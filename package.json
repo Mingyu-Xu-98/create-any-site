@@ -8,15 +8,26 @@
     "start": "next start"
   },
   "dependencies": {
+    "@auth/drizzle-adapter": "^1.11.1",
     "@tailwindcss/postcss": "^4.2.1",
     "@types/node": "^25.4.0",
     "@types/react": "^19.2.14",
+    "bcryptjs": "^3.0.3",
+    "better-sqlite3": "^12.8.0",
+    "drizzle-orm": "^0.45.1",
     "jszip": "^3.10.1",
+    "nanoid": "^5.1.7",
     "next": "^16.1.6",
+    "next-auth": "^5.0.0-beta.30",
     "postcss": "^8.5.8",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "tailwindcss": "^4.2.1",
     "typescript": "^5.9.3"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/better-sqlite3": "^7.6.13",
+    "drizzle-kit": "^0.31.10"
   }
 }

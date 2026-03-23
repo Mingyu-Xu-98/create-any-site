@@ -1,188 +1,125 @@
 "use client";
 
-import { useState, useCallback } from "react";
-import type { WorkspaceData, UserSelections, SiteType, ThemeStyle } from "@/lib/types";
-import { INITIAL_SELECTIONS, WIZARD_STEPS } from "@/lib/types";
-import { analyzeWorkspace } from "@/lib/analyzer";
-import { getAutoLayout, getStylesForSiteType } from "@/lib/questions";
+import Link from "next/link";
+import { useSession } from "next-auth/react";
+import Navbar from "@/components/Navbar";
 
-import StepIndicator from "@/components/StepIndicator";
-import UploadZone from "@/components/UploadZone";
-import QuestionCard from "@/components/QuestionCard";
-import SpecPanel from "@/components/SpecPanel";
-import GeneratePanel from "@/components/GeneratePanel";
-
-export default function Home() {
-  const [step, setStep] = useState(0);
-  const [loading, setLoading] = useState(false);
-  const [workspaceData, setWorkspaceData] = useState<WorkspaceData | null>(null);
-  const [selections, setSelections] = useState<UserSelections>({ ...INITIAL_SELECTIONS });
-  const [error, setError] = useState<string | null>(null);
-
-  const currentStepId = WIZARD_STEPS[step]?.id;
-
-  const handleUpload = useCallback(async (file: File) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await analyzeWorkspace(file);
-      setWorkspaceData(data);
-      setStep(1);
-    } catch (e) {
-      setError(`解析工作区失败：${e instanceof Error ? e.message : "未知错误"}`);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  const canNext = (): boolean => {
-    switch (currentStepId) {
-      case "upload": return false;
-      case "siteType": return !!selections.siteType;
-      case "theme": return !!selections.theme;
-      case "spec": return false;
-      case "generate": return false;
-      default: return false;
-    }
-  };
-
-  const next = () => {
-    if (!canNext()) return;
-    if (step < WIZARD_STEPS.length - 1) setStep(step + 1);
-  };
-
-  const back = () => {
-    if (step > 0) setStep(step - 1);
-  };
+export default function LandingPage() {
+  const { data: session } = useSession();
 
   return (
     <div className="min-h-screen relative">
-      {/* Background */}
       <div className="wizard-bg">
         <div className="orb orb-1" />
         <div className="orb orb-2" />
         <div className="orb orb-3" />
       </div>
 
-      <div className="relative z-10 max-w-4xl mx-auto px-6 pb-12">
-        {/* Header */}
-        <header className="pt-10 pb-2 text-center">
-          <h1 className="text-2xl font-bold tracking-tight">
-            创建<span className="text-accent">任意</span>简历网站
-          </h1>
-          <p className="text-sm text-text-muted mt-1">
-            上传工作区，选择风格，一键生成个人简历网站
-          </p>
-        </header>
+      <Navbar />
 
-        {/* Step Indicator */}
-        <StepIndicator currentStep={step} />
-
-        {/* Step Content */}
-        <div className="mt-4">
-          {/* Step title */}
-          <div className="text-center mb-8 step-content" key={`title-${step}`}>
-            <h2 className="text-xl font-bold">{WIZARD_STEPS[step].title}</h2>
-            <p className="text-sm text-text-muted mt-1">{WIZARD_STEPS[step].subtitle}</p>
+      {/* Hero */}
+      <section className="relative z-10 pt-32 pb-20 px-6">
+        <div className="max-w-4xl mx-auto text-center">
+          <div className="inline-block mb-6 px-4 py-1.5 rounded-full bg-white/5 border border-white/10 text-xs text-white/50">
+            AI-Powered Website Builder
           </div>
-
-          {/* Error display */}
-          {error && (
-            <div className="max-w-xl mx-auto mb-6 p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
-              {error}
-            </div>
-          )}
-
-          {/* Step body */}
-          <div className="step-content" key={`body-${step}`}>
-            {currentStepId === "upload" && (
-              <UploadZone onFileAccepted={handleUpload} loading={loading} />
-            )}
-
-            {currentStepId === "siteType" && (
-              <QuestionCard
-                options={[
-                  { value: "portfolio", icon: "briefcase", label: "个人简历网站", desc: "展示你的职业经历、项目、技能和教育背景" },
-                  { value: "brand", icon: "star", label: "品牌官网", desc: "专业品牌形象，强烈视觉识别" },
-                  { value: "custom", icon: "pencil", label: "自定义", desc: "用自己的话描述理想的网站类型" },
-                ]}
-                selected={selections.siteType}
-                onSelect={(v) => setSelections({ ...selections, siteType: v as SiteType })}
-                customText={selections.customSiteType}
-                onCustomTextChange={(t) => setSelections({ ...selections, customSiteType: t })}
-              />
-            )}
-
-            {currentStepId === "theme" && (
-              <QuestionCard
-                options={getStylesForSiteType(selections.siteType).map(o => ({
-                  value: o.value,
-                  icon: o.icon,
-                  label: o.label,
-                  desc: o.desc,
-                  preview: o.preview,
-                }))}
-                selected={selections.theme}
-                onSelect={(v) => {
-                  const autoLayout = getAutoLayout(v, selections.siteType, selections.customTheme);
-                  setSelections({ ...selections, theme: v as ThemeStyle, layout: autoLayout });
-                }}
-                customText={selections.customTheme}
-                onCustomTextChange={(t) => {
-                  const autoLayout = getAutoLayout("custom", selections.siteType, t);
-                  setSelections({ ...selections, customTheme: t, layout: autoLayout });
-                }}
-              />
-            )}
-
-            {currentStepId === "spec" && workspaceData && (
-              <SpecPanel
-                data={workspaceData}
-                onUpdate={(updated) => setWorkspaceData(updated)}
-                onConfirm={() => setStep(step + 1)}
-              />
-            )}
-
-            {currentStepId === "generate" && workspaceData && (
-              <GeneratePanel data={workspaceData} selections={selections} />
-            )}
+          <h1 className="text-5xl md:text-6xl font-bold leading-tight tracking-tight">
+            Create <span className="bg-gradient-to-r from-violet-400 to-cyan-400 bg-clip-text text-transparent">Any Site</span>
+            <br />in Minutes
+          </h1>
+          <p className="mt-6 text-lg text-white/50 max-w-2xl mx-auto leading-relaxed">
+            Upload your content, choose from beautiful templates, and let AI generate a stunning website.
+            No coding required. Host it instantly with a shareable link.
+          </p>
+          <div className="mt-10 flex items-center justify-center gap-4">
+            <Link
+              href={session?.user ? "/create" : "/login"}
+              className="px-8 py-3 rounded-xl bg-accent text-white font-medium hover:bg-accent/90 transition-all shadow-lg shadow-accent/20"
+            >
+              Start Building
+            </Link>
+            <Link
+              href="/templates"
+              className="px-8 py-3 rounded-xl bg-white/5 border border-white/10 text-white/70 hover:text-white hover:bg-white/10 transition-all"
+            >
+              Browse Templates
+            </Link>
           </div>
         </div>
+      </section>
 
-        {/* Navigation */}
-        {currentStepId !== "upload" && (
-          <div className="flex justify-between items-center mt-10 max-w-3xl mx-auto">
-            <button
-              onClick={back}
-              className="flex items-center gap-2 text-sm text-text-muted hover:text-text px-5 py-2.5 rounded-xl border border-line hover:border-accent/30 transition-all"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-              </svg>
-              上一步
-            </button>
-
-            {currentStepId !== "generate" && currentStepId !== "spec" && (
-              <button
-                onClick={next}
-                disabled={!canNext()}
-                className={`
-                  flex items-center gap-2 text-sm px-6 py-2.5 rounded-xl font-medium transition-all
-                  ${canNext()
-                    ? "bg-accent text-white hover:bg-accent/90 shadow-lg shadow-accent/20"
-                    : "bg-white/5 text-text-muted cursor-not-allowed"
-                  }
-                `}
-              >
-                下一步
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+      {/* Features */}
+      <section className="relative z-10 py-20 px-6">
+        <div className="max-w-5xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-6">
+          {[
+            {
+              icon: "M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z",
+              title: "18+ Themes",
+              desc: "Cyberpunk, Minimalist, Ghibli, Glassmorphism and more unique visual styles",
+            },
+            {
+              icon: "M13 10V3L4 14h7v7l9-11h-7z",
+              title: "AI-Powered",
+              desc: "Upload your data and AI analyzes, structures, and generates your site automatically",
+            },
+            {
+              icon: "M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064",
+              title: "Instant Hosting",
+              desc: "One-click publish with a shareable link. Custom domain support coming soon",
+            },
+          ].map((f, i) => (
+            <div key={i} className="p-6 rounded-2xl bg-white/[0.03] border border-white/5 hover:border-white/10 transition-all">
+              <div className="w-10 h-10 rounded-xl bg-accent/10 flex items-center justify-center mb-4">
+                <svg className="w-5 h-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d={f.icon} />
                 </svg>
-              </button>
-            )}
+              </div>
+              <h3 className="font-semibold mb-2">{f.title}</h3>
+              <p className="text-sm text-white/40 leading-relaxed">{f.desc}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* Site Types */}
+      <section className="relative z-10 py-20 px-6">
+        <div className="max-w-4xl mx-auto text-center">
+          <h2 className="text-3xl font-bold mb-4">Build Any Type of Site</h2>
+          <p className="text-white/40 mb-12">Portfolio, Blog, Landing Page, E-commerce, and more</p>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {[
+              "Portfolio", "Brand Site", "Blog", "Landing Page",
+              "SaaS", "E-commerce", "Event Page", "Docs Site",
+            ].map((type) => (
+              <div key={type} className="px-4 py-3 rounded-xl bg-white/[0.03] border border-white/5 text-sm text-white/60">
+                {type}
+              </div>
+            ))}
           </div>
-        )}
-      </div>
+        </div>
+      </section>
+
+      {/* CTA */}
+      <section className="relative z-10 py-20 px-6">
+        <div className="max-w-2xl mx-auto text-center">
+          <h2 className="text-3xl font-bold mb-4">Ready to Build?</h2>
+          <p className="text-white/40 mb-8">Create a professional website in minutes, not hours.</p>
+          <Link
+            href={session?.user ? "/create" : "/login"}
+            className="inline-block px-8 py-3 rounded-xl bg-accent text-white font-medium hover:bg-accent/90 transition-all shadow-lg shadow-accent/20"
+          >
+            Get Started Free
+          </Link>
+        </div>
+      </section>
+
+      {/* Footer */}
+      <footer className="relative z-10 border-t border-white/5 py-8 px-6">
+        <div className="max-w-5xl mx-auto flex items-center justify-between text-xs text-white/20">
+          <span>CreateAnySite</span>
+          <span>Built with AI</span>
+        </div>
+      </footer>
     </div>
   );
 }

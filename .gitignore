@@ -3,5 +3,7 @@ node_modules/
 .env.local
 .DS_Store
 output/
+html-output/
+data/
 *.tsbuildinfo
 __pycache__/

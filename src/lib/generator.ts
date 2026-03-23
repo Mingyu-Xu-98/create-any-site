@@ -67,6 +67,13 @@ export function generateFileMap(
   files["src/app/api/chat/route.ts"] = genChatRoute(data);
   files["src/components/SharePoster.tsx"] = genSharePoster();
 
+  // Dynamic knowledge base for AI chatbot
+  files["src/data/knowledge.json"] = JSON.stringify(
+    buildKnowledgeChunks(data),
+    null,
+    2,
+  );
+
   // Style-specific extra components
   if (theme === "cyberpunk") {
     files["src/components/ParticleBackground.tsx"] = genParticleBackground();
@@ -137,6 +144,7 @@ function getStyleBgMarkup(theme: ThemeStyle): string {
     case "neo-tokyo": return `<div className="neotokyo-bg" />`;
     case "tpl-resume-bold": return `<div className="bold-resume-bg"><div className="shape shape-1" /><div className="shape shape-2" /><div className="shape shape-3" /></div>`;
     case "tpl-resume-dark": return `<div className="dark-resume-bg"><div className="blob blob-1" /><div className="blob blob-2" /><div className="blob blob-3" /></div>`;
+    case "tpl-blog": return `<div className="blog-grain" />`;
     case "nature": return "";
     case "editorial": return "";
     default: return "";
@@ -173,6 +181,7 @@ function genLayout(data: WorkspaceData, theme: ThemeStyle, features: FeatureFlag
       "neo-tokyo": "https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500;700&family=JetBrains+Mono:wght@400;500&display=swap",
       "tpl-resume-bold": "https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=Manrope:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap",
       "tpl-resume-dark": "https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap",
+      "tpl-blog": "https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,700;9..144,900&family=Inter:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap",
     };
     const url = fontMap[theme];
     if (url) fontLinks = `\n        <link href="${url}" rel="stylesheet" />`;
@@ -344,9 +353,9 @@ const STYLE_CONFIG: Record<ThemeStyle, {
   },
   glassmorphism: {
     colors: {
-      bg: "#0d1520", "bg-card": "rgba(255,255,255,0.08)", "bg-card-solid": "rgba(15,25,50,0.9)",
-      "bg-tag": "rgba(70,130,220,0.12)", text: "#e8f0ff", "text-muted": "#8aa0c0",
-      accent: "#5b8fd9", "accent-soft": "rgba(70,130,220,0.15)", "accent-alt": "#7cb3ff",
+      bg: "#1a1225", "bg-card": "rgba(255,255,255,0.07)", "bg-card-solid": "rgba(30,20,45,0.9)",
+      "bg-tag": "rgba(180,130,200,0.12)", text: "#f0e8f5", "text-muted": "#b0a0c0",
+      accent: "#c89bda", "accent-soft": "rgba(180,130,200,0.15)", "accent-alt": "#e8b88a",
       line: "rgba(255,255,255,0.1)", green: "#34d399",
     },
     fontSans: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
@@ -474,6 +483,17 @@ const STYLE_CONFIG: Record<ThemeStyle, {
     fontHeading: '"Inter", -apple-system, sans-serif',
     borderRadius: "999px",
   },
+  "tpl-blog": {
+    colors: {
+      bg: "#fdfbf7", "bg-card": "#ffffff", "bg-card-solid": "#ffffff",
+      "bg-tag": "rgba(184,92,56,0.08)", text: "#1c1917", "text-muted": "#57534e",
+      accent: "#b85c38", "accent-soft": "rgba(184,92,56,0.12)", "accent-alt": "#d4825e",
+      line: "rgba(28,25,23,0.1)", green: "#57534e",
+    },
+    fontSans: '"Inter", -apple-system, sans-serif',
+    fontHeading: '"Fraunces", Georgia, serif',
+    borderRadius: "16px",
+  },
   custom: {
     colors: {
       bg: "#ffffff", "bg-card": "#f8f8f8", "bg-card-solid": "#f5f5f5",
@@ -489,7 +509,7 @@ const STYLE_CONFIG: Record<ThemeStyle, {
 
 function genLightThemeOverride(theme: ThemeStyle): string {
   // Light themes don't need an override
-  const lightThemes: ThemeStyle[] = ["ghibli", "minimalist", "retro", "bold-creative", "editorial", "nature", "tpl-resume-bold"];
+  const lightThemes: ThemeStyle[] = ["ghibli", "minimalist", "retro", "bold-creative", "editorial", "nature", "tpl-resume-bold", "tpl-blog"];
   if (lightThemes.includes(theme)) return "";
   return `
 [data-theme="light"] {
@@ -775,6 +795,30 @@ function genCardStyle(theme: ThemeStyle): string {
   pointer-events: none; z-index: 1;
 }
 `;
+    case "tpl-blog":
+      return `
+.card {
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-card);
+  overflow: hidden;
+  position: relative;
+  transition: transform 0.35s ease, box-shadow 0.35s ease, border-color 0.35s ease;
+}
+.card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 32px rgba(184,92,56,0.12);
+  border-color: var(--color-accent);
+}
+.card::before {
+  content: '';
+  position: absolute; top: 0; left: 0; right: 0; height: 3px;
+  background: var(--color-accent);
+  transform: scaleX(0); transform-origin: left;
+  transition: transform 0.4s ease;
+}
+.card:hover::before { transform: scaleX(1); }
+`;
     default:
       return `
 .card {
@@ -1023,13 +1067,47 @@ function genAnimationCSS(theme: ThemeStyle): string {
 /* === Glassmorphism Dusk Street Background === */
 .glass-bg {
   position: fixed; inset: 0; overflow: hidden; pointer-events: none; z-index: 0;
-  background: linear-gradient(160deg, #0a1628 0%, #121d3a 25%, #1a2a4a 50%, #162040 75%, #0d1520 100%);
+  /* Deep dusk sky: warm horizon fading into cool twilight */
+  background: linear-gradient(170deg,
+    #1a1225 0%,        /* deep night sky */
+    #2a1b3d 15%,       /* purple dusk */
+    #3d2449 30%,       /* warm twilight */
+    #4a2f52 45%,       /* dusky violet */
+    #3a2845 60%,       /* fading purple */
+    #2d2040 75%,       /* deeper evening */
+    #1a1428 100%       /* night */
+  );
 }
-.glass-bg .blob { position: absolute; border-radius: 50%; filter: blur(150px); }
-.glass-bg .blob-1 { width: 700px; height: 700px; background: rgba(40,80,160,0.3); top: -15%; right: -10%; animation: float1 20s ease-in-out infinite; }
-.glass-bg .blob-2 { width: 550px; height: 550px; background: rgba(60,100,180,0.2); bottom: -10%; left: -10%; animation: float2 25s ease-in-out infinite; }
-.glass-bg .blob-3 { width: 450px; height: 450px; background: rgba(80,130,200,0.15); top: 40%; left: 30%; animation: float3 22s ease-in-out infinite; }
-.glass-bg .blob-4 { width: 400px; height: 400px; background: rgba(50,90,150,0.18); bottom: 20%; right: 20%; animation: float4 28s ease-in-out infinite; }
+/* Heavily blurred color blobs simulate out-of-focus street lights & signage */
+.glass-bg .blob { position: absolute; border-radius: 50%; }
+/* Warm street lamp glow — top right */
+.glass-bg .blob-1 {
+  width: 700px; height: 700px;
+  background: radial-gradient(circle, rgba(255,170,80,0.25) 0%, rgba(220,120,50,0.1) 50%, transparent 70%);
+  filter: blur(120px); top: -10%; right: -5%;
+  animation: float1 20s ease-in-out infinite;
+}
+/* Cool neon reflection — bottom left */
+.glass-bg .blob-2 {
+  width: 550px; height: 550px;
+  background: radial-gradient(circle, rgba(100,140,220,0.2) 0%, rgba(80,100,180,0.08) 50%, transparent 70%);
+  filter: blur(140px); bottom: -10%; left: -8%;
+  animation: float2 25s ease-in-out infinite;
+}
+/* Pink/magenta shop sign bokeh — mid */
+.glass-bg .blob-3 {
+  width: 450px; height: 450px;
+  background: radial-gradient(circle, rgba(200,100,160,0.18) 0%, rgba(160,70,130,0.06) 50%, transparent 70%);
+  filter: blur(160px); top: 35%; left: 25%;
+  animation: float3 22s ease-in-out infinite;
+}
+/* Distant amber streetlight — lower right */
+.glass-bg .blob-4 {
+  width: 400px; height: 400px;
+  background: radial-gradient(circle, rgba(240,180,100,0.15) 0%, rgba(200,140,60,0.05) 50%, transparent 70%);
+  filter: blur(130px); bottom: 15%; right: 15%;
+  animation: float4 28s ease-in-out infinite;
+}
 @keyframes float1 { 0%,100%{transform:translate(0,0) scale(1)} 50%{transform:translate(-60px,40px) scale(1.1)} }
 @keyframes float2 { 0%,100%{transform:translate(0,0) scale(1)} 50%{transform:translate(50px,-30px) scale(1.08)} }
 @keyframes float3 { 0%,100%{transform:translate(0,0) scale(1)} 50%{transform:translate(-30px,-40px) scale(0.9)} }
@@ -1043,7 +1121,7 @@ function genAnimationCSS(theme: ThemeStyle): string {
   overflow-y: auto; z-index: 10;
 }
 .gm-sidebar::-webkit-scrollbar { width: 4px; }
-.gm-sidebar::-webkit-scrollbar-thumb { background: rgba(70,130,220,0.3); border-radius: 2px; }
+.gm-sidebar::-webkit-scrollbar-thumb { background: rgba(180,130,200,0.3); border-radius: 2px; }
 .gm-main { margin-left: 280px; flex: 1; padding: 32px 40px; min-height: 100vh; }
 
 /* === Glass Card Base === */
@@ -2169,6 +2247,315 @@ body::after {
 }
 .badge { border-radius: 999px !important; }
 `;
+  } else if (theme === "tpl-blog") {
+    bgEffects = `
+/* ===== Blog Theme — Dark Mode ===== */
+[data-theme="dark"] {
+  --color-bg: #0f0e0c;
+  --color-bg-card: #1e1c19;
+  --color-bg-card-solid: #1e1c19;
+  --color-bg-tag: rgba(184,92,56,0.15);
+  --color-text: #ede8e0;
+  --color-text-muted: #a8a29e;
+  --color-accent: #d4825e;
+  --color-accent-soft: rgba(212,130,94,0.15);
+  --color-accent-alt: #b85c38;
+  --color-line: rgba(255,255,255,0.08);
+}
+
+/* ===== Blog Theme — Grain Overlay ===== */
+.blog-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: 9999;
+  opacity: 0.025;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* ===== Blog Theme — Navigation ===== */
+.blog-nav {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 900;
+  transition: background 0.4s, box-shadow 0.4s;
+}
+.blog-nav.scrolled {
+  background: rgba(253,251,247,0.88);
+  backdrop-filter: blur(24px) saturate(1.2); -webkit-backdrop-filter: blur(24px) saturate(1.2);
+  box-shadow: 0 1px 0 var(--color-line);
+}
+[data-theme="dark"] .blog-nav.scrolled {
+  background: rgba(15,14,12,0.88);
+}
+.blog-nav-inner {
+  max-width: 1120px; margin: 0 auto; padding: 0 36px;
+  height: 72px; display: flex; align-items: center; justify-content: space-between;
+}
+.blog-nav-brand {
+  font-family: var(--font-heading); font-size: 22px; font-weight: 700;
+  letter-spacing: -0.5px; color: var(--color-accent);
+}
+.blog-nav-links {
+  display: flex; align-items: center; gap: 28px; list-style: none;
+}
+.blog-nav-links a, .blog-nav-links button {
+  font-size: 14px; font-weight: 500; color: var(--color-text-muted);
+  transition: color 0.25s; position: relative; text-decoration: none;
+  background: none; border: none; cursor: pointer; font-family: var(--font-sans);
+}
+.blog-nav-links a::after {
+  content: ''; position: absolute; bottom: -4px; left: 0;
+  width: 0; height: 2px; background: var(--color-accent);
+  border-radius: 1px; transition: width 0.3s ease;
+}
+.blog-nav-links a:hover { color: var(--color-accent); }
+.blog-nav-links a:hover::after { width: 100%; }
+.blog-nav-links button:hover { color: var(--color-accent); }
+.blog-theme-toggle {
+  width: 38px; height: 38px; border-radius: 50%;
+  border: 1.5px solid var(--color-line); background: transparent;
+  color: var(--color-text-muted); cursor: pointer; font-size: 17px;
+  display: flex; align-items: center; justify-content: center; transition: all 0.25s;
+}
+.blog-theme-toggle:hover { border-color: var(--color-accent); color: var(--color-accent); }
+@media (max-width: 768px) { .blog-nav-links { display: none; } }
+
+/* ===== Blog Theme — Hero ===== */
+.blog-hero {
+  max-width: 1120px; margin: 0 auto; padding: 160px 36px 100px;
+  display: flex; align-items: center; gap: 64px;
+}
+.blog-hero-avatar-wrap { flex-shrink: 0; position: relative; }
+.blog-hero-avatar-wrap::before {
+  content: ''; position: absolute; inset: -8px; border-radius: 50%;
+  border: 2px dashed var(--color-line); animation: blogSpin 40s linear infinite;
+}
+@keyframes blogSpin { to { transform: rotate(360deg); } }
+.blog-hero-avatar {
+  width: 200px; height: 200px; border-radius: 50%; overflow: hidden;
+  box-shadow: 0 12px 40px rgba(28,25,23,0.08);
+  border: 4px solid var(--color-bg-card);
+}
+.blog-hero-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.blog-hero-avatar .avatar-placeholder {
+  width: 100%; height: 100%;
+  background: linear-gradient(135deg, var(--color-accent), var(--color-accent-alt));
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-heading); font-size: 72px; font-weight: 700; color: white;
+}
+.blog-hero-info { flex: 1; }
+.blog-hero-hello {
+  font-family: 'IBM Plex Mono', var(--font-mono); font-size: 14px;
+  color: var(--color-accent); margin-bottom: 12px; letter-spacing: 0.5px;
+}
+.blog-hero-name {
+  font-family: var(--font-heading); font-size: 52px; font-weight: 700;
+  line-height: 1.12; letter-spacing: -1.5px; margin-bottom: 8px;
+}
+.blog-hero-tagline {
+  font-size: 20px; color: var(--color-text-muted); margin-bottom: 20px; font-weight: 400;
+}
+.blog-hero-bio {
+  font-size: 16px; color: var(--color-text-muted); max-width: 500px;
+  line-height: 1.8; margin-bottom: 28px;
+}
+.blog-hero-socials { display: flex; gap: 12px; }
+.blog-social-btn {
+  width: 44px; height: 44px; border-radius: 50%;
+  border: 1.5px solid var(--color-line); display: flex;
+  align-items: center; justify-content: center; font-size: 16px;
+  color: var(--color-text-muted); transition: all 0.3s ease;
+  background: transparent; text-decoration: none;
+}
+.blog-social-btn:hover {
+  border-color: var(--color-accent); color: var(--color-accent);
+  transform: translateY(-3px); box-shadow: 0 6px 16px var(--color-accent-soft);
+}
+@media (max-width: 768px) {
+  .blog-hero { flex-direction: column; text-align: center; padding: 130px 24px 60px; gap: 36px; }
+  .blog-hero-name { font-size: 36px; }
+  .blog-hero-tagline { font-size: 17px; }
+  .blog-hero-bio { margin: 0 auto 28px; }
+  .blog-hero-socials { justify-content: center; }
+  .blog-hero-avatar { width: 150px; height: 150px; }
+}
+
+/* ===== Blog Theme — Sections ===== */
+.blog-section {
+  max-width: 1120px; margin: 0 auto; padding: 80px 36px;
+}
+.blog-section-header { margin-bottom: 48px; }
+.blog-section-label {
+  font-family: 'IBM Plex Mono', var(--font-mono); font-size: 13px;
+  color: var(--color-accent); text-transform: uppercase;
+  letter-spacing: 1.5px; margin-bottom: 8px;
+}
+.blog-section-title {
+  font-family: var(--font-heading); font-size: 36px; font-weight: 700;
+  letter-spacing: -0.5px;
+}
+.blog-section-line {
+  width: 40px; height: 3px; background: var(--color-accent);
+  border-radius: 2px; margin-top: 16px;
+}
+.blog-section-alt {
+  background: var(--color-bg-card-solid); max-width: 100%;
+  transition: background 0.4s ease; padding: 80px 36px;
+}
+[data-theme="dark"] .blog-section-alt { background: rgba(30,28,25,0.5); }
+@media (max-width: 768px) {
+  .blog-section { padding: 56px 24px; }
+  .blog-section-alt { padding: 56px 24px; }
+  .blog-section-title { font-size: 28px; }
+}
+
+/* ===== Blog Theme — About ===== */
+.blog-about {
+  max-width: 720px; font-size: 17px; line-height: 2;
+  color: var(--color-text-muted); white-space: pre-wrap;
+}
+
+/* ===== Blog Theme — Skills ===== */
+.blog-skills-wrap { display: flex; flex-wrap: wrap; gap: 12px; }
+.blog-skill-tag {
+  padding: 10px 24px; background: var(--color-bg-card);
+  border: 1.5px solid var(--color-line); border-radius: 100px;
+  font-size: 14px; font-weight: 500; color: var(--color-text-muted);
+  transition: all 0.3s ease; cursor: default;
+}
+.blog-skill-tag:hover {
+  border-color: var(--color-accent); color: var(--color-accent);
+  transform: translateY(-2px); box-shadow: 0 4px 12px var(--color-accent-soft);
+}
+
+/* ===== Blog Theme — Projects Grid ===== */
+.blog-projects-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 28px;
+}
+.blog-project-card {
+  background: var(--color-bg-card); border-radius: 16px; padding: 32px;
+  border: 1px solid var(--color-line); transition: all 0.35s ease;
+  cursor: default; position: relative; overflow: hidden;
+  display: flex; flex-direction: column;
+}
+.blog-project-card::before {
+  content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+  background: var(--color-accent); transform: scaleX(0); transform-origin: left;
+  transition: transform 0.4s ease;
+}
+.blog-project-card:hover { transform: translateY(-6px); box-shadow: 0 12px 40px rgba(28,25,23,0.08); }
+.blog-project-card:hover::before { transform: scaleX(1); }
+.blog-project-icon {
+  width: 48px; height: 48px; border-radius: 12px;
+  background: var(--color-accent-soft); display: flex;
+  align-items: center; justify-content: center; font-size: 22px; margin-bottom: 20px;
+}
+.blog-project-name {
+  font-family: var(--font-heading); font-size: 20px; font-weight: 700;
+  margin-bottom: 10px;
+}
+.blog-project-desc {
+  font-size: 15px; color: var(--color-text-muted); line-height: 1.7;
+  margin-bottom: 18px; flex: 1;
+}
+.blog-project-tech { display: flex; flex-wrap: wrap; gap: 6px; }
+.blog-project-tech span {
+  font-size: 12px; font-family: 'IBM Plex Mono', var(--font-mono);
+  padding: 4px 10px; border-radius: 6px; background: var(--color-bg-tag);
+  color: var(--color-text-muted); font-weight: 500;
+}
+@media (max-width: 768px) { .blog-projects-grid { grid-template-columns: 1fr; } }
+
+/* ===== Blog Theme — Experience Timeline ===== */
+.blog-timeline { position: relative; padding-left: 32px; }
+.blog-timeline::before {
+  content: ''; position: absolute; left: 7px; top: 8px; bottom: 8px;
+  width: 2px; background: var(--color-line);
+}
+.blog-timeline-item { position: relative; margin-bottom: 40px; }
+.blog-timeline-item:last-child { margin-bottom: 0; }
+.blog-timeline-item::before {
+  content: ''; position: absolute; left: -29px; top: 8px;
+  width: 12px; height: 12px; border-radius: 50%;
+  border: 3px solid var(--color-accent); background: var(--color-bg);
+}
+.blog-timeline-period {
+  font-family: 'IBM Plex Mono', var(--font-mono); font-size: 13px;
+  color: var(--color-accent); margin-bottom: 4px;
+}
+.blog-timeline-role { font-size: 18px; font-weight: 700; margin-bottom: 2px; }
+.blog-timeline-company { font-size: 15px; color: var(--color-text-muted); margin-bottom: 8px; }
+.blog-timeline-desc { font-size: 15px; color: var(--color-text-muted); line-height: 1.7; }
+
+/* ===== Blog Theme — Education ===== */
+.blog-edu-card {
+  background: var(--color-bg-card); border: 1px solid var(--color-line);
+  border-radius: 16px; padding: 28px 32px; display: flex; gap: 20px;
+  align-items: center; transition: all 0.3s ease; margin-bottom: 16px;
+}
+.blog-edu-card:last-child { margin-bottom: 0; }
+.blog-edu-card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(28,25,23,0.06); }
+.blog-edu-icon {
+  width: 56px; height: 56px; flex-shrink: 0; border-radius: 50%;
+  background: linear-gradient(135deg, var(--color-accent), var(--color-accent-alt));
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-heading); font-weight: 700; font-size: 18px; color: white;
+}
+.blog-edu-info h3 { font-family: var(--font-heading); font-size: 17px; font-weight: 700; }
+.blog-edu-school {
+  font-family: 'IBM Plex Mono', var(--font-mono); font-size: 13px;
+  color: var(--color-accent); font-weight: 500; margin: 2px 0;
+}
+.blog-edu-detail { font-size: 14px; color: var(--color-text-muted); }
+@media (max-width: 768px) { .blog-edu-card { flex-direction: column; text-align: center; } }
+
+/* ===== Blog Theme — Contact ===== */
+.blog-contact-box {
+  background: var(--color-bg-card); border: 1px solid var(--color-line);
+  border-radius: 20px; padding: 48px; text-align: center; max-width: 600px;
+}
+.blog-contact-box p {
+  font-size: 17px; color: var(--color-text-muted); line-height: 1.8; margin-bottom: 28px;
+}
+.blog-contact-btn {
+  display: inline-flex; align-items: center; gap: 10px;
+  padding: 14px 36px; background: var(--color-accent); color: white;
+  border-radius: 100px; font-size: 15px; font-weight: 600;
+  font-family: var(--font-sans); border: none; cursor: pointer;
+  transition: all 0.3s ease; box-shadow: 0 4px 16px var(--color-accent-soft);
+  text-decoration: none;
+}
+.blog-contact-btn:hover {
+  transform: translateY(-2px); box-shadow: 0 8px 28px rgba(184,92,56,0.3);
+}
+
+/* ===== Blog Theme — Footer ===== */
+.blog-footer {
+  border-top: 1px solid var(--color-line); padding: 40px 36px;
+  transition: border-color 0.4s;
+}
+.blog-footer-inner {
+  max-width: 1120px; margin: 0 auto; display: flex;
+  align-items: center; justify-content: space-between;
+}
+.blog-footer-copy { font-size: 14px; color: var(--color-text-muted); }
+@media (max-width: 768px) {
+  .blog-footer-inner { flex-direction: column; gap: 16px; text-align: center; }
+}
+
+/* ===== Blog Theme — Scroll Reveal ===== */
+.blog-reveal {
+  opacity: 0; transform: translateY(32px);
+  transition: opacity 0.7s ease, transform 0.7s ease;
+}
+.blog-reveal.visible { opacity: 1; transform: translateY(0); }
+.blog-reveal-d1 { transition-delay: 0.1s; }
+.blog-reveal-d2 { transition-delay: 0.2s; }
+.blog-reveal-d3 { transition-delay: 0.3s; }
+.blog-reveal-d4 { transition-delay: 0.4s; }
+
+/* ===== Blog Theme — Scrollbar ===== */
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-track { background: var(--color-bg); }
+::-webkit-scrollbar-thumb { background: var(--color-line); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--color-text-muted); }
+`;
   } else if (theme === "minimalist") {
     bgEffects = `
 /* ===== Minimalist — Dark Mode ===== */
@@ -2566,6 +2953,7 @@ function genPage(data: WorkspaceData, layout: LayoutType, theme: ThemeStyle, fea
   if (theme === "minimalist") return genMinimalistPage(data, features);
   if (theme === "brutalist") return genBrutalistPage(data, features);
   if (theme === "glassmorphism") return genGlassmorphismPage(data, features);
+  if (theme === "tpl-blog") return genBlogPage(data, features);
 
   const family = LAYOUT_FAMILY[layout] || "single";
   switch (family) {
@@ -2794,6 +3182,230 @@ export default function Home() {
       {/* Footer */}
       <footer className="bold-footer">
         <p>{t.footer}</p>
+      </footer>
+
+      <SharePoster />
+      <ChatBot />
+    </div>
+  );
+}
+`;
+}
+
+/**
+ * Dedicated page generator for the Blog (暖调书卷) theme.
+ * Warm earthy tones, serif headings, grain overlay, hero with avatar,
+ * about, skills tags, projects grid, experience timeline, education, contact.
+ */
+function genBlogPage(data: WorkspaceData, features: FeatureFlags): string {
+  const initials = (data.nameEn || data.name).split(/\s+/).map((w: string) => w[0]).join("").slice(0, 2).toUpperCase();
+
+  return `"use client";
+
+import { useState, useEffect, useRef } from "react";
+import Image from "next/image";
+import { useLanguage } from "@/components/LanguageProvider";
+import ChatBot from "@/components/ChatBot";
+import SharePoster from "@/components/SharePoster";
+
+export default function Home() {
+  const { lang, t, toggle } = useLanguage();
+  const [dark, setDark] = useState(false);
+  const [navScrolled, setNavScrolled] = useState(false);
+  const mainRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const saved = localStorage.getItem("theme");
+    const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    if (saved === "dark" || (!saved && prefersDark)) setDark(true);
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
+    localStorage.setItem("theme", dark ? "dark" : "light");
+  }, [dark]);
+
+  useEffect(() => {
+    const onScroll = () => setNavScrolled(window.scrollY > 20);
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
+  useEffect(() => {
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add("visible");
+          observer.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.1, rootMargin: "0px 0px -40px 0px" });
+    mainRef.current?.querySelectorAll(".blog-reveal").forEach(el => observer.observe(el));
+    return () => observer.disconnect();
+  }, []);
+
+  return (
+    <div ref={mainRef} className="min-h-screen">
+      {/* Grain Overlay */}
+      <div className="blog-grain" />
+
+      {/* Navigation */}
+      <nav className={\`blog-nav\${navScrolled ? " scrolled" : ""}\`}>
+        <div className="blog-nav-inner">
+          <span className="blog-nav-brand">{lang === "zh" ? "${data.name}" : "${data.nameEn || data.name}"}</span>
+          <ul className="blog-nav-links">
+            {t.availableSections.filter(s => s !== "contact").map((id) => (
+              <li key={id}><a href={\`#\${id === "timeline" ? "experience" : id}\`}>{t.sections[id as keyof typeof t.sections] || id}</a></li>
+            ))}
+            <li><a href="#contact">{t.nav.contact}</a></li>
+            <li><button onClick={toggle}>{lang === "zh" ? "EN" : "\\u4e2d"}</button></li>
+            <li>
+              <button className="blog-theme-toggle" onClick={() => setDark(!dark)} aria-label="Toggle theme">
+                {dark ? "\\u2600" : "\\u263e"}
+              </button>
+            </li>
+          </ul>
+        </div>
+      </nav>
+
+      {/* Hero */}
+      <section className="blog-hero">
+        <div className="blog-hero-avatar-wrap blog-reveal">
+          <div className="blog-hero-avatar">
+            <Image src="/images/avatar.png" alt="" width={200} height={200} className="w-full h-full object-cover" unoptimized onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; (e.target as HTMLImageElement).nextElementSibling?.classList.remove("hidden"); }} />
+            <div className="avatar-placeholder hidden">${initials}</div>
+          </div>
+        </div>
+        <div className="blog-hero-info">
+          <div className="blog-hero-hello blog-reveal">// {t.ui.welcomeToSite}</div>
+          <h1 className="blog-hero-name blog-reveal blog-reveal-d1">{lang === "zh" ? "${data.name}" : "${data.nameEn || data.name}"}</h1>
+          <p className="blog-hero-tagline blog-reveal blog-reveal-d2">{lang === "zh" ? "${data.title}" : "${data.titleEn || data.title}"}</p>
+          <p className="blog-hero-bio blog-reveal blog-reveal-d3">{t.about.text}</p>
+          <div className="blog-hero-socials blog-reveal blog-reveal-d4">
+            ${data.email ? `<a href="mailto:${data.email}" className="blog-social-btn" title="Email">{"\\u2709"}</a>` : ""}
+            ${data.github ? `<a href="${data.github}" target="_blank" className="blog-social-btn" title="GitHub"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg></a>` : ""}
+            ${data.linkedin ? `<a href="${data.linkedin}" target="_blank" className="blog-social-btn" title="LinkedIn"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 01-2.063-2.065 2.064 2.064 0 112.063 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/></svg></a>` : ""}
+          </div>
+        </div>
+      </section>
+
+      {/* About */}
+      <section className="blog-section" id="about">
+        <div className="blog-section-header blog-reveal">
+          <div className="blog-section-label">About</div>
+          <h2 className="blog-section-title">{t.sections.about}</h2>
+          <div className="blog-section-line" />
+        </div>
+        <div className="blog-about blog-reveal blog-reveal-d1">{t.about.text}</div>
+        <div className="blog-skills-wrap" style={{marginTop: 24}}>
+          {t.about.tags.map((tag) => (<span key={tag} className="blog-skill-tag blog-reveal blog-reveal-d2">{tag}</span>))}
+        </div>
+      </section>
+
+      {/* Skills */}
+      {t.skills.length > 0 && (
+      <section className="blog-section-alt" id="skills">
+        <div style={{maxWidth: 1120, margin: "0 auto"}}>
+          <div className="blog-section-header blog-reveal">
+            <div className="blog-section-label">Skills</div>
+            <h2 className="blog-section-title">{t.sections.skills}</h2>
+            <div className="blog-section-line" />
+          </div>
+          <div className="blog-skills-wrap">
+            {t.skills.flatMap(g => g.skills).map((s, i) => (
+              <span key={s} className={\`blog-skill-tag blog-reveal blog-reveal-d\${(i % 4) + 1}\`}>{s}</span>
+            ))}
+          </div>
+        </div>
+      </section>
+      )}
+
+      {/* Projects */}
+      {t.projects.length > 0 && (
+      <section className="blog-section" id="projects">
+        <div className="blog-section-header blog-reveal">
+          <div className="blog-section-label">Projects</div>
+          <h2 className="blog-section-title">{t.sections.projects}</h2>
+          <div className="blog-section-line" />
+        </div>
+        <div className="blog-projects-grid">
+          {t.projects.map((p, i) => (
+            <div key={i} className={\`blog-project-card blog-reveal blog-reveal-d\${(i % 3) + 1}\`}>
+              <div className="blog-project-icon">{p.title.slice(0, 1)}</div>
+              <h3 className="blog-project-name">{p.title}</h3>
+              <p className="blog-project-desc">{p.desc}</p>
+              <div className="blog-project-tech">
+                {p.tags.map((tag) => (<span key={tag}>{tag}</span>))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+      )}
+
+      {/* Experience */}
+      {t.timeline.length > 0 && (
+      <section className="blog-section-alt" id="experience">
+        <div style={{maxWidth: 1120, margin: "0 auto"}}>
+          <div className="blog-section-header blog-reveal">
+            <div className="blog-section-label">Experience</div>
+            <h2 className="blog-section-title">{t.sections.timeline}</h2>
+            <div className="blog-section-line" />
+          </div>
+          <div className="blog-timeline">
+            {t.timeline.map((item, i) => (
+              <div key={i} className={\`blog-timeline-item blog-reveal blog-reveal-d\${(i % 3) + 1}\`}>
+                <div className="blog-timeline-period">{item.date}</div>
+                <div className="blog-timeline-role">{item.title}</div>
+                <div className="blog-timeline-desc">{item.desc}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+      )}
+
+      {/* Education */}
+      {t.education.length > 0 && (
+      <section className="blog-section" id="education">
+        <div className="blog-section-header blog-reveal">
+          <div className="blog-section-label">Education</div>
+          <h2 className="blog-section-title">{t.sections.education}</h2>
+          <div className="blog-section-line" />
+        </div>
+        <div>
+          {t.education.map((edu, i) => (
+            <div key={i} className={\`blog-edu-card blog-reveal blog-reveal-d\${(i % 3) + 1}\`}>
+              <div className="blog-edu-icon">{edu.school.slice(0, 2)}</div>
+              <div className="blog-edu-info">
+                <h3>{edu.degree}</h3>
+                <div className="blog-edu-school">{edu.school}</div>
+                <div className="blog-edu-detail">{edu.highlights.join(" | ")}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+      )}
+
+      {/* Contact */}
+      <section className="blog-section" id="contact">
+        <div className="blog-section-header blog-reveal">
+          <div className="blog-section-label">Contact</div>
+          <h2 className="blog-section-title">{t.sections.contact || t.nav.contact}</h2>
+          <div className="blog-section-line" />
+        </div>
+        <div className="blog-contact-box blog-reveal blog-reveal-d1">
+          <p>{t.ui.openForOpportunities}</p>
+          ${data.email ? `<a href="mailto:${data.email}" className="blog-contact-btn">{"\\u2709 "}${data.email}</a>` : ""}
+        </div>
+      </section>
+
+      {/* Footer */}
+      <footer className="blog-footer">
+        <div className="blog-footer-inner">
+          <div className="blog-footer-copy">{t.footer}</div>
+        </div>
       </footer>
 
       <SharePoster />
@@ -4518,14 +5130,17 @@ function genTranslations(data: WorkspaceData): string {
         education: "教育",
       },
     },
-    availableSections: [
-      "about",
-      ...(data.projects.length > 0 ? ["projects"] : []),
-      ...(data.timeline.length > 0 ? ["timeline"] : []),
-      ...(data.skills.length > 0 ? ["skills"] : []),
-      ...(data.education.length > 0 ? ["education"] : []),
-      "contact",
-    ],
+    availableSections: data.visibleSections && data.visibleSections.length > 0
+      ? data.visibleSections.filter(s => s !== "links")
+      : [
+        "about",
+        ...(data.projects.length > 0 ? ["projects"] : []),
+        ...(data.timeline.length > 0 ? ["timeline"] : []),
+        ...(data.skills.length > 0 ? ["skills"] : []),
+        ...(data.education.length > 0 ? ["education"] : []),
+        "contact",
+      ],
+    links: (data.links || []).map(l => ({ label: l.label, url: l.url, icon: l.icon || "other" })),
   };
   const en = {
     nav: { projects: "Projects", timeline: "Experience", skills: "Skills", education: "Education", contact: "Contact" },
@@ -4585,14 +5200,17 @@ function genTranslations(data: WorkspaceData): string {
         education: "Education",
       },
     },
-    availableSections: [
-      "about",
-      ...((data.projectsEn || data.projects).length > 0 ? ["projects"] : []),
-      ...((data.timelineEn || data.timeline).length > 0 ? ["timeline"] : []),
-      ...((data.skillsEn || data.skills).length > 0 ? ["skills"] : []),
-      ...((data.educationEn || data.education).length > 0 ? ["education"] : []),
-      "contact",
-    ],
+    availableSections: data.visibleSections && data.visibleSections.length > 0
+      ? data.visibleSections.filter(s => s !== "links")
+      : [
+        "about",
+        ...((data.projectsEn || data.projects).length > 0 ? ["projects"] : []),
+        ...((data.timelineEn || data.timeline).length > 0 ? ["timeline"] : []),
+        ...((data.skillsEn || data.skills).length > 0 ? ["skills"] : []),
+        ...((data.educationEn || data.education).length > 0 ? ["education"] : []),
+        "contact",
+      ],
+    links: (data.links || []).map(l => ({ label: l.labelEn || l.label, url: l.url, icon: l.icon || "other" })),
   };
 
   return `
@@ -4602,6 +5220,7 @@ interface TranslationTimeline { date: string; title: string; desc: string; activ
 interface TranslationSkill { title: string; skills: string[]; }
 interface TranslationChatbot { title: string; subtitle: string; welcome: string; placeholder: string; send: string; tooltip: string; suggestions: string[]; }
 interface TranslationShare { button: string; title: string; invite: string; desc: string; cta: string; save: string; copy: string; copied: string; projectTags: string[]; skillTags: string[]; }
+interface TranslationLink { label: string; url: string; icon: string; }
 interface TranslationData {
   nav: Record<string, string>;
   hero: { lines: string[]; tags: string[] };
@@ -4616,6 +5235,7 @@ interface TranslationData {
   share: TranslationShare;
   ui: { heyIm: string; welcomeToSite: string; availableForHire: string; letsCollaborate: string; openForOpportunities: string; contactMe: string; scrollDown: string; viewProject: string; sectionSubtitles: Record<string, string>; statLabels: Record<string, string>; };
   availableSections: string[];
+  links: TranslationLink[];
 }
 
 export const translations: { zh: TranslationData; en: TranslationData } = {
@@ -4874,13 +5494,8 @@ export default function SharePoster() {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    const W = 540, H = 620;
+    const W = 540;
     const dpr = typeof window !== "undefined" ? Math.min(window.devicePixelRatio || 1, 2) : 1;
-    canvas.width = W * dpr;
-    canvas.height = H * dpr;
-    canvas.style.width = W + "px";
-    canvas.style.height = H + "px";
-    ctx.scale(dpr, dpr);
 
     // --- Read CSS variables for theme-aware rendering ---
     const s = getComputedStyle(document.documentElement);
@@ -4891,6 +5506,52 @@ export default function SharePoster() {
     const fontFamily = s.getPropertyValue("--font-sans").trim() || "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
     const fontBase = fontFamily.split(",").slice(0, 2).join(",");
     const cx = W / 2;
+    const cardX = 32, cardW = W - 64, cardY = 40;
+
+    // --- Pre-calculate content height ---
+    // Use an offscreen measurement pass
+    const measureCanvas = document.createElement("canvas");
+    measureCanvas.width = W; measureCanvas.height = 100;
+    const mCtx = measureCanvas.getContext("2d")!;
+
+    const avatarR = 32;
+    // avatar top to name: cardY(40) + 50(avatarY offset) + avatarR(32) + 28 = 150
+    let contentH = 50 + avatarR * 2 + 28; // start from cardY
+    contentH += 26 + 46; // title + gap to divider
+    contentH += 34; // invite text
+    contentH += 30; // gap to desc
+
+    mCtx.font = \`13px \${fontBase}\`;
+    const descLines = wrapText(mCtx, share.desc, cardW - 80);
+    const descLineCount = Math.min(descLines.length, 2);
+    contentH += descLineCount * 20 + 20; // desc lines + gap
+
+    const skillTags = (share.skillTags || []).slice(0, 6);
+    if (skillTags.length > 0) {
+      contentH += 18; // "Skills" header
+      mCtx.font = \`12px \${fontBase}\`;
+      const maxLineW = cardW - 60;
+      let lineW = 0;
+      let tagRows = 1;
+      skillTags.forEach((tag) => {
+        const tw = mCtx.measureText(tag).width + 20 + 5;
+        if (lineW + tw > maxLineW && lineW > 0) { tagRows++; lineW = tw; }
+        else { lineW += tw; }
+      });
+      contentH += tagRows * 28 + 12; // tag rows + gap
+    }
+
+    // QR code block: 8 padding + 90 qr + 8 padding + 20 text + 24 bottom
+    contentH += 8 + 90 + 8 + 20 + 24;
+
+    const cardH = contentH;
+    const H = cardY * 2 + cardH;
+
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+    canvas.style.width = W + "px";
+    canvas.style.height = H + "px";
+    ctx.scale(dpr, dpr);
 
     // --- Background gradient ---
     const bgGrad = ctx.createLinearGradient(0, 0, W, H);
@@ -4908,7 +5569,6 @@ export default function SharePoster() {
     ctx.globalAlpha = 1;
 
     // --- Glass card ---
-    const cardX = 32, cardY = 40, cardW = W - 64, cardH = H - 80;
     ctx.save();
     ctx.fillStyle = isLight(bg) ? "rgba(255,255,255,0.6)" : "rgba(255,255,255,0.06)";
     ctx.strokeStyle = isLight(bg) ? "rgba(0,0,0,0.08)" : "rgba(255,255,255,0.1)";
@@ -4920,10 +5580,8 @@ export default function SharePoster() {
     // --- Draw rest after avatar loads ---
     const drawContent = (avatarImg?: HTMLImageElement) => {
       const avatarY = cardY + 50;
-      const avatarR = 32;
 
       if (avatarImg) {
-        // Draw real avatar image in circle
         ctx.save();
         ctx.beginPath();
         ctx.arc(cx, avatarY, avatarR, 0, Math.PI * 2);
@@ -4931,12 +5589,10 @@ export default function SharePoster() {
         ctx.clip();
         ctx.drawImage(avatarImg, cx - avatarR, avatarY - avatarR, avatarR * 2, avatarR * 2);
         ctx.restore();
-        // Border ring
         ctx.strokeStyle = isLight(bg) ? "rgba(0,0,0,0.1)" : "rgba(255,255,255,0.15)";
         ctx.lineWidth = 2;
         ctx.beginPath(); ctx.arc(cx, avatarY, avatarR, 0, Math.PI * 2); ctx.stroke();
       } else {
-        // Fallback: colored circle with silhouette
         ctx.save();
         ctx.fillStyle = mixColor(accent, bg, 0.3);
         ctx.beginPath(); ctx.arc(cx, avatarY, avatarR, 0, Math.PI * 2); ctx.fill();
@@ -4986,14 +5642,13 @@ export default function SharePoster() {
       // --- Description ---
       ctx.fillStyle = mutedColor;
       ctx.font = \`13px \${fontBase}\`;
-      const descLines = wrapText(ctx, share.desc, cardW - 80);
-      descLines.slice(0, 2).forEach((line, i) => {
+      const drawnDescLines = wrapText(ctx, share.desc, cardW - 80);
+      drawnDescLines.slice(0, 2).forEach((line, i) => {
         ctx.fillText(line, cx, inviteY + 30 + i * 20);
       });
 
       // --- Skill tags (compact) ---
-      let nextY = inviteY + 30 + Math.min(descLines.length, 2) * 20 + 20;
-      const skillTags = (share.skillTags || []).slice(0, 8);
+      let nextY = inviteY + 30 + Math.min(drawnDescLines.length, 2) * 20 + 20;
       if (skillTags.length > 0) {
         ctx.fillStyle = mutedColor;
         ctx.font = \`bold 12px \${fontBase}\`;
@@ -5305,13 +5960,126 @@ export default function ChatBot() {
 `;
 }
 
+function buildKnowledgeChunks(data: WorkspaceData): { chunks: { topic: string; content: string }[] } {
+  const chunks: { topic: string; content: string }[] = [];
+
+  // Personal info chunk
+  chunks.push({
+    topic: "personal",
+    content: `Name: ${data.name} (${data.nameEn})\nTitle: ${data.title} (${data.titleEn})\nEmail: ${data.email}\nLocation: ${data.location}\nBio: ${data.bio}\nBio (EN): ${data.bioEn}`,
+  });
+
+  // Skills chunk
+  if (data.skills.length > 0) {
+    chunks.push({
+      topic: "skills",
+      content: data.skills.map(g => `${g.title}: ${g.skills.join(", ")}`).join("\n"),
+    });
+  }
+
+  // Projects chunk
+  if (data.projects.length > 0) {
+    chunks.push({
+      topic: "projects",
+      content: data.projects.map(p => `${p.title} (${p.org}): ${p.desc} [${p.tags.join(", ")}]`).join("\n"),
+    });
+  }
+
+  // Work experience chunk
+  if (data.timeline.length > 0) {
+    chunks.push({
+      topic: "experience",
+      content: data.timeline.map(t => `${t.date} - ${t.title}: ${t.desc}`).join("\n"),
+    });
+  }
+
+  // Education chunk
+  if (data.education.length > 0) {
+    chunks.push({
+      topic: "education",
+      content: data.education.map(e => `${e.school}, ${e.degree}${e.highlights.length ? ": " + e.highlights.join("; ") : ""}`).join("\n"),
+    });
+  }
+
+  // Links chunk
+  if (data.links && data.links.length > 0) {
+    chunks.push({
+      topic: "links",
+      content: data.links.map(l => `${l.label}: ${l.url}`).join("\n"),
+    });
+  }
+
+  // Raw knowledge from uploaded files (the full chatbotContext)
+  if (data.chatbotContext) {
+    // Split into manageable chunks (~2000 chars each)
+    const raw = data.chatbotContext;
+    const sections = raw.split(/\n## /);
+    for (const section of sections) {
+      const trimmed = section.trim();
+      if (!trimmed || trimmed.length < 20) continue;
+      const firstLine = trimmed.split("\n")[0] || "raw";
+      chunks.push({
+        topic: firstLine.slice(0, 50).replace(/[^a-zA-Z0-9\u4e00-\u9fff _.-]/g, ""),
+        content: trimmed.slice(0, 3000),
+      });
+    }
+  }
+
+  return { chunks };
+}
+
 function genChatRoute(data: WorkspaceData): string {
-  const ctx = data.chatbotContext.replace(/`/g, "\\`").replace(/\$/g, "\\$");
   return `import { NextRequest } from "next/server";
+import knowledgeData from "@/data/knowledge.json";
 
-const SYSTEM_PROMPT = \`You are ${data.name}'s AI avatar. Answer based on the following profile. Use first person. Be concise (under 200 words).
+interface KnowledgeChunk {
+  topic: string;
+  content: string;
+}
 
-${ctx}\`;
+function findRelevantChunks(question: string, chunks: KnowledgeChunk[]): string {
+  const q = question.toLowerCase();
+
+  // Keywords for each topic
+  const topicKeywords: Record<string, string[]> = {
+    personal: ["name", "who", "介绍", "你是谁", "叫什么", "姓名", "邮箱", "email", "位置", "location"],
+    skills: ["skill", "技能", "会什么", "擅长", "技术", "能力", "tools", "framework"],
+    projects: ["project", "项目", "做过", "作品", "portfolio", "开发了"],
+    experience: ["experience", "work", "经历", "工作", "公司", "company", "career", "job"],
+    education: ["education", "school", "学校", "学历", "学位", "university", "毕业"],
+    links: ["link", "链接", "github", "网站", "blog", "contact", "联系"],
+  };
+
+  // Score each chunk by relevance
+  const scored = chunks.map(chunk => {
+    let score = 0;
+    const keywords = topicKeywords[chunk.topic] || [];
+    for (const kw of keywords) {
+      if (q.includes(kw)) score += 3;
+    }
+    // Also check if the question words appear in the content
+    const words = q.split(/\\s+/).filter(w => w.length > 1);
+    for (const word of words) {
+      if (chunk.content.toLowerCase().includes(word)) score += 1;
+    }
+    return { chunk, score };
+  });
+
+  // Sort by score descending, take top relevant chunks
+  scored.sort((a, b) => b.score - a.score);
+
+  // Always include personal info + top 3 relevant chunks
+  const personal = chunks.find(c => c.topic === "personal");
+  const relevant = scored.filter(s => s.score > 0).slice(0, 3).map(s => s.chunk);
+
+  // If no relevant chunks found, include everything (short context fallback)
+  if (relevant.length === 0) {
+    return chunks.map(c => c.content).join("\\n\\n");
+  }
+
+  const selected = personal ? [personal, ...relevant.filter(c => c.topic !== "personal")] : relevant;
+  return selected.map(c => c.content).join("\\n\\n");
+}
 
 export async function POST(req: NextRequest) {
   const { messages } = await req.json();
@@ -5320,12 +6088,20 @@ export async function POST(req: NextRequest) {
     return new Response(JSON.stringify({ error: "API key not configured. Set SILICONFLOW_API_KEY in .env.local" }), { status: 500, headers: { "Content-Type": "application/json" } });
   }
 
+  // Dynamic knowledge retrieval — find chunks relevant to the user's question
+  const lastUserMsg = [...messages].reverse().find((m: { role: string }) => m.role === "user")?.content || "";
+  const relevantKnowledge = findRelevantChunks(lastUserMsg, (knowledgeData as { chunks: KnowledgeChunk[] }).chunks);
+
+  const systemPrompt = \`You are ${data.name}'s AI avatar. Answer based on the following profile knowledge. Use first person. Be concise (under 200 words). If the user speaks Chinese, reply in Chinese. If in English, reply in English.
+
+\${relevantKnowledge}\`;
+
   const response = await fetch("https://api.siliconflow.cn/v1/chat/completions", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: \`Bearer \${apiKey}\` },
     body: JSON.stringify({
       model: "Pro/zai-org/GLM-5",
-      messages: [{ role: "system", content: SYSTEM_PROMPT }, ...messages],
+      messages: [{ role: "system", content: systemPrompt }, ...messages],
       temperature: 0.7, max_tokens: 1024, stream: true,
     }),
   });

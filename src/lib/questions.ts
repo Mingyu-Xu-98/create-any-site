@@ -25,6 +25,7 @@ const STYLE_LAYOUT_MAP: Record<string, LayoutType> = {
   "tpl-business": "card-grid",
   "tpl-resume-bold": "card-grid",
   "tpl-resume-dark": "hidden-nav",
+  "tpl-blog": "hero-media",
   custom: "card-grid",
 };
 
@@ -346,6 +347,15 @@ export const ALL_THEME_OPTIONS: QuestionOption<ThemeStyle>[] = [
     desc: "粗边框、硬阴影、粉青撞色、浮动标签",
     descEn: "Thick borders, hard shadows, pink+cyan clash, floating tags",
     preview: "linear-gradient(135deg, #FDF2F8 0%, #EC4899 50%, #0891B2 100%)",
+  },
+  {
+    value: "tpl-blog",
+    icon: "style-tpl-blog",
+    label: "暖调书卷",
+    labelEn: "Warm Literary",
+    desc: "暖色调、衬线字体、纸质纹理、博客卡片、时间线",
+    descEn: "Warm earthy tones, serif fonts, grain texture, blog cards, timeline",
+    preview: "linear-gradient(135deg, #fdfbf7 0%, #f5f0e8 50%, #b85c38 200%)",
   },
   {
     value: "custom",

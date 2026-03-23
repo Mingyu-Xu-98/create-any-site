@@ -1,15 +1,18 @@
 import type { Metadata } from "next";
+import AuthProvider from "@/components/AuthProvider";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "创建任意简历网站",
-  description: "上传工作区，选择风格，一键生成个人简历网站",
+  title: "CreateAnySite - Build Any Website in Minutes",
+  description: "AI-powered website builder. Upload your content, pick a template, generate and host your site instantly.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="zh">
-      <body>{children}</body>
+    <html lang="en">
+      <body>
+        <AuthProvider>{children}</AuthProvider>
+      </body>
     </html>
   );
 }

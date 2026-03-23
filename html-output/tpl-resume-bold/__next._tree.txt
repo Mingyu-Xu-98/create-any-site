@@ -1,3 +1,0 @@
-:HL["/_next/static/chunks/2279c83845f581ec.css","style"]
-:HL["https://fonts.googleapis.com/css2?family=Archivo:wght@300;400;500;600;700&family=Space+Grotesk:wght@300;400;500;600;700&display=swap","style"]
-0:{"buildId":"LdLKV6jevXehXPlFbxEY9","tree":{"name":"","paramType":null,"paramKey":"","hasRuntimePrefetch":false,"slots":{"children":{"name":"__PAGE__","paramType":null,"paramKey":"__PAGE__","hasRuntimePrefetch":false,"slots":null,"isRootLayout":false}},"isRootLayout":true},"staleTime":300}

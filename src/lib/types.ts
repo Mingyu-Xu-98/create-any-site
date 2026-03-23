@@ -22,7 +22,16 @@ export interface WorkspaceData {
   bioTagsEn: string[];
   github?: string;
   linkedin?: string;
+  links: LinkItem[];
+  visibleSections: string[];
   chatbotContext: string;
+}
+
+export interface LinkItem {
+  label: string;
+  labelEn: string;
+  url: string;
+  icon?: string;
 }
 
 export interface SkillGroup {
@@ -59,7 +68,7 @@ export type SiteType = "portfolio" | "brand" | "blog" | "landing" | "custom";
 
 export type ThemeStyle = "cyberpunk" | "minimalist" | "ghibli" | "glassmorphism" | "retro" | "brutalist"
   | "cinematic" | "bold-creative" | "editorial" | "nature" | "gradient-mesh" | "neo-tokyo"
-  | "tpl-business" | "tpl-resume-bold" | "tpl-resume-dark" | "custom";
+  | "tpl-business" | "tpl-resume-bold" | "tpl-resume-dark" | "tpl-blog" | "custom";
 
 export type LayoutType = "two-column" | "split-screen" | "asymmetric" | "f-shape" | "z-shape"
   | "card-grid" | "hero-media" | "masonry" | "magazine" | "fixed-nav" | "hidden-nav"
@@ -179,7 +188,6 @@ export const WIZARD_STEPS: WizardStep[] = [
   { id: "upload",   title: "上传工作区",   subtitle: "上传你的工作区压缩包" },
   { id: "siteType", title: "网站类型",     subtitle: "选择要构建的网站类型" },
   { id: "theme",    title: "视觉风格",     subtitle: "选择一种独特的设计风格" },
-  { id: "spec",     title: "数据确认",     subtitle: "确认并编辑提取的数据" },
   { id: "generate", title: "生成网站",     subtitle: "预览你的网站" },
 ];
 

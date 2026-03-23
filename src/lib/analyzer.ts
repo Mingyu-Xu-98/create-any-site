@@ -130,6 +130,14 @@ export async function analyzeWorkspace(file: File): Promise<WorkspaceData> {
     bioTagsEn,
     github: extractGithub(person),
     linkedin: "",
+    links: [],
+    visibleSections: [
+      "about",
+      ...(projects.length > 0 ? ["projects"] : []),
+      ...(timeline.length > 0 ? ["timeline"] : []),
+      ...(skills.length > 0 ? ["skills"] : []),
+      ...(education.length > 0 ? ["education"] : []),
+    ],
     chatbotContext,
   };
 }

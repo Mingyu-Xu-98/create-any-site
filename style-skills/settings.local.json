@@ -1,0 +1,37 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ping:*)",
+      "Bash(nslookup:*)",
+      "Bash(dig:*)",
+      "Bash(curl:*)",
+      "WebFetch(domain:leondu.com)",
+      "Bash(echo:*)",
+      "mcp__mcp-registry__search_mcp_registry",
+      "WebFetch(domain:pearlharbour.feishu.cn)",
+      "WebFetch(domain:open.feishu.cn)",
+      "WebFetch(domain:feishu.apifox.cn)",
+      "WebFetch(domain:www.jijyun.cn)",
+      "WebFetch(domain:help.fanruan.com)",
+      "Bash(git clone:*)",
+      "Bash(ls:*)",
+      "Bash(git config:*)",
+      "Bash(git sparse-checkout:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(gh auth status:*)",
+      "Bash(gh auth refresh:*)",
+      "Bash(gh auth:*)",
+      "Bash(git rm:*)",
+      "Bash(gh run list:*)",
+      "Bash(gh run view:*)",
+      "Bash(git pull:*)",
+      "Bash(gh repo view:*)",
+      "Bash(gh api:*)",
+      "WebFetch(domain:www.hyperbrowser.ai)",
+      "WebFetch(domain:www.ycombinator.com)",
+      "WebFetch(domain:docs.hyperbrowser.ai)"
+    ]
+  }
+}

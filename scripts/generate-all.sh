@@ -133,6 +133,10 @@ DTSEOF
     find "$DEST" -name "*.html" -exec sed -i '' 's|src="/images/|src="./images/|g' {} \;
     find "$DEST" -name "*.html" -exec sed -i '' 's|href="/images/|href="./images/|g' {} \;
 
+    # Make reveal/scroll-animated elements visible in static HTML (no JS observer)
+    find "$DEST" -name "*.html" -exec sed -i '' 's|class="bold-reveal|class="bold-reveal visible|g' {} \;
+    find "$DEST" -name "*.html" -exec sed -i '' 's|class="reveal|class="reveal visible|g' {} \;
+
     # Count files
     FILE_COUNT=$(find "$DEST" -name "*.html" | wc -l | tr -d ' ')
     echo "  Done: $DEST ($FILE_COUNT HTML files)"
