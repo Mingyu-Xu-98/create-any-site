@@ -1,13 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { KnowledgeItem } from "@/lib/knowledge";
+import { logger } from "@/lib/logger";
 
 export async function POST(req: NextRequest) {
+  const requestId = crypto.randomUUID().slice(0, 8);
   const apiKey = process.env.SILICONFLOW_API_KEY;
   if (!apiKey) {
+    logger.error("chat-build", `[${requestId}] SILICONFLOW_API_KEY not configured`);
     return NextResponse.json({ error: "SILICONFLOW_API_KEY not configured" }, { status: 500 });
   }
 
   const { messages, knowledge, currentSelections } = await req.json();
+  logger.info("chat-build", `[${requestId}] Chat request: ${messages.length} messages, ${(knowledge as KnowledgeItem[]).filter(k => k.selected).length} knowledge items`);
 
   // Build knowledge context from selected items
   const knowledgeContext = (knowledge as KnowledgeItem[])
@@ -78,11 +82,18 @@ When ready to generate the site:
 
   if (!response.ok) {
     const errText = await response.text();
+    logger.error("chat-build", `[${requestId}] AI error: ${response.status}`, { response: errText.slice(0, 300) });
     return NextResponse.json({ error: `AI error: ${response.status} ${errText}` }, { status: 500 });
   }
 
   const result = await response.json();
   const content = result.choices?.[0]?.message?.content || "";
+  const tokenUsage = result.usage;
+
+  logger.info("chat-build", `[${requestId}] AI response received`, {
+    tokens: tokenUsage,
+    responseLength: content.length,
+  });
 
   // Extract action if present
   let action = null;
@@ -90,7 +101,10 @@ When ready to generate the site:
   if (actionMatch) {
     try {
       action = JSON.parse(actionMatch[1].trim());
-    } catch { /* invalid action json */ }
+      logger.info("chat-build", `[${requestId}] Action detected: ${action.type}`, action);
+    } catch {
+      logger.warn("chat-build", `[${requestId}] Invalid action JSON in response`);
+    }
   }
 
   return NextResponse.json({ content, action });

@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useSession } from "next-auth/react";
 import Navbar from "@/components/Navbar";
+import { useLocale } from "@/components/LocaleProvider";
 
 interface TemplateItem {
   id: string;
@@ -113,6 +114,7 @@ const BUILT_IN_TEMPLATES: TemplateItem[] = [
 
 export default function TemplatesPage() {
   const { data: session } = useSession();
+  const { t } = useLocale();
   const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
 
@@ -133,7 +135,7 @@ export default function TemplatesPage() {
       <div className="relative z-10 max-w-6xl mx-auto px-6 pt-24 pb-12">
         {/* Header */}
         <div className="text-center mb-10">
-          <h1 className="text-3xl font-bold">Template Gallery</h1>
+          <h1 className="text-3xl font-bold">{t("templates.title")}</h1>
           <p className="text-white/40 mt-2">Choose a template and start building your site</p>
         </div>
 
@@ -143,7 +145,7 @@ export default function TemplatesPage() {
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search templates..."
+            placeholder={t("templates.search")}
             className="w-full md:w-64 px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-accent/50"
           />
           <div className="flex flex-wrap gap-1.5">
@@ -186,7 +188,7 @@ export default function TemplatesPage() {
                     href={session?.user ? `/create?theme=${template.theme}` : "/login"}
                     className="flex-1 text-center px-3 py-2 rounded-lg bg-accent text-white text-xs font-medium hover:bg-accent/90 transition-all"
                   >
-                    Use Template
+                    {t("templates.useTemplate")}
                   </Link>
                   <button className="px-3 py-2 rounded-lg bg-white/5 text-xs text-white/50 hover:bg-white/10 transition-all">
                     Preview
@@ -199,7 +201,7 @@ export default function TemplatesPage() {
 
         {filtered.length === 0 && (
           <div className="text-center py-20 text-white/30">
-            No templates match your filter
+            {t("templates.noMatch")}
           </div>
         )}
       </div>

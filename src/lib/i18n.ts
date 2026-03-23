@@ -1,0 +1,110 @@
+export type Locale = "zh" | "en";
+
+export const translations: Record<string, Record<Locale, string>> = {
+  // Navbar
+  "nav.templates": { zh: "模板", en: "Templates" },
+  "nav.dashboard": { zh: "工作台", en: "Dashboard" },
+  "nav.admin": { zh: "管理后台", en: "Admin" },
+  "nav.login": { zh: "登录", en: "Login" },
+  "nav.logout": { zh: "退出", en: "Logout" },
+
+  // Landing page
+  "landing.badge": { zh: "AI 驱动的建站平台", en: "AI-Powered Website Builder" },
+  "landing.title1": { zh: "创建", en: "Create " },
+  "landing.titleHighlight": { zh: "任意网站", en: "Any Site" },
+  "landing.title2": { zh: "", en: "" },
+  "landing.title3": { zh: "分钟搞定", en: "in Minutes" },
+  "landing.desc": { zh: "上传内容，选择精美模板，让 AI 自动生成令人惊艳的网站。无需编程，即时上线，一键分享。", en: "Upload your content, choose from beautiful templates, and let AI generate a stunning website. No coding required. Host it instantly with a shareable link." },
+  "landing.cta": { zh: "开始创建", en: "Start Building" },
+  "landing.browseTemplates": { zh: "浏览模板", en: "Browse Templates" },
+  "landing.themes": { zh: "18+ 主题风格", en: "18+ Themes" },
+  "landing.themesDesc": { zh: "赛博朋克、极简主义、吉卜力、毛玻璃等多种独特视觉风格", en: "Cyberpunk, Minimalist, Ghibli, Glassmorphism and more unique visual styles" },
+  "landing.aiPowered": { zh: "AI 驱动", en: "AI-Powered" },
+  "landing.aiPoweredDesc": { zh: "上传数据，AI 自动分析、整理并生成你的网站", en: "Upload your data and AI analyzes, structures, and generates your site automatically" },
+  "landing.hosting": { zh: "即时上线", en: "Instant Hosting" },
+  "landing.hostingDesc": { zh: "一键发布，生成可分享链接。自定义域名即将推出", en: "One-click publish with a shareable link. Custom domain support coming soon" },
+  "landing.siteTypes": { zh: "创建任意类型的网站", en: "Build Any Type of Site" },
+  "landing.siteTypesDesc": { zh: "作品集、博客、落地页、电商等", en: "Portfolio, Blog, Landing Page, E-commerce, and more" },
+  "landing.readyTitle": { zh: "准备好了吗？", en: "Ready to Build?" },
+  "landing.readyDesc": { zh: "几分钟内创建专业网站，而非几小时。", en: "Create a professional website in minutes, not hours." },
+  "landing.getStarted": { zh: "免费开始", en: "Get Started Free" },
+
+  // Login
+  "login.title": { zh: "欢迎来到", en: "Welcome to " },
+  "login.subtitle": { zh: "登录你的账户", en: "Sign in to your account" },
+  "login.email": { zh: "邮箱", en: "Email" },
+  "login.password": { zh: "密码", en: "Password" },
+  "login.submit": { zh: "登录", en: "Sign In" },
+  "login.loading": { zh: "登录中...", en: "Signing in..." },
+  "login.error": { zh: "邮箱或密码错误", en: "Invalid email or password" },
+  "login.noAccount": { zh: "还没有账户？", en: "Don't have an account?" },
+  "login.register": { zh: "注册", en: "Register" },
+
+  // Register
+  "register.title": { zh: "创建你的", en: "Create your " },
+  "register.titleHighlight": { zh: "账户", en: "account" },
+  "register.subtitle": { zh: "开始创建精美网站", en: "Start building amazing websites" },
+  "register.name": { zh: "姓名", en: "Name" },
+  "register.namePlaceholder": { zh: "你的姓名（可选）", en: "Your name (optional)" },
+  "register.password": { zh: "密码", en: "Password" },
+  "register.passwordPlaceholder": { zh: "至少6位字符", en: "At least 6 characters" },
+  "register.confirmPassword": { zh: "确认密码", en: "Confirm Password" },
+  "register.confirmPlaceholder": { zh: "再次输入密码", en: "Re-enter your password" },
+  "register.submit": { zh: "注册", en: "Create Account" },
+  "register.loading": { zh: "创建中...", en: "Creating account..." },
+  "register.hasAccount": { zh: "已有账户？", en: "Already have an account?" },
+  "register.login": { zh: "登录", en: "Sign In" },
+  "register.mismatch": { zh: "两次密码不一致", en: "Passwords do not match" },
+  "register.tooShort": { zh: "密码至少6位字符", en: "Password must be at least 6 characters" },
+
+  // Dashboard
+  "dashboard.title": { zh: "我的网站", en: "My Sites" },
+  "dashboard.siteCount": { zh: "个网站", en: " site(s) created" },
+  "dashboard.createNew": { zh: "创建网站", en: "Create New Site" },
+  "dashboard.noSites": { zh: "暂无网站", en: "No sites yet" },
+  "dashboard.noSitesDesc": { zh: "创建你的第一个网站", en: "Create your first site to get started" },
+
+  // Create page
+  "create.sources": { zh: "数据源", en: "Sources" },
+  "create.knowledge": { zh: "知识库", en: "Knowledge" },
+  "create.build": { zh: "构建", en: "Build" },
+  "create.sourcesDesc": { zh: "添加数据源，AI 将分析内容并提取知识。", en: "Add data sources. AI will analyze and extract knowledge items." },
+  "create.recentUploads": { zh: "最近上传", en: "Recent Uploads" },
+  "create.savedSources": { zh: "已保存来源", en: "Saved Sources" },
+  "create.analyzing": { zh: "分析中...", en: "Analyzing..." },
+  "create.done": { zh: "完成 — 已保存到知识库", en: "Done — items saved to Knowledge" },
+  "create.items": { zh: "条记录", en: "items" },
+  "create.analysisResults": { zh: "解析结果", en: "Analysis Results" },
+  "create.reviewDesc": { zh: "条知识已提取，编辑后保存到知识库。", en: " items extracted. Review and edit before saving." },
+  "create.discard": { zh: "丢弃", en: "Discard" },
+  "create.saveToKnowledge": { zh: "保存到知识库", en: "Save to Knowledge" },
+  "create.analyzingSource": { zh: "正在分析来源...", en: "Analyzing source..." },
+  "create.aiExtracting": { zh: "AI 正在从你的内容中提取知识", en: "AI is extracting knowledge from your content" },
+  "create.addSources": { zh: "添加数据源", en: "Add Your Data Sources" },
+  "create.addSourcesDesc": { zh: "上传 PDF、ZIP，或粘贴 Git、Bilibili、YouTube 链接。AI 将分析内容并提取结构化知识。", en: "Upload PDFs, ZIPs, or paste links to Git repos, Bilibili and YouTube videos. AI will analyze your content and extract structured knowledge." },
+  "create.knowledgeBase": { zh: "你的知识库", en: "Your Knowledge Base" },
+  "create.noKnowledge": { zh: "先添加数据源，分析后知识会出现在这里。", en: "Add sources first. Knowledge items will appear here after analysis." },
+  "create.buildSite": { zh: "构建网站 →", en: "Build Site →" },
+  "create.selected": { zh: "已选择", en: "selected" },
+  "create.styleThemes": { zh: "风格主题", en: "Style Themes" },
+  "create.styleThemesDesc": { zh: "选择一种视觉风格，或在对话中描述", en: "Choose a visual style or describe one in the chat" },
+  "create.chatDesc": { zh: "描述你想要的网站，或使用快捷操作：", en: "Describe the site you want, or use a quick action:" },
+  "create.quickGenerate": { zh: "⚡ 使用默认配置快速生成", en: "⚡ Quick generate with defaults" },
+  "create.chatPlaceholder": { zh: "描述你的需求...", en: "Describe what you want..." },
+  "create.generating": { zh: "正在生成网站...", en: "Generating your website..." },
+  "create.preview": { zh: "网站预览", en: "Website Preview" },
+  "create.previewDesc": { zh: "与 AI 对话或点击快速生成查看网站。", en: "Chat with AI or click quick generate to see your site here." },
+  "create.addSourcesFirst": { zh: "先添加数据源并构建知识库。", en: "Add sources and build your knowledge base first." },
+
+  // Templates
+  "templates.title": { zh: "模板画廊", en: "Template Gallery" },
+  "templates.subtitle": { zh: "选择模板，开始创建你的网站", en: "Choose a template and start building your site" },
+  "templates.search": { zh: "搜索模板...", en: "Search templates..." },
+  "templates.useTemplate": { zh: "使用模板", en: "Use Template" },
+  "templates.preview": { zh: "预览", en: "Preview" },
+  "templates.noMatch": { zh: "没有匹配的模板", en: "No templates match your filter" },
+};
+
+export function t(key: string, locale: Locale): string {
+  return translations[key]?.[locale] || key;
+}

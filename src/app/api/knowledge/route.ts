@@ -29,41 +29,47 @@ export async function GET() {
 
 // POST /api/knowledge - Batch create knowledge items (from source analysis)
 export async function POST(req: NextRequest) {
-  const session = await auth();
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  try {
+    const session = await auth();
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const body = await req.json();
+    const { items, sourceId, sourceName, sourceType } = body;
+
+    if (!Array.isArray(items) || items.length === 0) {
+      return NextResponse.json({ error: "items array required" }, { status: 400 });
+    }
+
+    const now = new Date().toISOString();
+    const created = [];
+
+    for (const item of items) {
+      const id = crypto.randomUUID();
+      await db.insert(knowledgeItems).values({
+        id,
+        userId: session.user.id,
+        sourceId: sourceId || item.sourceId || null,
+        sourceName: sourceName || null,
+        sourceType: sourceType || null,
+        category: item.category || "factual",
+        title: item.title || "Untitled",
+        content: item.content || "",
+        tags: JSON.stringify(item.tags || []),
+        selected: 1,
+        createdAt: now,
+        updatedAt: now,
+      });
+      created.push(id);
+    }
+
+    return NextResponse.json({ ok: true, count: created.length, ids: created });
+  } catch (err) {
+    console.error("POST /api/knowledge error:", err);
+    const message = err instanceof Error ? err.message : "Unknown error";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
-
-  const body = await req.json();
-  const { items, sourceId, sourceName, sourceType } = body;
-
-  if (!Array.isArray(items) || items.length === 0) {
-    return NextResponse.json({ error: "items array required" }, { status: 400 });
-  }
-
-  const now = new Date().toISOString();
-  const created = [];
-
-  for (const item of items) {
-    const id = crypto.randomUUID();
-    await db.insert(knowledgeItems).values({
-      id,
-      userId: session.user.id,
-      sourceId: sourceId || item.sourceId || null,
-      sourceName: sourceName || null,
-      sourceType: sourceType || null,
-      category: item.category || "factual",
-      title: item.title || "Untitled",
-      content: item.content || "",
-      tags: JSON.stringify(item.tags || []),
-      selected: 1,
-      createdAt: now,
-      updatedAt: now,
-    });
-    created.push(id);
-  }
-
-  return NextResponse.json({ ok: true, count: created.length, ids: created });
 }
 
 // DELETE /api/knowledge - Delete items by sourceId or all

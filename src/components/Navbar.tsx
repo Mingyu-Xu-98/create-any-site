@@ -2,9 +2,11 @@
 
 import Link from "next/link";
 import { useSession, signOut } from "next-auth/react";
+import { useLocale, LocaleSwitcher } from "@/components/LocaleProvider";
 
 export default function Navbar() {
   const { data: session } = useSession();
+  const { t } = useLocale();
   const role = (session?.user as { role?: string } | undefined)?.role;
 
   return (
@@ -16,20 +18,21 @@ export default function Navbar() {
           </span>
         </Link>
 
-        <div className="flex items-center gap-6">
+        <div className="flex items-center gap-5">
           <Link href="/templates" className="text-sm text-white/60 hover:text-white transition-colors">
-            Templates
+            {t("nav.templates")}
           </Link>
           {session?.user ? (
             <>
               <Link href="/dashboard" className="text-sm text-white/60 hover:text-white transition-colors">
-                Dashboard
+                {t("nav.dashboard")}
               </Link>
               {role === "admin" && (
                 <Link href="/admin" className="text-sm text-white/60 hover:text-white transition-colors">
-                  Admin
+                  {t("nav.admin")}
                 </Link>
               )}
+              <LocaleSwitcher />
               <div className="flex items-center gap-3">
                 {session.user.image ? (
                   <img src={session.user.image} alt="" className="w-7 h-7 rounded-full" />
@@ -42,17 +45,20 @@ export default function Navbar() {
                   onClick={() => signOut()}
                   className="text-xs text-white/40 hover:text-white/70 transition-colors"
                 >
-                  Logout
+                  {t("nav.logout")}
                 </button>
               </div>
             </>
           ) : (
-            <Link
-              href="/login"
-              className="text-sm px-4 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-white transition-colors"
-            >
-              Login
-            </Link>
+            <>
+              <LocaleSwitcher />
+              <Link
+                href="/login"
+                className="text-sm px-4 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-white transition-colors"
+              >
+                {t("nav.login")}
+              </Link>
+            </>
           )}
         </div>
       </div>

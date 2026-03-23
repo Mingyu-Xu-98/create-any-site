@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import Navbar from "@/components/Navbar";
+import { useLocale } from "@/components/LocaleProvider";
 
 interface SiteItem {
   id: string;
@@ -20,6 +21,7 @@ interface SiteItem {
 export default function DashboardPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
+  const { t } = useLocale();
   const [sites, setSites] = useState<SiteItem[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -68,9 +70,9 @@ export default function DashboardPage() {
       <div className="relative z-10 max-w-6xl mx-auto px-6 pt-24 pb-12">
         <div className="flex items-center justify-between mb-8">
           <div>
-            <h1 className="text-2xl font-bold">My Sites</h1>
+            <h1 className="text-2xl font-bold">{t("dashboard.title")}</h1>
             <p className="text-sm text-text-muted mt-1">
-              {sites.length} site{sites.length !== 1 ? "s" : ""} created
+              {sites.length} {t("dashboard.siteCount")}
             </p>
           </div>
           <Link
@@ -80,7 +82,7 @@ export default function DashboardPage() {
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
             </svg>
-            Create New Site
+            {t("dashboard.createNew")}
           </Link>
         </div>
 
@@ -97,13 +99,13 @@ export default function DashboardPage() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4v16m8-8H4" />
               </svg>
             </div>
-            <h3 className="text-lg font-medium text-white/60">No sites yet</h3>
-            <p className="text-sm text-white/30 mt-1">Create your first site to get started</p>
+            <h3 className="text-lg font-medium text-white/60">{t("dashboard.noSites")}</h3>
+            <p className="text-sm text-white/30 mt-1">{t("dashboard.noSitesDesc")}</p>
             <Link
               href="/create"
               className="inline-block mt-6 px-6 py-2.5 rounded-xl bg-accent text-white text-sm font-medium hover:bg-accent/90 transition-all"
             >
-              Create Site
+              {t("dashboard.createNew")}
             </Link>
           </div>
         ) : (
