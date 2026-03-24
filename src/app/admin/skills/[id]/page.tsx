@@ -30,8 +30,6 @@ export default function EditSkillPage() {
             const s = data.skill;
             setSkill({
               ...s,
-              siteTypes: (() => { try { return JSON.parse(s.siteTypes || "[]"); } catch { return []; } })(),
-              templates: (() => { try { return JSON.parse(s.templates || "[]"); } catch { return []; } })(),
               enabled: !!s.enabled,
             });
           }

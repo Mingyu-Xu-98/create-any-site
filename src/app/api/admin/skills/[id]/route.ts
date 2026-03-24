@@ -4,7 +4,7 @@ import { db } from "@/lib/db";
 import { skills } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 
-// GET /api/admin/skills/[id]
+// GET /api/admin/skills/[id] - Get full skill (all levels)
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const adminId = await requireAdmin();
@@ -35,9 +35,9 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   if (body.name !== undefined) updates.name = body.name;
   if (body.description !== undefined) updates.description = body.description;
   if (body.category !== undefined) updates.category = body.category;
-  if (body.content !== undefined) updates.content = body.content;
+  if (body.indexContent !== undefined) updates.indexContent = body.indexContent;
+  if (body.references !== undefined) updates.references = JSON.stringify(body.references);
   if (body.siteTypes !== undefined) updates.siteTypes = JSON.stringify(body.siteTypes);
-  if (body.templates !== undefined) updates.templates = JSON.stringify(body.templates);
   if (body.enabled !== undefined) updates.enabled = body.enabled ? 1 : 0;
 
   await db.update(skills).set(updates).where(eq(skills.id, id));

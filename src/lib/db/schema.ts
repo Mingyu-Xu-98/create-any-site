@@ -93,16 +93,16 @@ export const conversations = sqliteTable("conversations", {
   updatedAt: text("updated_at").$defaultFn(() => new Date().toISOString()),
 });
 
-// ---- Skills ----
+// ---- Skills (progressive disclosure: description → indexContent → references) ----
 
 export const skills = sqliteTable("skills", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   name: text("name").notNull(),
-  description: text("description"),
-  category: text("category").notNull(), // design | content | layout | interaction | seo | other
-  content: text("content").notNull(),   // markdown prompt
-  siteTypes: text("site_types"),        // JSON array
-  templates: text("templates"),         // JSON array
+  description: text("description"),          // Level 0: AI-generated trigger description (~50 words)
+  category: text("category").notNull(),      // design | content | layout | interaction | seo | other
+  indexContent: text("index_content").notNull(), // Level 1: index.md full text (how to apply)
+  references: text("references"),            // Level 2: JSON [{name, content}] (deep reference docs)
+  siteTypes: text("site_types"),             // JSON array
   enabled: integer("enabled").default(1),
   createdAt: text("created_at").$defaultFn(() => new Date().toISOString()),
   updatedAt: text("updated_at").$defaultFn(() => new Date().toISOString()),

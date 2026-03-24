@@ -4,7 +4,7 @@ import { db } from "@/lib/db";
 import { skills } from "@/lib/db/schema";
 import { desc, eq, like, or } from "drizzle-orm";
 
-// GET /api/admin/skills - List all skills with optional search/filter
+// GET /api/admin/skills - List all skills (returns Level 0 by default)
 export async function GET(req: NextRequest) {
   const adminId = await requireAdmin();
   if (!adminId) {
@@ -35,7 +35,7 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ skills: result });
 }
 
-// POST /api/admin/skills - Create a new skill
+// POST /api/admin/skills - Create a new skill manually
 export async function POST(req: NextRequest) {
   const adminId = await requireAdmin();
   if (!adminId) {
@@ -43,10 +43,10 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json();
-  const { name, description, category, content, siteTypes, templates, enabled } = body;
+  const { name, description, category, indexContent, references, siteTypes, enabled } = body;
 
-  if (!name || !category || !content) {
-    return NextResponse.json({ error: "name, category, and content are required" }, { status: 400 });
+  if (!name || !category || !indexContent) {
+    return NextResponse.json({ error: "name, category, and indexContent are required" }, { status: 400 });
   }
 
   const id = crypto.randomUUID();
@@ -57,9 +57,9 @@ export async function POST(req: NextRequest) {
     name,
     description: description || "",
     category,
-    content,
+    indexContent,
+    references: references ? JSON.stringify(references) : null,
     siteTypes: siteTypes ? JSON.stringify(siteTypes) : "[]",
-    templates: templates ? JSON.stringify(templates) : "[]",
     enabled: enabled !== false ? 1 : 0,
     createdAt: now,
     updatedAt: now,

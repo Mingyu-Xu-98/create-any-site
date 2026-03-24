@@ -113,9 +113,9 @@ function initDb() {
       name TEXT NOT NULL,
       description TEXT,
       category TEXT NOT NULL,
-      content TEXT NOT NULL,
+      index_content TEXT NOT NULL,
+      "references" TEXT,
       site_types TEXT,
-      templates TEXT,
       enabled INTEGER DEFAULT 1,
       created_at TEXT,
       updated_at TEXT

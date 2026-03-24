@@ -135,7 +135,7 @@ function CreatePageInner() {
   }, [loadConvList]);
 
   // Auto-save site
-  const autoSaveSite = useCallback(async (url: string, config: Record<string, string>, convId: string | null) => {
+  const autoSaveSite = useCallback(async (url: string, config: Record<string, unknown>, convId: string | null) => {
     try {
       if (!siteId) {
         const r = await fetch("/api/sites", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: config.siteType === "blog" ? "My Blog" : "My Site", siteType: config.siteType || "portfolio", theme: config.theme || "minimalist", layout: config.layout || "card-grid", previewUrl: url }) });
@@ -197,30 +197,49 @@ function CreatePageInner() {
     for (const it of group) { await fetch(`/api/knowledge/${it.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ selected: newVal }) }); }
   };
 
+  // Activated skills (Level 1 loaded)
+  const [loadedSkillIds, setLoadedSkillIds] = useState<string[]>([]);
+
   // Chat
   const sendChat = async (overrideInput?: string) => {
     const msg = overrideInput || chatInput; if (!msg.trim() || chatLoading) return;
     const userMsg: ChatMessage = { role: "user", content: msg };
     const newMsgs = [...chatMessages, userMsg];
     setChatMessages(newMsgs); setChatInput(""); setChatLoading(true);
-    await saveConv(newMsgs); // Save immediately on first message
+    await saveConv(newMsgs);
     try {
-      const r = await fetch("/api/chat-build", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ messages: newMsgs.map(m => ({ role: m.role, content: m.content })), knowledge: items.filter(i => i.selected), currentSelections: {} }) });
+      const r = await fetch("/api/chat-build", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: newMsgs.map(m => ({ role: m.role, content: m.content })),
+          knowledge: items.filter(i => i.selected),
+          currentSelections: {},
+          loadedSkills: loadedSkillIds,
+        }),
+      });
       const d = await r.json();
       if (d.content) { const updated = [...newMsgs, { role: "assistant" as const, content: d.content }]; setChatMessages(updated); await saveConv(updated); }
-      if (d.action?.type === "generate") handleGenerate(d.action);
+
+      if (d.action?.type === "activate_skills" && Array.isArray(d.action.skillIds)) {
+        // Progressive disclosure: add newly activated skill IDs
+        setLoadedSkillIds(prev => [...new Set([...prev, ...d.action.skillIds])]);
+      } else if (d.action?.type === "generate") {
+        handleGenerate({ ...d.action, skillIds: [...new Set([...loadedSkillIds, ...(d.action.skillIds || [])])] });
+      }
     } catch { setChatMessages(p => [...p, { role: "assistant", content: "Something went wrong." }]); }
     finally { setChatLoading(false); }
   };
 
-  const handleGenerate = async (config: Record<string, string>) => {
+  const handleGenerate = async (config: Record<string, unknown>) => {
     setGenStatus("generating");
     try {
       const sel = items.filter(i => i.selected);
       const data = buildWorkspaceDataFromKnowledge(sel);
-      const theme = config.theme || "minimalist";
-      const selections = { siteType: config.siteType || "portfolio", theme, layout: config.layout || getAutoLayout(theme, config.siteType || "portfolio"), customSiteType: "", customTheme: config.customTheme || "", customLayout: "", features: { chatbot: true, i18n: true, animations: true, share: true } };
-      const r = await fetch("/api/generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ data, selections }) });
+      const theme = (config.theme as string) || "minimalist";
+      const skillIds = Array.isArray(config.skillIds) ? config.skillIds : [];
+      const selections = { siteType: (config.siteType as string) || "portfolio", theme, layout: (config.layout as string) || getAutoLayout(theme, (config.siteType as string) || "portfolio"), customSiteType: "", customTheme: (config.customTheme as string) || "", customLayout: "", features: { chatbot: true, i18n: true, animations: true, share: true } };
+      const r = await fetch("/api/generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ data, selections, skillIds }) });
       if (!r.ok) throw new Error("Generation failed");
       const { url } = await r.json();
       const imageTasks = getImageTasks(theme as import("@/lib/types").ThemeStyle, data.name, data.projects.map((p: { title: string; tags: string[] }) => ({ title: p.title, tags: p.tags })));
