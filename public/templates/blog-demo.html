@@ -1,0 +1,1217 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>个人博客</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,500;0,9..144,700;1,9..144,400&family=Noto+Sans+SC:wght@300;400;500;600;700&family=Noto+Serif+SC:wght@400;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
+
+/* ═══════ RESET ═══════ */
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:80px}
+
+/* ═══════ THEME VARIABLES ═══════ */
+:root {
+  --accent: #b85c38;
+  --accent-light: #d4825e;
+  --accent-glow: rgba(184,92,56,0.12);
+  --bg-0: #fdfbf7;
+  --bg-1: #f5f0e8;
+  --bg-2: #ebe4d8;
+  --surface: #ffffff;
+  --text-0: #1c1917;
+  --text-1: #57534e;
+  --text-2: #a8a29e;
+  --border: #e7e1d8;
+  --shadow-sm: 0 1px 3px rgba(28,25,23,0.04);
+  --shadow-md: 0 4px 20px rgba(28,25,23,0.06);
+  --shadow-lg: 0 12px 40px rgba(28,25,23,0.08);
+  --serif: 'Fraunces', 'Noto Serif SC', serif;
+  --sans: 'Noto Sans SC', system-ui, sans-serif;
+  --mono: 'IBM Plex Mono', monospace;
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+[data-theme="dark"] {
+  --bg-0: #0f0e0c;
+  --bg-1: #1a1816;
+  --bg-2: #262320;
+  --surface: #1e1c19;
+  --text-0: #ede8e0;
+  --text-1: #a8a29e;
+  --text-2: #6b6560;
+  --border: #2e2a26;
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.2);
+  --shadow-md: 0 4px 20px rgba(0,0,0,0.25);
+  --shadow-lg: 0 12px 40px rgba(0,0,0,0.3);
+  --accent-glow: rgba(184,92,56,0.2);
+}
+
+body {
+  font-family: var(--sans);
+  background: var(--bg-0);
+  color: var(--text-0);
+  line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+  transition: background .4s var(--ease), color .4s var(--ease);
+}
+
+a { color: inherit; text-decoration: none; }
+img { display: block; max-width: 100%; }
+
+/* ═══════ GRAIN OVERLAY ═══════ */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9999;
+  opacity: 0.025;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* ═══════ NAVIGATION ═══════ */
+.nav {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 900;
+  transition: background .4s var(--ease), box-shadow .4s var(--ease);
+}
+
+.nav.scrolled {
+  background: rgba(253,251,247,0.88);
+  backdrop-filter: blur(24px) saturate(1.2);
+  box-shadow: 0 1px 0 var(--border);
+}
+
+[data-theme="dark"] .nav.scrolled {
+  background: rgba(15,14,12,0.88);
+}
+
+.nav-inner {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 0 36px;
+  height: 72px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.nav-brand {
+  font-family: var(--serif);
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  color: var(--accent);
+}
+
+.nav-links {
+  display: flex;
+  align-items: center;
+  gap: 36px;
+  list-style: none;
+}
+
+.nav-links a {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-1);
+  transition: color .25s;
+  position: relative;
+}
+
+.nav-links a::after {
+  content: '';
+  position: absolute;
+  bottom: -4px;
+  left: 0;
+  width: 0;
+  height: 2px;
+  background: var(--accent);
+  border-radius: 1px;
+  transition: width .3s var(--ease);
+}
+
+.nav-links a:hover { color: var(--accent); }
+.nav-links a:hover::after { width: 100%; }
+
+.theme-toggle {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border);
+  background: transparent;
+  color: var(--text-1);
+  cursor: pointer;
+  font-size: 17px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all .25s;
+}
+
+.theme-toggle:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.nav-mobile-btn {
+  display: none;
+  width: 38px;
+  height: 38px;
+  border-radius: 8px;
+  border: 1.5px solid var(--border);
+  background: transparent;
+  color: var(--text-0);
+  cursor: pointer;
+  font-size: 20px;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ═══════ HERO ═══════ */
+.hero {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 160px 36px 100px;
+  display: flex;
+  align-items: center;
+  gap: 64px;
+}
+
+.hero-avatar-wrap {
+  flex-shrink: 0;
+  position: relative;
+}
+
+.hero-avatar-wrap::before {
+  content: '';
+  position: absolute;
+  inset: -8px;
+  border-radius: 50%;
+  border: 2px dashed var(--border);
+  animation: spin 40s linear infinite;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.hero-avatar {
+  width: 200px;
+  height: 200px;
+  border-radius: 50%;
+  overflow: hidden;
+  box-shadow: var(--shadow-lg);
+  border: 4px solid var(--surface);
+}
+
+.hero-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.hero-avatar .avatar-placeholder {
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(135deg, var(--accent), var(--accent-light));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--serif);
+  font-size: 72px;
+  font-weight: 700;
+  color: white;
+}
+
+.hero-info { flex: 1; }
+
+.hero-hello {
+  font-family: var(--mono);
+  font-size: 14px;
+  color: var(--accent);
+  margin-bottom: 12px;
+  letter-spacing: 0.5px;
+}
+
+.hero-name {
+  font-family: var(--serif);
+  font-size: 52px;
+  font-weight: 700;
+  line-height: 1.12;
+  letter-spacing: -1.5px;
+  margin-bottom: 8px;
+}
+
+.hero-tagline {
+  font-size: 20px;
+  color: var(--text-1);
+  margin-bottom: 20px;
+  font-weight: 400;
+}
+
+.hero-bio {
+  font-size: 16px;
+  color: var(--text-1);
+  max-width: 500px;
+  line-height: 1.8;
+  margin-bottom: 28px;
+}
+
+.hero-socials {
+  display: flex;
+  gap: 12px;
+}
+
+.social-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  color: var(--text-1);
+  transition: all .3s var(--ease);
+  background: transparent;
+  text-decoration: none;
+}
+
+.social-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  transform: translateY(-3px);
+  box-shadow: 0 6px 16px var(--accent-glow);
+}
+
+/* ═══════ SECTIONS ═══════ */
+.section {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 80px 36px;
+}
+
+.section-header {
+  margin-bottom: 48px;
+}
+
+.section-label {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  margin-bottom: 8px;
+}
+
+.section-title {
+  font-family: var(--serif);
+  font-size: 36px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+}
+
+.section-line {
+  width: 40px;
+  height: 3px;
+  background: var(--accent);
+  border-radius: 2px;
+  margin-top: 16px;
+}
+
+/* ═══════ ABOUT ═══════ */
+.about-content {
+  max-width: 720px;
+  font-size: 17px;
+  line-height: 2;
+  color: var(--text-1);
+  white-space: pre-wrap;
+}
+
+/* ═══════ SKILLS ═══════ */
+.skills-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.skill-tag {
+  padding: 10px 24px;
+  background: var(--surface);
+  border: 1.5px solid var(--border);
+  border-radius: 100px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-1);
+  transition: all .3s var(--ease);
+  cursor: default;
+}
+
+.skill-tag:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px var(--accent-glow);
+}
+
+/* ═══════ POSTS ═══════ */
+.posts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 28px;
+}
+
+.post-card {
+  background: var(--surface);
+  border-radius: 16px;
+  padding: 32px;
+  border: 1px solid var(--border);
+  transition: all .35s var(--ease);
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+}
+
+.post-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: var(--accent);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform .4s var(--ease);
+}
+
+.post-card:hover {
+  transform: translateY(-6px);
+  box-shadow: var(--shadow-lg);
+}
+
+.post-card:hover::before { transform: scaleX(1); }
+
+.post-date {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--text-2);
+  margin-bottom: 12px;
+}
+
+.post-title {
+  font-family: var(--serif);
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.3;
+  margin-bottom: 12px;
+  letter-spacing: -0.3px;
+}
+
+.post-summary {
+  font-size: 15px;
+  color: var(--text-1);
+  line-height: 1.7;
+  margin-bottom: 20px;
+}
+
+.post-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.post-tag {
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 100px;
+  background: var(--accent-glow);
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.read-more {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.read-more .arrow {
+  transition: transform .3s;
+}
+
+.post-card:hover .read-more .arrow {
+  transform: translateX(4px);
+}
+
+/* ═══════ POST DETAIL (FULL PAGE) ═══════ */
+.post-detail-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0,0,0,0.45);
+  backdrop-filter: blur(10px);
+  display: none;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 60px 20px;
+  overflow-y: auto;
+}
+
+.post-detail-overlay.open { display: flex; }
+
+.post-detail {
+  background: var(--surface);
+  border-radius: 20px;
+  max-width: 720px;
+  width: 100%;
+  padding: 56px;
+  position: relative;
+  animation: slideUp .4s var(--ease) both;
+  margin-top: 20px;
+  margin-bottom: 40px;
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(30px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.post-detail-close {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border);
+  background: var(--bg-1);
+  color: var(--text-0);
+  font-size: 20px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all .2s;
+}
+
+.post-detail-close:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+
+.post-detail .post-date { margin-bottom: 16px; }
+
+.post-detail .post-title {
+  font-size: 32px;
+  margin-bottom: 12px;
+}
+
+.post-detail .post-tags { margin-bottom: 32px; }
+
+.post-detail .post-body {
+  font-size: 17px;
+  line-height: 2;
+  color: var(--text-1);
+  white-space: pre-wrap;
+}
+
+/* ═══════ PROJECTS ═══════ */
+.projects-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 28px;
+}
+
+.project-card {
+  background: var(--surface);
+  border-radius: 16px;
+  padding: 32px;
+  border: 1px solid var(--border);
+  transition: all .35s var(--ease);
+  display: flex;
+  flex-direction: column;
+}
+
+.project-card:hover {
+  transform: translateY(-6px);
+  box-shadow: var(--shadow-lg);
+}
+
+.project-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background: var(--accent-glow);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  margin-bottom: 20px;
+}
+
+.project-name {
+  font-family: var(--serif);
+  font-size: 20px;
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+
+.project-desc {
+  font-size: 15px;
+  color: var(--text-1);
+  line-height: 1.7;
+  margin-bottom: 18px;
+  flex: 1;
+}
+
+.project-tech {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 20px;
+}
+
+.project-tech span {
+  font-size: 12px;
+  font-family: var(--mono);
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: var(--bg-1);
+  color: var(--text-1);
+  font-weight: 500;
+}
+
+.project-link {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.project-link:hover { text-decoration: underline; }
+
+/* ═══════ EXPERIENCE TIMELINE ═══════ */
+.timeline {
+  position: relative;
+  padding-left: 32px;
+}
+
+.timeline::before {
+  content: '';
+  position: absolute;
+  left: 7px;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  background: var(--border);
+}
+
+.timeline-item {
+  position: relative;
+  margin-bottom: 40px;
+}
+
+.timeline-item:last-child { margin-bottom: 0; }
+
+.timeline-item::before {
+  content: '';
+  position: absolute;
+  left: -29px;
+  top: 8px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 3px solid var(--accent);
+  background: var(--bg-0);
+}
+
+.timeline-period {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--accent);
+  margin-bottom: 4px;
+}
+
+.timeline-role {
+  font-size: 18px;
+  font-weight: 700;
+  margin-bottom: 2px;
+}
+
+.timeline-company {
+  font-size: 15px;
+  color: var(--text-1);
+  margin-bottom: 8px;
+}
+
+.timeline-desc {
+  font-size: 15px;
+  color: var(--text-2);
+  line-height: 1.7;
+}
+
+/* ═══════ CONTACT ═══════ */
+.contact-box {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 48px;
+  text-align: center;
+  max-width: 600px;
+}
+
+.contact-box p {
+  font-size: 17px;
+  color: var(--text-1);
+  line-height: 1.8;
+  margin-bottom: 28px;
+}
+
+.contact-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 36px;
+  background: var(--accent);
+  color: white;
+  border-radius: 100px;
+  font-size: 15px;
+  font-weight: 600;
+  font-family: var(--sans);
+  border: none;
+  cursor: pointer;
+  transition: all .3s var(--ease);
+  box-shadow: 0 4px 16px var(--accent-glow);
+  text-decoration: none;
+}
+
+.contact-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 28px rgba(184,92,56,0.3);
+}
+
+/* ═══════ FOOTER ═══════ */
+.footer {
+  border-top: 1px solid var(--border);
+  padding: 40px 36px;
+  transition: border-color .4s;
+}
+
+.footer-inner {
+  max-width: 1120px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.footer-copy {
+  font-size: 14px;
+  color: var(--text-2);
+}
+
+.footer-socials {
+  display: flex;
+  gap: 10px;
+}
+
+.footer-socials a {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  color: var(--text-2);
+  transition: all .25s;
+}
+
+.footer-socials a:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* ═══════ SCROLL ANIMATIONS ═══════ */
+.reveal {
+  opacity: 0;
+  transform: translateY(32px);
+  transition: opacity .7s var(--ease), transform .7s var(--ease);
+}
+
+.reveal.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.reveal-delay-1 { transition-delay: .1s; }
+.reveal-delay-2 { transition-delay: .2s; }
+.reveal-delay-3 { transition-delay: .3s; }
+.reveal-delay-4 { transition-delay: .4s; }
+
+/* ═══════ RESPONSIVE ═══════ */
+@media (max-width: 768px) {
+  .hero {
+    flex-direction: column;
+    text-align: center;
+    padding: 130px 24px 60px;
+    gap: 36px;
+  }
+  .hero-name { font-size: 36px; }
+  .hero-tagline { font-size: 17px; }
+  .hero-bio { margin: 0 auto 28px; }
+  .hero-socials { justify-content: center; }
+  .hero-avatar { width: 150px; height: 150px; }
+  .section { padding: 56px 24px; }
+  .section-title { font-size: 28px; }
+  .posts-grid, .projects-grid { grid-template-columns: 1fr; }
+  .post-detail { padding: 32px; }
+  .nav-links { display: none; }
+  .nav-links.open {
+    display: flex;
+    flex-direction: column;
+    position: absolute;
+    top: 72px;
+    left: 0;
+    right: 0;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 20px 36px;
+    gap: 18px;
+    box-shadow: var(--shadow-md);
+  }
+  .nav-mobile-btn { display: flex; }
+  .footer-inner { flex-direction: column; gap: 16px; text-align: center; }
+  .contact-box { padding: 32px 24px; }
+}
+
+/* ═══════ SCROLLBAR ═══════ */
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-track { background: var(--bg-0); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-2); }
+</style>
+</head>
+<body>
+
+<script>
+// ╔══════════════════════════════════════════════════════════════════╗
+// ║  📝 个人资料配置 — 修改下面的数据即可生成你的博客                    ║
+// ╚══════════════════════════════════════════════════════════════════╝
+
+const PROFILE = {
+  // —— 基本信息 ——
+  name: "林小溪",
+  tagline: "全栈开发工程师 / 开源爱好者",
+  greeting: "你好，我是",
+  // 头像：填写图片 URL，留空则显示姓名首字
+  avatar: "",
+  bio: "热爱技术，专注于 Web 应用开发和云原生架构。\n工作之余喜欢写技术博客、参与开源项目，相信技术可以让世界变得更美好。",
+  // 详细介绍（关于页面）
+  about: "我是一名拥有 6 年经验的全栈开发工程师，目前在一家科技公司负责基础架构和开发者工具的建设。\n\n我的技术兴趣广泛，从前端框架到后端微服务，从容器编排到 DevOps 流水线，都有深入的实践经验。我相信好的工程师不仅要写好代码，更要理解业务、关注用户体验。\n\n工作之外，我是多个开源项目的贡献者，也经常在技术社区分享我的经验和思考。我认为知识分享是技术成长最快的方式。",
+
+  // —— 社交链接 ——
+  social: {
+    github: "linxiaoxi",
+    twitter: "linxiaoxi_dev",
+    linkedin: "",
+    email: "hello@linxiaoxi.dev",
+    website: "linxiaoxi.dev"
+  },
+
+  // —— 技能标签 ——
+  skills: [
+    "JavaScript", "TypeScript", "React", "Vue.js", "Node.js",
+    "Python", "Go", "Rust", "Docker", "Kubernetes",
+    "PostgreSQL", "Redis", "GraphQL", "CI/CD", "系统设计"
+  ],
+
+  // —— 博客文章 ——
+  posts: [
+    {
+      title: "用 Rust 重写我的博客引擎",
+      date: "2026-03-01",
+      tags: ["Rust", "性能优化"],
+      summary: "分享从 Node.js 迁移到 Rust 的心路历程，以及性能提升的真实数据。",
+      content: "最近我完成了一个有趣的项目：将我的博客引擎从 Node.js 完全重写为 Rust。\n\n动机很简单 —— 我对 Rust 的性能和安全性一直很好奇，而博客引擎是一个复杂度适中的实际项目。经过两个月的周末开发，结果令人惊喜：\n\n• 构建速度提升了 12 倍\n• 内存使用降低 85%\n• 冷启动时间从 2.3s 降至 40ms\n\n当然过程中也踩了不少坑，尤其是 Rust 的所有权系统在处理模板引擎时带来的挑战。但正是这些挑战让我对内存管理有了更深的理解。\n\n如果你也在考虑将某个项目迁移到 Rust，我的建议是：从一个你熟悉的、规模适中的项目开始。这样你可以把精力集中在学习 Rust 本身，而不是业务逻辑上。"
+    },
+    {
+      title: "我的 2025 年度技术回顾",
+      date: "2026-01-15",
+      tags: ["年度总结", "成长"],
+      summary: "回顾过去一年学到的技术、完成的项目和获得的成长。",
+      content: "2025 年是充实的一年。这一年里，我深入学习了 Rust 和 WebAssembly，参与了 3 个开源项目的贡献，在团队中推动了微服务架构的落地。\n\n最大的收获是学会了平衡深度和广度 —— 不再追求学习每一项新技术，而是选择几个方向深耕。\n\n技术栈变化：\n• 前端：从 React 全面转向 React + Next.js\n• 后端：开始在生产环境使用 Rust\n• 基础设施：深入 Kubernetes 和 GitOps\n\n开源贡献：全年提交了 247 个 PR，其中 189 个被合并。最有成就感的是为一个知名 Rust 框架修复了一个困扰社区数月的内存泄漏问题。\n\n2026 年的目标：深入 AI 基础设施领域，探索 LLM 应用的工程实践。"
+    },
+    {
+      title: "Docker 最佳实践：从开发到部署",
+      date: "2025-11-20",
+      tags: ["Docker", "DevOps"],
+      summary: "总结我在生产环境中使用 Docker 的经验和最佳实践。",
+      content: "在过去三年的 Docker 使用中，我积累了许多实用的经验。\n\n1. 镜像优化\n使用多阶段构建是最有效的优化手段。我们的 Go 服务镜像从 1.2GB 缩小到了 12MB。关键在于将构建环境和运行环境分离。\n\n2. 安全加固\n• 永远不要以 root 用户运行容器\n• 使用 distroless 或 Alpine 作为基础镜像\n• 定期扫描镜像漏洞\n\n3. 日志与监控\n统一使用 JSON 格式日志，配合 Fluentd 收集到 Elasticsearch。\n\n4. 网络策略\n在 Kubernetes 中务必配置 NetworkPolicy，限制 Pod 间的通信范围。\n\n这些实践帮助我们团队将部署可靠性从 95% 提升到了 99.8%。"
+    },
+    {
+      title: "为什么我选择 PostgreSQL 而不是 MongoDB",
+      date: "2025-09-10",
+      tags: ["数据库", "架构"],
+      summary: "从实际项目出发，分析关系型数据库在现代应用中的优势。",
+      content: "在启动一个新项目时，数据库的选型往往是最重要的架构决策之一。\n\n在经历了多个使用 MongoDB 的项目后，我逐渐发现关系型数据库（尤其是 PostgreSQL）在大多数场景下都是更好的选择：\n\n• 数据一致性：ACID 事务在金融、电商等场景下是刚需\n• JSONB：PostgreSQL 的 JSONB 类型提供了足够灵活的半结构化数据支持\n• 查询能力：SQL 的表达力远超 MongoDB 的查询语法\n• 生态系统：PostGIS、全文搜索、时序数据扩展等\n\n当然 MongoDB 在某些场景下仍有优势，比如需要极高写入吞吐量的日志系统。但对于大多数 Web 应用，PostgreSQL 是我的首选。"
+    }
+  ],
+
+  // —— 项目作品 ——
+  projects: [
+    {
+      name: "Flux Engine",
+      icon: "⚡",
+      desc: "一个高性能的静态网站生成器，使用 Rust 编写，支持 Markdown 和自定义模板引擎。构建速度比同类工具快 10 倍以上。",
+      tech: ["Rust", "WebAssembly", "Markdown"],
+      link: "https://github.com/linxiaoxi/flux-engine"
+    },
+    {
+      name: "CloudBoard",
+      icon: "📋",
+      desc: "跨设备剪贴板同步工具，支持文本、图片和文件的即时同步。端到端加密，保障隐私安全。",
+      tech: ["React", "Node.js", "WebSocket", "Redis"],
+      link: "https://github.com/linxiaoxi/cloudboard"
+    },
+    {
+      name: "DevMetrics",
+      icon: "📊",
+      desc: "开发者个人效率追踪仪表盘，自动统计编码时长、代码行数和项目进度。支持 VS Code 和 JetBrains 插件。",
+      tech: ["Vue.js", "Python", "FastAPI", "PostgreSQL"],
+      link: "https://github.com/linxiaoxi/devmetrics"
+    },
+    {
+      name: "TinyCI",
+      icon: "🔧",
+      desc: "轻量级 CI/CD 系统，专为小团队设计。支持 Docker 构建、自动部署和 Webhook 通知。",
+      tech: ["Go", "Docker", "SQLite", "Vue.js"],
+      link: "https://github.com/linxiaoxi/tinyci"
+    }
+  ],
+
+  // —— 工作经历（可选，留空数组则不显示） ——
+  experience: [
+    {
+      period: "2024 — 至今",
+      role: "高级全栈工程师",
+      company: "某科技公司",
+      desc: "负责开发者工具平台和基础架构建设，推动微服务架构落地。"
+    },
+    {
+      period: "2021 — 2024",
+      role: "全栈开发工程师",
+      company: "某互联网公司",
+      desc: "参与核心业务系统重构，从单体架构迁移至微服务。"
+    },
+    {
+      period: "2020 — 2021",
+      role: "前端开发工程师",
+      company: "某创业公司",
+      desc: "负责产品前端架构设计与开发，建立组件库和工程化体系。"
+    }
+  ],
+
+  // —— 联系我 ——
+  contactText: "如果你对我的项目感兴趣，或者想聊聊技术，欢迎随时联系我。",
+
+  // —— 主题色 ——
+  accentColor: "#b85c38"
+};
+</script>
+
+<!-- Navigation -->
+<nav class="nav" id="nav">
+  <div class="nav-inner">
+    <a class="nav-brand" id="navBrand"></a>
+    <ul class="nav-links" id="navLinks"></ul>
+    <div style="display:flex;align-items:center;gap:10px">
+      <button class="theme-toggle" onclick="toggleTheme()" aria-label="切换主题">☀</button>
+      <button class="nav-mobile-btn" onclick="toggleMobileNav()" aria-label="菜单">☰</button>
+    </div>
+  </div>
+</nav>
+
+<!-- Hero -->
+<section class="hero" id="hero"></section>
+
+<!-- Dynamic Sections -->
+<div id="dynamicSections"></div>
+
+<!-- Post Detail Overlay -->
+<div class="post-detail-overlay" id="postOverlay" onclick="if(event.target===this)closePost()">
+  <article class="post-detail">
+    <button class="post-detail-close" onclick="closePost()">✕</button>
+    <div class="post-date" id="detailDate"></div>
+    <h2 class="post-title" id="detailTitle"></h2>
+    <div class="post-tags" id="detailTags"></div>
+    <div class="post-body" id="detailBody"></div>
+  </article>
+</div>
+
+<!-- Footer -->
+<footer class="footer">
+  <div class="footer-inner">
+    <div class="footer-copy" id="footerCopy"></div>
+    <div class="footer-socials" id="footerSocials"></div>
+  </div>
+</footer>
+
+<script>
+// ═══════ RENDER ENGINE ═══════
+const P = PROFILE;
+const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
+// Apply accent color
+if (P.accentColor) {
+  document.documentElement.style.setProperty('--accent', P.accentColor);
+  // derive light version
+  const hex = P.accentColor.replace('#','');
+  const r = parseInt(hex.substring(0,2),16), g = parseInt(hex.substring(2,4),16), b = parseInt(hex.substring(4,6),16);
+  document.documentElement.style.setProperty('--accent-light', `rgb(${Math.min(r+40,255)},${Math.min(g+40,255)},${Math.min(b+40,255)})`);
+  document.documentElement.style.setProperty('--accent-glow', `rgba(${r},${g},${b},0.12)`);
+}
+
+// Set page title
+document.title = `${P.name} — 个人博客`;
+
+// ── Social HTML builder ──
+function socialHTML(cls) {
+  const s = P.social;
+  let h = '';
+  if (s.github) h += `<a href="https://github.com/${esc(s.github)}" target="_blank" class="${cls}" title="GitHub"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg></a>`;
+  if (s.twitter) h += `<a href="https://x.com/${esc(s.twitter)}" target="_blank" class="${cls}" title="X"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg></a>`;
+  if (s.linkedin) h += `<a href="${esc(s.linkedin.startsWith('http') ? s.linkedin : 'https://linkedin.com/in/' + s.linkedin)}" target="_blank" class="${cls}" title="LinkedIn"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 01-2.063-2.065 2.064 2.064 0 112.063 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/></svg></a>`;
+  if (s.email) h += `<a href="mailto:${esc(s.email)}" class="${cls}" title="邮箱">✉</a>`;
+  if (s.website) h += `<a href="${esc(s.website.startsWith('http') ? s.website : 'https://' + s.website)}" target="_blank" class="${cls}" title="网站">⊕</a>`;
+  return h;
+}
+
+// ── Navigation ──
+document.getElementById('navBrand').textContent = P.name;
+const navItems = [];
+if (P.about) navItems.push(['#about', '关于']);
+if (P.skills?.length) navItems.push(['#skills', '技能']);
+if (P.posts?.length) navItems.push(['#posts', '文章']);
+if (P.projects?.length) navItems.push(['#projects', '项目']);
+if (P.experience?.length) navItems.push(['#experience', '经历']);
+navItems.push(['#contact', '联系']);
+
+document.getElementById('navLinks').innerHTML = navItems.map(([href, text]) =>
+  `<li><a href="${href}">${text}</a></li>`
+).join('');
+
+// ── Hero ──
+const initial = P.name.charAt(0);
+const avatarHTML = P.avatar
+  ? `<img src="${esc(P.avatar)}" alt="${esc(P.name)}">`
+  : `<div class="avatar-placeholder">${initial}</div>`;
+
+document.getElementById('hero').innerHTML = `
+  <div class="hero-avatar-wrap reveal">
+    <div class="hero-avatar">${avatarHTML}</div>
+  </div>
+  <div class="hero-info">
+    <div class="hero-hello reveal">${esc(P.greeting || '你好，我是')}</div>
+    <h1 class="hero-name reveal reveal-delay-1">${esc(P.name)}</h1>
+    <p class="hero-tagline reveal reveal-delay-2">${esc(P.tagline)}</p>
+    <p class="hero-bio reveal reveal-delay-3">${esc(P.bio)}</p>
+    <div class="hero-socials reveal reveal-delay-4">${socialHTML('social-btn')}</div>
+  </div>
+`;
+
+// ── Dynamic Sections ──
+let sections = '';
+
+// About
+if (P.about) {
+  sections += `
+  <section class="section" id="about">
+    <div class="section-header reveal">
+      <div class="section-label">About</div>
+      <h2 class="section-title">关于我</h2>
+      <div class="section-line"></div>
+    </div>
+    <div class="about-content reveal reveal-delay-1">${esc(P.about)}</div>
+  </section>`;
+}
+
+// Skills
+if (P.skills?.length) {
+  sections += `
+  <section class="section" id="skills" style="background:var(--bg-1);max-width:100%;transition:background .4s var(--ease)">
+    <div style="max-width:1120px;margin:0 auto;padding:0">
+      <div class="section-header reveal">
+        <div class="section-label">Skills</div>
+        <h2 class="section-title">技能专长</h2>
+        <div class="section-line"></div>
+      </div>
+      <div class="skills-wrap">
+        ${P.skills.map((s, i) => `<span class="skill-tag reveal reveal-delay-${(i % 4) + 1}">${esc(s)}</span>`).join('')}
+      </div>
+    </div>
+  </section>`;
+}
+
+// Posts
+if (P.posts?.length) {
+  sections += `
+  <section class="section" id="posts">
+    <div class="section-header reveal">
+      <div class="section-label">Blog</div>
+      <h2 class="section-title">博客文章</h2>
+      <div class="section-line"></div>
+    </div>
+    <div class="posts-grid">
+      ${P.posts.map((p, i) => `
+        <article class="post-card reveal reveal-delay-${(i % 3) + 1}" onclick="openPost(${i})">
+          <div class="post-date">${esc(p.date)}</div>
+          <h3 class="post-title">${esc(p.title)}</h3>
+          ${p.tags?.length ? `<div class="post-tags">${p.tags.map(t => `<span class="post-tag">${esc(t)}</span>`).join('')}</div>` : ''}
+          <p class="post-summary">${esc(p.summary)}</p>
+          <span class="read-more">阅读全文 <span class="arrow">→</span></span>
+        </article>
+      `).join('')}
+    </div>
+  </section>`;
+}
+
+// Projects
+if (P.projects?.length) {
+  sections += `
+  <section class="section" id="projects" style="background:var(--bg-1);max-width:100%;transition:background .4s var(--ease)">
+    <div style="max-width:1120px;margin:0 auto;padding:0">
+      <div class="section-header reveal">
+        <div class="section-label">Projects</div>
+        <h2 class="section-title">项目作品</h2>
+        <div class="section-line"></div>
+      </div>
+      <div class="projects-grid">
+        ${P.projects.map((p, i) => `
+          <div class="project-card reveal reveal-delay-${(i % 3) + 1}">
+            <div class="project-icon">${p.icon || '📁'}</div>
+            <h3 class="project-name">${esc(p.name)}</h3>
+            <p class="project-desc">${esc(p.desc)}</p>
+            ${p.tech?.length ? `<div class="project-tech">${p.tech.map(t => `<span>${esc(t)}</span>`).join('')}</div>` : ''}
+            ${p.link ? `<a class="project-link" href="${esc(p.link)}" target="_blank">查看项目 <span>→</span></a>` : ''}
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  </section>`;
+}
+
+// Experience
+if (P.experience?.length) {
+  sections += `
+  <section class="section" id="experience">
+    <div class="section-header reveal">
+      <div class="section-label">Experience</div>
+      <h2 class="section-title">工作经历</h2>
+      <div class="section-line"></div>
+    </div>
+    <div class="timeline">
+      ${P.experience.map((e, i) => `
+        <div class="timeline-item reveal reveal-delay-${(i % 3) + 1}">
+          <div class="timeline-period">${esc(e.period)}</div>
+          <div class="timeline-role">${esc(e.role)}</div>
+          <div class="timeline-company">${esc(e.company)}</div>
+          <div class="timeline-desc">${esc(e.desc)}</div>
+        </div>
+      `).join('')}
+    </div>
+  </section>`;
+}
+
+// Contact
+sections += `
+<section class="section" id="contact">
+  <div class="section-header reveal">
+    <div class="section-label">Contact</div>
+    <h2 class="section-title">联系我</h2>
+    <div class="section-line"></div>
+  </div>
+  <div class="contact-box reveal reveal-delay-1">
+    <p>${esc(P.contactText || '欢迎随时联系我。')}</p>
+    ${P.social.email ? `<a class="contact-btn" href="mailto:${esc(P.social.email)}">✉ 发送邮件</a>` : ''}
+  </div>
+</section>`;
+
+document.getElementById('dynamicSections').innerHTML = sections;
+
+// ── Footer ──
+document.getElementById('footerCopy').textContent = `© ${new Date().getFullYear()} ${P.name}`;
+document.getElementById('footerSocials').innerHTML = socialHTML('');
+
+// ═══════ INTERACTIONS ═══════
+
+// Theme toggle
+function toggleTheme() {
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  document.documentElement.setAttribute('data-theme', isDark ? '' : 'dark');
+  document.querySelector('.theme-toggle').textContent = isDark ? '☀' : '☾';
+}
+
+// Mobile nav
+function toggleMobileNav() {
+  document.getElementById('navLinks').classList.toggle('open');
+}
+
+// Close mobile nav on link click
+document.querySelectorAll('.nav-links a').forEach(a => {
+  a.addEventListener('click', () => document.getElementById('navLinks').classList.remove('open'));
+});
+
+// Nav scroll effect
+window.addEventListener('scroll', () => {
+  document.getElementById('nav').classList.toggle('scrolled', window.scrollY > 20);
+}, { passive: true });
+
+// Open post detail
+function openPost(index) {
+  const p = P.posts[index];
+  if (!p) return;
+  document.getElementById('detailDate').textContent = p.date;
+  document.getElementById('detailTitle').textContent = p.title;
+  document.getElementById('detailTags').innerHTML = (p.tags || []).map(t => `<span class="post-tag">${esc(t)}</span>`).join('');
+  document.getElementById('detailBody').textContent = p.content || p.summary;
+  document.getElementById('postOverlay').classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+
+function closePost() {
+  document.getElementById('postOverlay').classList.remove('open');
+  document.body.style.overflow = '';
+}
+
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closePost(); });
+
+// ═══════ SCROLL REVEAL ═══════
+const observer = new IntersectionObserver((entries) => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      entry.target.classList.add('visible');
+      observer.unobserve(entry.target);
+    }
+  });
+}, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
+
+document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+</script>
+
+</body>
+</html>

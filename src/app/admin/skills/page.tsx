@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import Navbar from "@/components/Navbar";
+import { useLocale } from "@/components/LocaleProvider";
 
 interface SkillItem {
   id: string;
@@ -70,6 +71,9 @@ export default function SkillsAdminPage() {
     fetchSkills();
   };
 
+  const { locale } = useLocale();
+  const zh = locale === "zh";
+
   if (status === "loading") return null;
   if (!session?.user) return null;
 
@@ -91,12 +95,15 @@ export default function SkillsAdminPage() {
       <Navbar />
 
       <div className="relative z-10 max-w-6xl mx-auto px-6 pt-24 pb-12">
-        {/* Header */}
+        <Link href="/admin" className="inline-flex items-center gap-1.5 text-xs text-white/30 hover:text-white/60 transition-colors mb-4">
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+          {zh ? "返回管理后台" : "Back to Admin"}
+        </Link>
         <div className="flex items-center justify-between mb-8">
           <div>
             <h1 className="text-2xl font-bold">Skill Hub</h1>
             <p className="text-sm text-text-muted mt-1">
-              Manage skills that assist website building
+              {zh ? "管理辅助网站构建的技能" : "Manage skills that assist website building"}
             </p>
           </div>
           <Link

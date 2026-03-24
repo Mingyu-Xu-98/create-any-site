@@ -97,6 +97,17 @@ function initDb() {
       updated_at TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS conversations (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      site_id TEXT REFERENCES sites(id) ON DELETE SET NULL,
+      title TEXT,
+      messages TEXT NOT NULL,
+      preview_url TEXT,
+      created_at TEXT,
+      updated_at TEXT
+    );
+
     CREATE TABLE IF NOT EXISTS skills (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,

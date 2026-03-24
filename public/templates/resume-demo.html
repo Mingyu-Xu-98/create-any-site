@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Alex Rivera - Portfolio</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+
+:root{
+  --bg:#07070f;--bg-card:rgba(15,15,30,0.6);--text:#e8e8f0;--text-muted:#7878a0;
+  --accent:#6c63ff;--accent2:#00d4aa;--line:rgba(140,140,180,0.1);
+  --font:'Space Grotesk',system-ui,sans-serif;--mono:'JetBrains Mono',monospace;
+}
+
+body{font-family:var(--font);background:var(--bg);color:var(--text);line-height:1.6;overflow-x:hidden}
+a{color:var(--accent);text-decoration:none}
+a:hover{color:var(--accent2)}
+
+/* Background */
+.bg-glow{position:fixed;inset:0;pointer-events:none;z-index:0}
+.bg-glow .orb{position:absolute;border-radius:50%;filter:blur(120px);opacity:0.15}
+.bg-glow .o1{width:500px;height:500px;background:var(--accent);top:-10%;left:-5%;animation:float1 20s ease-in-out infinite}
+.bg-glow .o2{width:400px;height:400px;background:var(--accent2);bottom:10%;right:-5%;animation:float2 25s ease-in-out infinite}
+@keyframes float1{0%,100%{transform:translate(0,0)}50%{transform:translate(60px,40px)}}
+@keyframes float2{0%,100%{transform:translate(0,0)}50%{transform:translate(-40px,-60px)}}
+
+.container{position:relative;z-index:1;max-width:900px;margin:0 auto;padding:0 24px}
+
+/* Nav */
+nav{position:sticky;top:0;z-index:50;background:rgba(7,7,15,0.8);backdrop-filter:blur(20px);border-bottom:1px solid var(--line);padding:16px 0}
+nav .inner{max-width:900px;margin:0 auto;padding:0 24px;display:flex;align-items:center;justify-content:space-between}
+nav .brand{font-weight:600;font-size:16px}
+nav .links{display:flex;gap:24px}
+nav .links a{font-size:13px;color:var(--text-muted);transition:color 0.2s}
+nav .links a:hover{color:var(--text)}
+
+/* Hero */
+.hero{padding:100px 0 60px;text-align:center}
+.hero .tag{display:inline-block;padding:4px 14px;border-radius:20px;background:rgba(108,99,255,0.1);border:1px solid rgba(108,99,255,0.2);font-size:12px;color:var(--accent);margin-bottom:24px;font-family:var(--mono)}
+.hero h1{font-size:48px;font-weight:700;letter-spacing:-1.5px;margin-bottom:12px;background:linear-gradient(135deg,var(--text),var(--accent));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.hero .subtitle{font-size:18px;color:var(--text-muted);margin-bottom:8px}
+.hero .bio{font-size:15px;color:var(--text-muted);max-width:560px;margin:0 auto 32px;line-height:1.8}
+.hero .links{display:flex;gap:12px;justify-content:center}
+.hero .links a{padding:8px 20px;border-radius:10px;font-size:13px;border:1px solid var(--line);color:var(--text-muted);transition:all 0.2s}
+.hero .links a:hover{border-color:var(--accent);color:var(--accent)}
+
+/* Section */
+.section{padding:60px 0}
+.section-title{font-size:24px;font-weight:600;margin-bottom:32px;display:flex;align-items:center;gap:12px}
+.section-title::after{content:'';flex:1;height:1px;background:var(--line)}
+
+/* Skills */
+.skills-grid{display:flex;flex-wrap:wrap;gap:8px}
+.skill{padding:6px 16px;border-radius:8px;background:var(--bg-card);border:1px solid var(--line);font-size:13px;color:var(--text-muted);transition:all 0.2s}
+.skill:hover{border-color:var(--accent);color:var(--accent)}
+
+/* Projects */
+.projects{display:grid;grid-template-columns:repeat(2,1fr);gap:16px}
+.project{padding:24px;border-radius:16px;background:var(--bg-card);border:1px solid var(--line);transition:all 0.3s}
+.project:hover{border-color:var(--accent);transform:translateY(-2px)}
+.project h3{font-size:16px;font-weight:600;margin-bottom:8px}
+.project p{font-size:13px;color:var(--text-muted);line-height:1.7;margin-bottom:12px}
+.project .tags{display:flex;flex-wrap:wrap;gap:6px}
+.project .tags span{font-size:11px;padding:2px 10px;border-radius:6px;background:rgba(108,99,255,0.08);color:var(--accent);font-family:var(--mono)}
+
+/* Timeline */
+.timeline{position:relative;padding-left:28px}
+.timeline::before{content:'';position:absolute;left:6px;top:8px;bottom:8px;width:1px;background:var(--line)}
+.timeline-item{position:relative;margin-bottom:32px}
+.timeline-item::before{content:'';position:absolute;left:-24px;top:8px;width:10px;height:10px;border-radius:50%;background:var(--accent);border:2px solid var(--bg)}
+.timeline-item .date{font-size:12px;color:var(--accent);font-family:var(--mono);margin-bottom:4px}
+.timeline-item h3{font-size:15px;font-weight:600;margin-bottom:4px}
+.timeline-item p{font-size:13px;color:var(--text-muted);line-height:1.7}
+
+/* Footer */
+footer{padding:40px 0;text-align:center;border-top:1px solid var(--line);margin-top:40px}
+footer p{font-size:12px;color:var(--text-muted)}
+
+@media(max-width:640px){
+  .hero h1{font-size:32px}
+  .projects{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+<div class="bg-glow"><div class="orb o1"></div><div class="orb o2"></div></div>
+
+<nav><div class="inner">
+  <div class="brand">Alex Rivera</div>
+  <div class="links">
+    <a href="#skills">Skills</a>
+    <a href="#projects">Projects</a>
+    <a href="#experience">Experience</a>
+  </div>
+</div></nav>
+
+<div class="container">
+  <section class="hero">
+    <div class="tag">Full-Stack Developer</div>
+    <h1>Alex Rivera</h1>
+    <p class="subtitle">Building elegant solutions with modern technology</p>
+    <p class="bio">Passionate full-stack developer with 5+ years of experience building scalable web applications. Specialized in React, Node.js, and cloud architecture. Love turning complex problems into simple, beautiful solutions.</p>
+    <div class="links">
+      <a href="#">GitHub</a>
+      <a href="#">LinkedIn</a>
+      <a href="#">Email</a>
+    </div>
+  </section>
+
+  <section class="section" id="skills">
+    <h2 class="section-title">Skills</h2>
+    <div class="skills-grid">
+      <span class="skill">React</span>
+      <span class="skill">TypeScript</span>
+      <span class="skill">Node.js</span>
+      <span class="skill">Python</span>
+      <span class="skill">PostgreSQL</span>
+      <span class="skill">AWS</span>
+      <span class="skill">Docker</span>
+      <span class="skill">GraphQL</span>
+      <span class="skill">Next.js</span>
+      <span class="skill">Tailwind CSS</span>
+      <span class="skill">Redis</span>
+      <span class="skill">Kubernetes</span>
+    </div>
+  </section>
+
+  <section class="section" id="projects">
+    <h2 class="section-title">Projects</h2>
+    <div class="projects">
+      <div class="project">
+        <h3>CloudSync Platform</h3>
+        <p>Real-time collaboration platform with multi-tenant architecture, handling 10K+ concurrent users.</p>
+        <div class="tags"><span>React</span><span>Node.js</span><span>WebSocket</span><span>Redis</span></div>
+      </div>
+      <div class="project">
+        <h3>DataViz Dashboard</h3>
+        <p>Interactive data visualization tool with custom chart components and real-time data streaming.</p>
+        <div class="tags"><span>D3.js</span><span>TypeScript</span><span>GraphQL</span></div>
+      </div>
+      <div class="project">
+        <h3>AI Code Review</h3>
+        <p>Automated code review system using LLMs, integrated with GitHub Actions for CI/CD pipelines.</p>
+        <div class="tags"><span>Python</span><span>OpenAI</span><span>GitHub API</span></div>
+      </div>
+      <div class="project">
+        <h3>E-Commerce Engine</h3>
+        <p>Headless commerce platform with Stripe integration, inventory management, and analytics.</p>
+        <div class="tags"><span>Next.js</span><span>Stripe</span><span>PostgreSQL</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="experience">
+    <h2 class="section-title">Experience</h2>
+    <div class="timeline">
+      <div class="timeline-item">
+        <div class="date">2022 - Present</div>
+        <h3>Senior Developer · TechCorp</h3>
+        <p>Leading a team of 5 engineers, architecting microservices platform serving 1M+ daily requests.</p>
+      </div>
+      <div class="timeline-item">
+        <div class="date">2020 - 2022</div>
+        <h3>Full-Stack Developer · StartupXYZ</h3>
+        <p>Built core product features, optimized performance by 40%, implemented CI/CD pipeline.</p>
+      </div>
+      <div class="timeline-item">
+        <div class="date">2018 - 2020</div>
+        <h3>Junior Developer · WebAgency</h3>
+        <p>Developed 20+ client websites, created reusable component library adopted across the agency.</p>
+      </div>
+    </div>
+  </section>
+</div>
+
+<footer><p>Built with CreateAnySite</p></footer>
+</body>
+</html>

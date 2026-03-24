@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import Navbar from "@/components/Navbar";
+import { useLocale } from "@/components/LocaleProvider";
 
 interface TemplateItem {
   id: string;
@@ -42,6 +43,9 @@ export default function TemplatesAdminPage() {
     load();
   };
 
+  const { locale } = useLocale();
+  const zh = locale === "zh";
+
   if (status === "loading" || !session?.user) return null;
 
   return (
@@ -49,10 +53,14 @@ export default function TemplatesAdminPage() {
       <div className="wizard-bg"><div className="orb orb-1" /><div className="orb orb-2" /></div>
       <Navbar />
       <div className="relative z-10 max-w-5xl mx-auto px-6 pt-24 pb-12">
+        <Link href="/admin" className="inline-flex items-center gap-1.5 text-xs text-white/30 hover:text-white/60 transition-colors mb-4">
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+          {zh ? "返回管理后台" : "Back to Admin"}
+        </Link>
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-bold">Site Templates</h1>
-            <p className="text-sm text-text-muted mt-1">Manage complete website templates for the marketplace</p>
+            <h1 className="text-2xl font-bold">{zh ? "网站模板" : "Site Templates"}</h1>
+            <p className="text-sm text-text-muted mt-1">{zh ? "管理模板市场的完整网站模板" : "Manage website templates for the marketplace"}</p>
           </div>
           <Link
             href="/admin/templates/new"

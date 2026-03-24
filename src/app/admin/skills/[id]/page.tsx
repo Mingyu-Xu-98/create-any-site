@@ -3,8 +3,10 @@
 import { useSession } from "next-auth/react";
 import { useRouter, useParams } from "next/navigation";
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import Navbar from "@/components/Navbar";
 import SkillForm from "@/components/SkillForm";
+import { useLocale } from "@/components/LocaleProvider";
 
 export default function EditSkillPage() {
   const { data: session, status } = useSession();
@@ -59,6 +61,10 @@ export default function EditSkillPage() {
       </div>
       <Navbar />
       <div className="relative z-10 max-w-3xl mx-auto px-6 pt-24 pb-12">
+        <Link href="/admin/skills" className="inline-flex items-center gap-1.5 text-xs text-white/30 hover:text-white/60 transition-colors mb-4">
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+          返回 Skills
+        </Link>
         <h1 className="text-2xl font-bold mb-8">Edit Skill</h1>
         {loading ? (
           <div className="h-96 rounded-xl bg-white/5 animate-pulse" />

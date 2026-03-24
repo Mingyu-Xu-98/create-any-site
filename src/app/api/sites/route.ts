@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { sites } from "@/lib/db/schema";
+import { sites, conversations } from "@/lib/db/schema";
 import { eq, desc } from "drizzle-orm";
 import { nanoid } from "nanoid";
 
@@ -28,7 +28,15 @@ export async function GET() {
     .where(eq(sites.userId, session.user.id))
     .orderBy(desc(sites.createdAt));
 
-  return NextResponse.json({ sites: userSites });
+  // Attach conversationId to each site
+  const sitesWithConv = await Promise.all(
+    userSites.map(async (s) => {
+      const conv = await db.select({ id: conversations.id }).from(conversations).where(eq(conversations.siteId, s.id)).get();
+      return { ...s, conversationId: conv?.id || null };
+    })
+  );
+
+  return NextResponse.json({ sites: sitesWithConv });
 }
 
 // POST /api/sites - Create a new site
@@ -39,7 +47,7 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json();
-  const { name, siteType, theme, layout, workspaceData, selections, fileMap } = body;
+  const { name, siteType, theme, layout, workspaceData, selections, fileMap, previewUrl } = body;
 
   if (!name || !siteType || !theme || !layout) {
     return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
@@ -61,6 +69,7 @@ export async function POST(req: NextRequest) {
     selections: selections ? JSON.stringify(selections) : null,
     fileMap: fileMap ? JSON.stringify(fileMap) : null,
     status: "draft",
+    previewUrl: previewUrl || null,
     createdAt: now,
     updatedAt: now,
   });

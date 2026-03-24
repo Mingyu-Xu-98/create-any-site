@@ -80,6 +80,19 @@ export const knowledgeItems = sqliteTable("knowledge_items", {
   updatedAt: text("updated_at").$defaultFn(() => new Date().toISOString()),
 });
 
+// ---- Conversations ----
+
+export const conversations = sqliteTable("conversations", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  siteId: text("site_id").references(() => sites.id, { onDelete: "set null" }),
+  title: text("title"),
+  messages: text("messages").notNull(), // JSON array of {role, content}
+  previewUrl: text("preview_url"),
+  createdAt: text("created_at").$defaultFn(() => new Date().toISOString()),
+  updatedAt: text("updated_at").$defaultFn(() => new Date().toISOString()),
+});
+
 // ---- Skills ----
 
 export const skills = sqliteTable("skills", {

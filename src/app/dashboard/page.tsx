@@ -16,12 +16,13 @@ interface SiteItem {
   status: string;
   createdAt: string;
   updatedAt: string;
+  conversationId?: string | null;
 }
 
 export default function DashboardPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
-  const { t } = useLocale();
+  const { t, locale } = useLocale();
   const [sites, setSites] = useState<SiteItem[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -111,11 +112,7 @@ export default function DashboardPage() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {sites.map((site) => (
-              <Link
-                key={site.id}
-                href={`/editor/${site.id}`}
-                className="group p-5 rounded-2xl bg-white/[0.03] border border-white/5 hover:border-accent/20 hover:bg-white/[0.06] transition-all"
-              >
+              <div key={site.id} className="group p-5 rounded-2xl bg-white/[0.03] border border-white/5 hover:border-accent/20 hover:bg-white/[0.06] transition-all">
                 <div className="flex items-start justify-between mb-3">
                   <h3 className="font-medium text-sm group-hover:text-accent transition-colors truncate">
                     {site.name}
@@ -128,10 +125,16 @@ export default function DashboardPage() {
                   <span className="px-2 py-0.5 rounded bg-white/5">{themeLabels[site.theme] || site.theme}</span>
                   <span>{site.siteType}</span>
                 </div>
-                <div className="mt-4 pt-3 border-t border-white/5 text-[10px] text-white/25">
-                  {new Date(site.createdAt).toLocaleDateString()}
+                <div className="mt-3 pt-3 border-t border-white/5 flex items-center justify-between">
+                  <span className="text-[10px] text-white/25">{new Date(site.createdAt).toLocaleDateString()}</span>
+                  <Link
+                    href={site.conversationId ? `/create?siteId=${site.id}` : `/create`}
+                    className="px-3 py-1 rounded-lg bg-accent/10 text-accent text-[10px] hover:bg-accent/20 transition-all"
+                  >
+                    {locale === "zh" ? "继续编辑" : "Continue Editing"}
+                  </Link>
                 </div>
-              </Link>
+              </div>
             ))}
           </div>
         )}
