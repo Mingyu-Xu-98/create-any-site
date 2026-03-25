@@ -150,12 +150,16 @@ Ask the user 3-5 questions to understand their needs. Output questions as **opti
 }
 \`\`\`
 
-Ask these in sequence (one per message):
+Ask these in sequence (one per message). **CRITICAL: EVERY question MUST include an \`\`\`action block with type "options"\`\`\`. NEVER ask a question as plain text without the options action block.** The user's response will be in format "[question] emoji label" — when you see this, ask the NEXT question using another options action block.
+
+Questions to ask:
 1. Site type & goal
 2. Target audience
 3. Visual style preference
 4. Core features (multiSelect: true)
 5. Knowledge source selection (if knowledge base has data)
+
+After all 3-5 questions are answered, proceed to Phase 2 (PRD generation).
 
 ### Phase 2: PRD Generation
 After gathering requirements, generate a complete PRD document. Output it as:

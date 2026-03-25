@@ -42,6 +42,7 @@ function CreatePageInner() {
   const [showPreview, setShowPreview] = useState(false);
   const [showKnowledgeSelector, setShowKnowledgeSelector] = useState(false);
   const [previewTab, setPreviewTab] = useState<"preview" | "prd">("preview");
+  const [workingStatus, setWorkingStatus] = useState("");
   const [prdData, setPrdData] = useState<PRDData | null>(null);
   const [pendingOptions, setPendingOptions] = useState<{ question: string; options: OptionCard[]; multiSelect: boolean } | null>(null);
   const [thinkingSteps, setThinkingSteps] = useState<string[]>([]);
@@ -82,7 +83,7 @@ function CreatePageInner() {
   }, []);
 
   useEffect(() => { if (session?.user) loadKnowledge(); }, [session, loadKnowledge]);
-  useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [chatMessages]);
+  useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [chatMessages, pendingOptions, prdData]);
 
   // Conv list
   const loadConvList = useCallback(async () => {
@@ -221,7 +222,20 @@ function CreatePageInner() {
     const userMsg: ChatMessage = { role: "user", content: msg };
     const newMsgs = [...chatMessages, userMsg];
     setChatMessages(newMsgs); setChatInput(""); setChatLoading(true);
+    setWorkingStatus(locale === "zh" ? "💾 保存对话..." : "💾 Saving...");
     await saveConv(newMsgs);
+
+    // Progressive status updates during AI call
+    const statusSteps = locale === "zh"
+      ? ["🧠 AI 正在分析需求...", "📚 读取知识库...", "🎨 匹配技能...", "✍️ 生成回复..."]
+      : ["🧠 Analyzing request...", "📚 Reading knowledge...", "🎨 Matching skills...", "✍️ Generating response..."];
+    let stepIdx = 0;
+    setWorkingStatus(statusSteps[0]);
+    const statusTimer = setInterval(() => {
+      stepIdx++;
+      if (stepIdx < statusSteps.length) setWorkingStatus(statusSteps[stepIdx]);
+    }, 3000);
+
     try {
       const r = await fetch("/api/chat-build", {
         method: "POST",
@@ -276,34 +290,45 @@ function CreatePageInner() {
         handleGenerate({ ...d.action, skillIds: [...new Set([...loadedSkillIds, ...(d.action.skillIds || [])])] });
       }
     } catch { setChatMessages(p => [...p, { role: "assistant", content: "Something went wrong." }]); }
-    finally { setChatLoading(false); }
+    finally { clearInterval(statusTimer); setWorkingStatus(""); setChatLoading(false); }
   };
 
   const handleGenerate = async (config: Record<string, unknown>) => {
     setGenStatus("generating");
+    const zh = locale === "zh";
+    setThinkingSteps([zh ? "📋 准备构建参数..." : "📋 Preparing build config..."]);
     try {
       const sel = items.filter(i => i.selected);
       const data = buildWorkspaceDataFromKnowledge(sel);
       const theme = (config.theme as string) || "minimalist";
       const skillIds = Array.isArray(config.skillIds) ? config.skillIds : [];
       const selections = { siteType: (config.siteType as string) || "portfolio", theme, layout: (config.layout as string) || getAutoLayout(theme, (config.siteType as string) || "portfolio"), customSiteType: "", customTheme: (config.customTheme as string) || "", customLayout: "", features: { chatbot: true, i18n: true, animations: true, share: true } };
+
+      setThinkingSteps(p => [...p, zh ? `🎨 主题: ${theme} | 布局: ${selections.layout}` : `🎨 Theme: ${theme} | Layout: ${selections.layout}`]);
+      setThinkingSteps(p => [...p, zh ? "⚙️ 生成代码文件..." : "⚙️ Generating code files..."]);
+
       const r = await fetch("/api/generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ data, selections, skillIds, siteId: siteIdRef.current }) });
       if (!r.ok) throw new Error("Generation failed");
       const genResult = await r.json();
       const url = genResult.url;
       const fileMap = genResult.fileMap;
-      // If generate created a new siteId, use it
-      if (genResult.siteId && !siteIdRef.current) {
-        siteIdRef.current = genResult.siteId;
-        setSiteId(genResult.siteId);
-      }
+      if (genResult.siteId && !siteIdRef.current) { siteIdRef.current = genResult.siteId; setSiteId(genResult.siteId); }
+
+      setThinkingSteps(p => [...p, zh ? `✅ 生成完成: ${Object.keys(fileMap || {}).length} 个文件` : `✅ Generated: ${Object.keys(fileMap || {}).length} files`]);
+      setThinkingSteps(p => [...p, zh ? "🖼️ 生成图片资源..." : "🖼️ Generating images..."]);
+
       const imageTasks = getImageTasks(theme as import("@/lib/types").ThemeStyle, data.name, data.projects.map((p: { title: string; tags: string[] }) => ({ title: p.title, tags: p.tags })));
       for (const task of imageTasks) { try { await fetch("/api/generate-image", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt: task.prompt, filename: task.filename, style: theme }) }); } catch {} }
+
+      setThinkingSteps(p => [...p, zh ? "🚀 启动预览服务..." : "🚀 Starting preview server..."]);
       const start = Date.now(); while (Date.now() - start < 30000) { try { await fetch(url, { mode: "no-cors" }); break; } catch {} await new Promise(r => setTimeout(r, 1000)); }
-      setPreviewUrl(url); setGenStatus("ready"); setShowPreview(true);
+
+      setThinkingSteps(p => [...p, zh ? "💾 保存项目..." : "💾 Saving project..."]);
+      setPreviewUrl(url); setGenStatus("ready"); setShowPreview(true); setPreviewTab("preview");
       const cid = await saveConv(chatMessages, url);
       await autoSaveSite(url, config, cid || convIdRef.current, fileMap);
-    } catch { setGenStatus("idle"); setChatMessages(p => [...p, { role: "assistant", content: "Generation failed." }]); }
+      setThinkingSteps([]);
+    } catch { setGenStatus("idle"); setThinkingSteps([]); setChatMessages(p => [...p, { role: "assistant", content: "Generation failed." }]); }
   };
 
   // Handle incremental code modification
@@ -496,21 +521,41 @@ function CreatePageInner() {
                   </div>
                 </div>
               )}
-              {chatMessages.map((msg, i) => (
-                <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-                  <div className={`max-w-[85%] px-3.5 py-2.5 rounded-xl text-[12px] leading-relaxed ${msg.role === "user" ? "bg-accent text-white" : "bg-gray-100 text-gray-600"}`}>
-                    <div className="whitespace-pre-wrap">{msg.content}</div>
+              {chatMessages.map((msg, i) => {
+                // Check if user message is an option selection: [question] emoji label
+                const optionMatch = msg.role === "user" && msg.content.match(/^\[(.+?)\]\s*(\S+)\s+(.+)$/);
+                return (
+                  <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+                    {optionMatch ? (
+                      // Render as styled option card
+                      <div className="max-w-[70%] rounded-xl overflow-hidden">
+                        <div className="px-3 py-1 bg-accent/10 text-[10px] text-accent">{optionMatch[1]}</div>
+                        <div className="px-3.5 py-2.5 bg-accent text-white flex items-center gap-2">
+                          <span className="text-base">{optionMatch[2]}</span>
+                          <span className="text-[12px] font-medium">{optionMatch[3]}</span>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className={`max-w-[85%] px-3.5 py-2.5 rounded-xl text-[12px] leading-relaxed ${msg.role === "user" ? "bg-accent text-white" : "bg-gray-100 text-gray-600"}`}>
+                        <div className="whitespace-pre-wrap">{msg.content}</div>
+                      </div>
+                    )}
                   </div>
-                </div>
-              ))}
+                );
+              })}
 
               {/* Option cards */}
-              {pendingOptions && !chatLoading && (
+              {pendingOptions && (
                 <div className="space-y-2">
                   <p className="text-xs text-gray-400">{pendingOptions.question}</p>
                   <div className="grid grid-cols-2 gap-2">
                     {pendingOptions.options.map(opt => (
-                      <button key={opt.id} onClick={() => { setPendingOptions(null); sendChat(opt.label); }}
+                      <button key={opt.id} onClick={() => {
+                        const question = pendingOptions.question;
+                        setPendingOptions(null);
+                        // Send structured message so AI knows to continue with options
+                        sendChat(`[${question}] ${opt.icon} ${opt.label}`);
+                      }}
                         className="flex items-start gap-2 p-3 rounded-xl bg-gray-50 border border-gray-200 hover:border-accent/30 hover:bg-gray-100 transition-all text-left">
                         <span className="text-lg">{opt.icon}</span>
                         <div>
@@ -550,7 +595,18 @@ function CreatePageInner() {
                 </div>
               )}
 
-              {chatLoading && <div className="flex justify-start"><div className="px-4 py-3 rounded-xl bg-gray-100"><div className="flex gap-1"><div className="w-1.5 h-1.5 rounded-full bg-white/20 animate-pulse" /><div className="w-1.5 h-1.5 rounded-full bg-gray-400 animate-pulse" style={{ animationDelay: "0.2s" }} /><div className="w-1.5 h-1.5 rounded-full bg-white/20 animate-pulse" style={{ animationDelay: "0.4s" }} /></div></div></div>}
+              {chatLoading && (
+                <div className="flex justify-start">
+                  <div className="px-4 py-3 rounded-xl bg-gray-100 space-y-1.5">
+                    {workingStatus && <p className="text-[11px] text-gray-500 font-medium">{workingStatus}</p>}
+                    <div className="flex gap-1">
+                      <div className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
+                      <div className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" style={{ animationDelay: "0.2s" }} />
+                      <div className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" style={{ animationDelay: "0.4s" }} />
+                    </div>
+                  </div>
+                </div>
+              )}
               <div ref={chatEndRef} />
             </div>
 
