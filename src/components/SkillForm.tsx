@@ -66,25 +66,25 @@ export default function SkillForm({ initialData, onSubmit }: SkillFormProps) {
     <form onSubmit={handleSubmit} className="space-y-6">
       {/* Upload skill package */}
       {!initialData && (
-        <div className="rounded-xl border-2 border-dashed border-white/10 p-6 text-center hover:border-white/20 transition-all">
+        <div className="rounded-xl border-2 border-dashed border-gray-200 p-6 text-center hover:border-white/20 transition-all">
           <input ref={fileRef} type="file" accept=".zip,.md" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) handleUpload(f); e.target.value = ""; }} />
           {uploading ? (
             <div className="flex flex-col items-center gap-3">
               <div className="w-8 h-8 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />
-              <p className="text-xs text-white/40">{zh ? "正在解析技能包..." : "Parsing skill package..."}</p>
+              <p className="text-xs text-gray-400">{zh ? "正在解析技能包..." : "Parsing skill package..."}</p>
             </div>
           ) : (
             <>
-              <div className="w-10 h-10 mx-auto mb-3 rounded-xl bg-white/5 flex items-center justify-center">
-                <svg className="w-5 h-5 text-white/20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" /></svg>
+              <div className="w-10 h-10 mx-auto mb-3 rounded-xl bg-gray-100 flex items-center justify-center">
+                <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" /></svg>
               </div>
               <button type="button" onClick={() => fileRef.current?.click()} className="text-sm text-accent hover:text-accent/80 transition-colors">
                 {zh ? "上传技能包（ZIP 或 Markdown）" : "Upload skill package (ZIP or Markdown)"}
               </button>
-              <p className="text-[10px] text-white/20 mt-1">
+              <p className="text-[10px] text-gray-400 mt-1">
                 {zh ? "ZIP 内需包含 index.md（主指令）+ 可选 reference 文件" : "ZIP should contain index.md (main instructions) + optional reference files"}
               </p>
-              <div className="mt-3 text-[9px] text-white/10 space-y-0.5">
+              <div className="mt-3 text-[9px] text-gray-400 space-y-0.5">
                 <p>{zh ? "📄 index.md / SKILL.md → 技能主指令（Level 1）" : "📄 index.md / SKILL.md → Main instructions (Level 1)"}</p>
                 <p>{zh ? "📁 其他文件 → 参考文档（Level 2，按需加载）" : "📁 Other files → Reference docs (Level 2, loaded on demand)"}</p>
               </div>
@@ -96,9 +96,9 @@ export default function SkillForm({ initialData, onSubmit }: SkillFormProps) {
 
       {!initialData && (
         <div className="flex items-center gap-3">
-          <div className="flex-1 h-px bg-white/5" />
-          <span className="text-[10px] text-white/20">{zh ? "或手动填写" : "or fill manually"}</span>
-          <div className="flex-1 h-px bg-white/5" />
+          <div className="flex-1 h-px bg-gray-100" />
+          <span className="text-[10px] text-gray-400">{zh ? "或手动填写" : "or fill manually"}</span>
+          <div className="flex-1 h-px bg-gray-100" />
         </div>
       )}
 
@@ -106,18 +106,18 @@ export default function SkillForm({ initialData, onSubmit }: SkillFormProps) {
       <div>
         <label className="block text-sm font-medium mb-2">{zh ? "名称" : "Name"}</label>
         <input type="text" value={name} onChange={e => setName(e.target.value)} required
-          className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-accent/50"
+          className="w-full px-4 py-3 rounded-xl bg-gray-100 border border-gray-200 text-sm text-gray-900 placeholder:text-gray-500 focus:outline-none focus:border-accent/50"
           placeholder={zh ? "如：Glassmorphism Design" : "e.g., Glassmorphism Design"} />
       </div>
 
       {/* Description — Level 0 trigger condition */}
       <div>
         <label className="block text-sm font-medium mb-1">
-          {zh ? "触发描述" : "Trigger Description"} <span className="text-white/20 font-normal">(Level 0)</span>
+          {zh ? "触发描述" : "Trigger Description"} <span className="text-gray-400 font-normal">(Level 0)</span>
         </label>
-        <p className="text-[10px] text-white/20 mb-2">{zh ? "构建 AI 会一次性读完所有技能的触发描述，决定要不要调用。描述什么时候该用，而不是怎么用。" : "Builder AI reads all trigger descriptions at once to decide which skills to activate. Describe WHEN to use, not HOW."}</p>
+        <p className="text-[10px] text-gray-400 mb-2">{zh ? "构建 AI 会一次性读完所有技能的触发描述，决定要不要调用。描述什么时候该用，而不是怎么用。" : "Builder AI reads all trigger descriptions at once to decide which skills to activate. Describe WHEN to use, not HOW."}</p>
         <input type="text" value={description} onChange={e => setDescription(e.target.value)}
-          className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-accent/50"
+          className="w-full px-4 py-3 rounded-xl bg-gray-100 border border-gray-200 text-sm text-gray-900 placeholder:text-gray-500 focus:outline-none focus:border-accent/50"
           placeholder={zh ? "如：当网站需要毛玻璃效果和半透明卡片时激活" : "e.g., Activate when the site needs frosted glass effects and translucent cards"} />
       </div>
 
@@ -127,7 +127,7 @@ export default function SkillForm({ initialData, onSubmit }: SkillFormProps) {
         <div className="flex flex-wrap gap-2">
           {CATEGORIES.map(c => (
             <button key={c} type="button" onClick={() => setCategory(c)}
-              className={`px-4 py-2 rounded-lg text-sm transition-all ${category === c ? "bg-accent text-white" : "bg-white/5 text-white/50 hover:bg-white/10"}`}>
+              className={`px-4 py-2 rounded-lg text-sm transition-all ${category === c ? "bg-accent text-white" : "bg-gray-100 text-gray-500 hover:bg-gray-100"}`}>
               {c.charAt(0).toUpperCase() + c.slice(1)}
             </button>
           ))}
@@ -140,22 +140,22 @@ export default function SkillForm({ initialData, onSubmit }: SkillFormProps) {
         <div className="flex flex-wrap gap-2">
           {SITE_TYPES.map(t => (
             <button key={t} type="button" onClick={() => toggleSiteType(t)}
-              className={`px-3 py-1.5 rounded-lg text-xs transition-all ${siteTypes.includes(t) ? "bg-accent/20 text-accent border border-accent/30" : "bg-white/5 text-white/40 border border-transparent hover:bg-white/10"}`}>
+              className={`px-3 py-1.5 rounded-lg text-xs transition-all ${siteTypes.includes(t) ? "bg-accent/20 text-accent border border-accent/30" : "bg-gray-100 text-gray-400 border border-transparent hover:bg-gray-100"}`}>
               {t}
             </button>
           ))}
         </div>
-        <p className="text-[10px] text-white/20 mt-1">{zh ? "留空表示适用于所有类型" : "Leave empty to apply to all types"}</p>
+        <p className="text-[10px] text-gray-400 mt-1">{zh ? "留空表示适用于所有类型" : "Leave empty to apply to all types"}</p>
       </div>
 
       {/* Index Content — Level 1 */}
       <div>
         <label className="block text-sm font-medium mb-1">
-          {zh ? "技能指令" : "Skill Instructions"} <span className="text-white/20 font-normal">(Level 1 — index.md)</span>
+          {zh ? "技能指令" : "Skill Instructions"} <span className="text-gray-400 font-normal">(Level 1 — index.md)</span>
         </label>
-        <p className="text-[10px] text-white/20 mb-2">{zh ? "当技能被激活后，构建 AI 会阅读此内容决定怎么应用" : "When activated, the builder AI reads this to decide HOW to apply the skill"}</p>
+        <p className="text-[10px] text-gray-400 mb-2">{zh ? "当技能被激活后，构建 AI 会阅读此内容决定怎么应用" : "When activated, the builder AI reads this to decide HOW to apply the skill"}</p>
         <textarea value={indexContent} onChange={e => setIndexContent(e.target.value)} required rows={16}
-          className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-accent/50 font-mono resize-y"
+          className="w-full px-4 py-3 rounded-xl bg-gray-100 border border-gray-200 text-sm text-gray-900 placeholder:text-gray-500 focus:outline-none focus:border-accent/50 font-mono resize-y"
           placeholder={zh ? "技能的完整指令..." : "Full skill instructions..."} />
       </div>
 
@@ -163,15 +163,15 @@ export default function SkillForm({ initialData, onSubmit }: SkillFormProps) {
       {references.length > 0 && (
         <div>
           <label className="block text-sm font-medium mb-1">
-            {zh ? "参考文档" : "Reference Docs"} <span className="text-white/20 font-normal">(Level 2)</span>
+            {zh ? "参考文档" : "Reference Docs"} <span className="text-gray-400 font-normal">(Level 2)</span>
           </label>
-          <p className="text-[10px] text-white/20 mb-2">{zh ? "深度参考，仅在需要时按需加载" : "Deep references, loaded on demand only"}</p>
+          <p className="text-[10px] text-gray-400 mb-2">{zh ? "深度参考，仅在需要时按需加载" : "Deep references, loaded on demand only"}</p>
           <div className="space-y-2">
             {references.map((ref, i) => (
-              <div key={i} className="flex items-center gap-2 p-3 rounded-lg bg-white/[0.03] border border-white/5">
-                <span className="text-xs text-white/30">📄</span>
-                <span className="text-xs text-white/50 flex-1 truncate">{ref.name}</span>
-                <span className="text-[10px] text-white/20">{ref.content.length} chars</span>
+              <div key={i} className="flex items-center gap-2 p-3 rounded-lg bg-white border border-gray-200">
+                <span className="text-xs text-gray-500">📄</span>
+                <span className="text-xs text-gray-500 flex-1 truncate">{ref.name}</span>
+                <span className="text-[10px] text-gray-400">{ref.content.length} chars</span>
                 <button type="button" onClick={() => setReferences(prev => prev.filter((_, j) => j !== i))} className="text-red-400/50 hover:text-red-400">
                   <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
                 </button>
@@ -184,10 +184,10 @@ export default function SkillForm({ initialData, onSubmit }: SkillFormProps) {
       {/* Enabled */}
       <div className="flex items-center gap-3">
         <button type="button" onClick={() => setEnabled(!enabled)}
-          className={`w-10 h-6 rounded-full relative transition-colors ${enabled ? "bg-accent" : "bg-white/10"}`}>
+          className={`w-10 h-6 rounded-full relative transition-colors ${enabled ? "bg-accent" : "bg-gray-100"}`}>
           <div className={`w-4 h-4 rounded-full bg-white absolute top-1 transition-all ${enabled ? "left-5" : "left-1"}`} />
         </button>
-        <span className="text-sm text-white/60">{zh ? "启用" : "Enabled"}</span>
+        <span className="text-sm text-gray-600">{zh ? "启用" : "Enabled"}</span>
       </div>
 
       {/* Submit */}
@@ -197,7 +197,7 @@ export default function SkillForm({ initialData, onSubmit }: SkillFormProps) {
           {saving ? (zh ? "保存中..." : "Saving...") : initialData ? (zh ? "更新技能" : "Update Skill") : (zh ? "创建技能" : "Create Skill")}
         </button>
         <button type="button" onClick={() => window.history.back()}
-          className="px-6 py-2.5 rounded-xl bg-white/5 text-white/50 text-sm hover:bg-white/10 transition-all">
+          className="px-6 py-2.5 rounded-xl bg-gray-100 text-gray-500 text-sm hover:bg-gray-100 transition-all">
           {zh ? "取消" : "Cancel"}
         </button>
       </div>

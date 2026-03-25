@@ -78,6 +78,8 @@ function initDb() {
       published_url TEXT,
       template_id TEXT,
       editor_state TEXT,
+      prd TEXT,
+      prd_history TEXT,
       created_at TEXT,
       updated_at TEXT
     );

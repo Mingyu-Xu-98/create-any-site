@@ -53,7 +53,7 @@ export default function TemplatesAdminPage() {
       <div className="wizard-bg"><div className="orb orb-1" /><div className="orb orb-2" /></div>
       <Navbar />
       <div className="relative z-10 max-w-5xl mx-auto px-6 pt-24 pb-12">
-        <Link href="/admin" className="inline-flex items-center gap-1.5 text-xs text-white/30 hover:text-white/60 transition-colors mb-4">
+        <Link href="/admin" className="inline-flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-600 transition-colors mb-4">
           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
           {zh ? "返回管理后台" : "Back to Admin"}
         </Link>
@@ -75,22 +75,22 @@ export default function TemplatesAdminPage() {
 
         {loading ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {[1, 2, 3].map((i) => <div key={i} className="h-48 rounded-2xl bg-white/5 animate-pulse" />)}
+            {[1, 2, 3].map((i) => <div key={i} className="h-48 rounded-2xl bg-gray-100 animate-pulse" />)}
           </div>
         ) : templates.length === 0 ? (
           <div className="text-center py-20">
-            <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-white/5 flex items-center justify-center">
-              <svg className="w-7 h-7 text-white/20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-gray-100 flex items-center justify-center">
+              <svg className="w-7 h-7 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zm0 8a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6z" />
               </svg>
             </div>
-            <h3 className="text-lg font-medium text-white/60">No templates yet</h3>
-            <p className="text-sm text-white/30 mt-1">Add your first complete website template</p>
+            <h3 className="text-lg font-medium text-gray-600">No templates yet</h3>
+            <p className="text-sm text-gray-500 mt-1">Add your first complete website template</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {templates.map((tpl) => (
-              <div key={tpl.id} className="rounded-2xl bg-white/[0.03] border border-white/5 hover:border-white/10 overflow-hidden transition-all group">
+              <div key={tpl.id} className="rounded-2xl bg-white border border-gray-200 hover:border-gray-200 overflow-hidden transition-all group">
                 {/* Preview */}
                 <div className="h-32 bg-gradient-to-br from-violet-500/10 to-cyan-500/10 flex items-center justify-center">
                   {tpl.previewImage ? (
@@ -106,15 +106,15 @@ export default function TemplatesAdminPage() {
                       <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-yellow-500/20 text-yellow-400">Featured</span>
                     ) : null}
                   </div>
-                  <p className="text-[10px] text-white/30 mb-3 line-clamp-2">{tpl.description || "No description"}</p>
+                  <p className="text-[10px] text-gray-500 mb-3 line-clamp-2">{tpl.description || "No description"}</p>
                   <div className="flex items-center gap-1.5 mb-3">
-                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-white/5 text-white/30">{tpl.siteType}</span>
-                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-white/5 text-white/30">{tpl.category}</span>
+                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">{tpl.siteType}</span>
+                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">{tpl.category}</span>
                   </div>
                   <div className="flex gap-2">
                     <Link
                       href={`/admin/templates/${tpl.id}`}
-                      className="flex-1 text-center px-3 py-1.5 rounded-lg bg-white/5 text-xs text-white/50 hover:bg-white/10 transition-all"
+                      className="flex-1 text-center px-3 py-1.5 rounded-lg bg-gray-100 text-xs text-gray-500 hover:bg-gray-100 transition-all"
                     >
                       Edit
                     </Link>

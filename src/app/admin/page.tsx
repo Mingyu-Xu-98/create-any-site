@@ -45,20 +45,20 @@ export default function AdminPage() {
 
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-10">
           {cards.map(c => (
-            <Link key={c.label} href={c.href} className={`p-4 rounded-2xl bg-gradient-to-br ${c.color} border border-white/5 hover:border-white/10 transition-all group`}>
-              <svg className="w-5 h-5 text-white/30 mb-3 group-hover:text-white/50 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d={c.icon} /></svg>
+            <Link key={c.label} href={c.href} className={`p-4 rounded-2xl bg-gradient-to-br ${c.color} border border-gray-200 hover:border-gray-200 transition-all group`}>
+              <svg className="w-5 h-5 text-gray-500 mb-3 group-hover:text-gray-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d={c.icon} /></svg>
               <div className="text-2xl font-bold">{c.value}</div>
-              <div className="text-[10px] text-white/35 mt-1">{c.label}</div>
+              <div className="text-[10px] text-gray-400 mt-1">{c.label}</div>
             </Link>
           ))}
         </div>
 
-        <h2 className="text-sm font-semibold text-white/50 mb-4">{zh ? "快捷操作" : "Quick Actions"}</h2>
+        <h2 className="text-sm font-semibold text-gray-500 mb-4">{zh ? "快捷操作" : "Quick Actions"}</h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           {quickLinks.map(item => (
-            <Link key={item.href} href={item.href} className="p-4 rounded-xl bg-white/[0.03] border border-white/5 hover:border-accent/20 hover:bg-white/[0.05] transition-all group">
+            <Link key={item.href} href={item.href} className="p-4 rounded-xl bg-white border border-gray-200 hover:border-accent/20 hover:bg-white/[0.05] transition-all group">
               <h3 className="text-sm font-medium group-hover:text-accent transition-colors">{item.label}</h3>
-              <p className="text-[10px] text-white/25 mt-1">{item.desc}</p>
+              <p className="text-[10px] text-gray-400 mt-1">{item.desc}</p>
             </Link>
           ))}
         </div>

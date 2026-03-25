@@ -2,8 +2,9 @@ node_modules/
 .next/
 .env.local
 .DS_Store
-output/
+output
 html-output/
+sites-data/
 data/
 *.tsbuildinfo
 __pycache__/

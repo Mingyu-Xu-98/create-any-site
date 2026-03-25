@@ -57,7 +57,7 @@ export default function DashboardPage() {
   const statusColors: Record<string, string> = {
     draft: "bg-yellow-500/20 text-yellow-400",
     published: "bg-green-500/20 text-green-400",
-    archived: "bg-white/10 text-white/40",
+    archived: "bg-gray-100 text-gray-400",
   };
 
   return (
@@ -90,18 +90,18 @@ export default function DashboardPage() {
         {loading ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {[1, 2, 3].map((i) => (
-              <div key={i} className="h-48 rounded-2xl bg-white/5 animate-pulse" />
+              <div key={i} className="h-48 rounded-2xl bg-gray-100 animate-pulse" />
             ))}
           </div>
         ) : sites.length === 0 ? (
           <div className="text-center py-24">
-            <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-white/5 flex items-center justify-center">
-              <svg className="w-8 h-8 text-white/20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-gray-100 flex items-center justify-center">
+              <svg className="w-8 h-8 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4v16m8-8H4" />
               </svg>
             </div>
-            <h3 className="text-lg font-medium text-white/60">{t("dashboard.noSites")}</h3>
-            <p className="text-sm text-white/30 mt-1">{t("dashboard.noSitesDesc")}</p>
+            <h3 className="text-lg font-medium text-gray-600">{t("dashboard.noSites")}</h3>
+            <p className="text-sm text-gray-500 mt-1">{t("dashboard.noSitesDesc")}</p>
             <Link
               href="/create"
               className="inline-block mt-6 px-6 py-2.5 rounded-xl bg-accent text-white text-sm font-medium hover:bg-accent/90 transition-all"
@@ -112,7 +112,7 @@ export default function DashboardPage() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {sites.map((site) => (
-              <div key={site.id} className="group p-5 rounded-2xl bg-white/[0.03] border border-white/5 hover:border-accent/20 hover:bg-white/[0.06] transition-all">
+              <div key={site.id} className="group p-5 rounded-2xl bg-white border border-gray-200 hover:border-accent/30 hover:bg-gray-50 transition-all">
                 <div className="flex items-start justify-between mb-3">
                   <h3 className="font-medium text-sm group-hover:text-accent transition-colors truncate">
                     {site.name}
@@ -121,12 +121,12 @@ export default function DashboardPage() {
                     {site.status}
                   </span>
                 </div>
-                <div className="flex items-center gap-2 text-xs text-white/40">
-                  <span className="px-2 py-0.5 rounded bg-white/5">{themeLabels[site.theme] || site.theme}</span>
+                <div className="flex items-center gap-2 text-xs text-gray-400">
+                  <span className="px-2 py-0.5 rounded bg-gray-100">{themeLabels[site.theme] || site.theme}</span>
                   <span>{site.siteType}</span>
                 </div>
-                <div className="mt-3 pt-3 border-t border-white/5 flex items-center justify-between">
-                  <span className="text-[10px] text-white/25">{new Date(site.createdAt).toLocaleDateString()}</span>
+                <div className="mt-3 pt-3 border-t border-gray-200 flex items-center justify-between">
+                  <span className="text-[10px] text-gray-500">{new Date(site.createdAt).toLocaleDateString()}</span>
                   <Link
                     href={site.conversationId ? `/create?siteId=${site.id}` : `/create`}
                     className="px-3 py-1 rounded-lg bg-accent/10 text-accent text-[10px] hover:bg-accent/20 transition-all"

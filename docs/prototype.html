@@ -1,0 +1,768 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CreateAnySite — Prototype</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #07070f;
+  --bg-card: rgba(15,15,30,0.6);
+  --bg-card-solid: #0f0f20;
+  --bg-tag: rgba(60,60,100,0.3);
+  --text: #e8e8f0;
+  --text-muted: #7878a0;
+  --text-dim: rgba(255,255,255,0.25);
+  --accent: #6c63ff;
+  --accent-soft: rgba(108,99,255,0.12);
+  --accent-glow: rgba(108,99,255,0.25);
+  --line: rgba(140,140,180,0.1);
+  --green: #4ade80;
+  --yellow: #fbbf24;
+  --red: #f87171;
+  --blue: #60a5fa;
+  --sidebar-bg: #0a0a0a;
+  --font: 'Geist', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden}
+body{font-family:var(--font);background:var(--bg);color:var(--text);font-size:14px;line-height:1.6;-webkit-font-smoothing:antialiased}
+::selection{background:var(--accent);color:#fff}
+::-webkit-scrollbar{width:5px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:rgba(120,120,160,0.3);border-radius:99px}
+button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
+input,textarea{font-family:inherit;border:none;outline:none;background:none;color:inherit}
+a{color:inherit;text-decoration:none}
+
+/* ── Floating Orbs ── */
+.orbs{position:fixed;inset:0;pointer-events:none;z-index:0;overflow:hidden}
+.orb{position:absolute;border-radius:50%;filter:blur(120px);opacity:.3}
+.orb-1{width:800px;height:800px;background:radial-gradient(circle,rgba(108,99,255,.25),transparent 70%);top:-20%;right:-15%;animation:f1 25s ease-in-out infinite}
+.orb-2{width:600px;height:600px;background:radial-gradient(circle,rgba(139,92,246,.2),transparent 70%);bottom:-10%;left:-10%;animation:f2 30s ease-in-out infinite}
+.orb-3{width:400px;height:400px;background:radial-gradient(circle,rgba(244,114,182,.12),transparent 70%);top:40%;left:40%;animation:f3 20s ease-in-out infinite}
+@keyframes f1{0%,100%{transform:translate(0,0) scale(1)}33%{transform:translate(-60px,40px) scale(1.1)}66%{transform:translate(40px,-30px) scale(.95)}}
+@keyframes f2{0%,100%{transform:translate(0,0)}50%{transform:translate(50px,-40px) scale(1.08)}}
+@keyframes f3{0%,100%{transform:translate(0,0)}50%{transform:translate(-40px,-30px) scale(1.15)}}
+
+/* ── Navbar ── */
+.nav{position:fixed;top:0;left:0;right:0;z-index:100;height:56px;background:rgba(10,10,10,.8);backdrop-filter:blur(20px);border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 24px}
+.nav-logo{font-size:18px;font-weight:700;background:linear-gradient(135deg,#a78bfa,#22d3ee);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.nav-links{display:flex;align-items:center;gap:20px}
+.nav-link{font-size:13px;color:rgba(255,255,255,.5);transition:color .15s}
+.nav-link:hover{color:rgba(255,255,255,.85)}
+.nav-link.active{color:var(--accent)}
+.nav-avatar{width:28px;height:28px;border-radius:50%;background:rgba(255,255,255,.08);display:flex;align-items:center;justify-content:center;font-size:11px;color:rgba(255,255,255,.5)}
+
+/* ── Page Tabs ── */
+.page-tabs{display:flex;gap:2px;background:rgba(255,255,255,.03);border-radius:8px;padding:2px}
+.page-tab{padding:6px 14px;border-radius:6px;font-size:12px;color:rgba(255,255,255,.4);transition:all .15s}
+.page-tab:hover{color:rgba(255,255,255,.6)}
+.page-tab.active{background:var(--accent);color:#fff}
+
+/* ── Pages ── */
+.page{display:none;height:100vh;overflow-y:auto}
+.page.active{display:block}
+.page-content{position:relative;z-index:1}
+
+/* ── Landing ── */
+.hero{padding:128px 24px 80px;text-center;max-width:800px;margin:0 auto;text-align:center}
+.hero-badge{display:inline-block;padding:6px 16px;border-radius:999px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);font-size:12px;color:rgba(255,255,255,.45);margin-bottom:24px}
+.hero h1{font-size:52px;font-weight:700;line-height:1.15;letter-spacing:-.02em}
+.hero .hl{background:linear-gradient(135deg,#a78bfa,#22d3ee);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.hero p{margin-top:20px;font-size:17px;color:rgba(255,255,255,.4);max-width:560px;margin-left:auto;margin-right:auto;line-height:1.7}
+.hero-btns{margin-top:40px;display:flex;gap:12px;justify-content:center}
+.btn-primary{padding:12px 32px;border-radius:12px;background:var(--accent);color:#fff;font-size:14px;font-weight:500;box-shadow:0 4px 20px var(--accent-glow);transition:all .15s}
+.btn-primary:hover{filter:brightness(1.1);transform:translateY(-1px)}
+.btn-ghost{padding:12px 32px;border-radius:12px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);color:rgba(255,255,255,.6);font-size:14px;transition:all .15s}
+.btn-ghost:hover{background:rgba(255,255,255,.08);color:rgba(255,255,255,.8)}
+
+.features{max-width:960px;margin:0 auto;padding:0 24px 80px;display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+.feat-card{padding:24px;border-radius:16px;background:rgba(255,255,255,.02);border:1px solid var(--line);transition:all .2s}
+.feat-card:hover{border-color:rgba(255,255,255,.08);transform:translateY(-2px)}
+.feat-icon{width:40px;height:40px;border-radius:10px;background:var(--accent-soft);display:flex;align-items:center;justify-content:center;margin-bottom:16px;color:var(--accent)}
+.feat-card h3{font-size:14px;font-weight:600;margin-bottom:8px}
+.feat-card p{font-size:13px;color:rgba(255,255,255,.35);line-height:1.6}
+
+.site-types{max-width:720px;margin:0 auto;padding:80px 24px;text-align:center}
+.site-types h2{font-size:28px;font-weight:700;margin-bottom:12px}
+.site-types>p{color:rgba(255,255,255,.35);margin-bottom:40px;font-size:14px}
+.type-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.type-pill{padding:12px 16px;border-radius:12px;background:rgba(255,255,255,.02);border:1px solid var(--line);font-size:13px;color:rgba(255,255,255,.5);transition:all .15s}
+.type-pill:hover{border-color:rgba(255,255,255,.12);color:rgba(255,255,255,.7)}
+.landing-footer{border-top:1px solid var(--line);padding:32px 24px;display:flex;justify-content:space-between;font-size:12px;color:rgba(255,255,255,.15);max-width:960px;margin:0 auto}
+
+/* ── Dashboard ── */
+.dash{padding:96px 24px 48px;max-width:1100px;margin:0 auto}
+.dash-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:32px}
+.dash-header h1{font-size:22px;font-weight:700}
+.dash-header .sub{font-size:13px;color:var(--text-muted);margin-top:4px}
+.dash-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+.site-card{padding:20px;border-radius:16px;background:rgba(255,255,255,.02);border:1px solid var(--line);transition:all .2s}
+.site-card:hover{border-color:rgba(108,99,255,.2);transform:translateY(-1px)}
+.site-card-head{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px}
+.site-card-head h3{font-size:14px;font-weight:500}
+.badge{font-size:10px;padding:2px 8px;border-radius:99px}
+.badge-draft{background:rgba(251,191,36,.15);color:#fbbf24}
+.badge-published{background:rgba(74,222,128,.15);color:#4ade80}
+.site-card-meta{display:flex;gap:8px;font-size:12px;color:rgba(255,255,255,.35)}
+.site-card-meta span{padding:2px 8px;border-radius:4px;background:rgba(255,255,255,.04)}
+.site-card-foot{margin-top:12px;padding-top:12px;border-top:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}
+.site-card-foot .date{font-size:10px;color:rgba(255,255,255,.2)}
+.btn-sm{padding:4px 12px;border-radius:8px;font-size:10px;background:var(--accent-soft);color:var(--accent);transition:all .15s}
+.btn-sm:hover{background:rgba(108,99,255,.2)}
+
+/* ── Create Page ── */
+.create-page{display:none;height:100vh;flex-direction:column;overflow:hidden}
+.create-page.active{display:flex}
+.create-body{flex:1;display:flex;padding-top:56px;overflow:hidden}
+
+/* Sidebar */
+.sidebar{width:224px;flex-shrink:0;background:var(--sidebar-bg);border-right:1px solid var(--line);display:flex;flex-direction:column;transition:width .2s ease}
+.sidebar.collapsed{width:56px}
+.sidebar-top{display:flex;align-items:center;padding:8px 12px;justify-content:space-between}
+.sidebar.collapsed .sidebar-top{flex-direction:column;padding:12px 8px;gap:4px}
+.btn-icon{width:40px;height:40px;border-radius:10px;display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,.2);transition:all .15s}
+.btn-icon:hover{background:rgba(255,255,255,.04);color:rgba(255,255,255,.45)}
+.btn-icon svg{width:16px;height:16px}
+.btn-new{padding:4px 8px;border-radius:8px;background:rgba(108,99,255,.15);color:var(--accent);font-size:10px;transition:all .15s}
+.btn-new:hover{background:rgba(108,99,255,.25)}
+
+.sidebar-nav{padding:4px 8px}
+.nav-item{width:100%;display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:8px;font-size:11px;color:rgba(255,255,255,.3);transition:all .15s;position:relative}
+.nav-item:hover{background:rgba(255,255,255,.03)}
+.nav-item.active{background:rgba(108,99,255,.12);color:var(--accent)}
+.nav-item svg{width:16px;height:16px;flex-shrink:0}
+.nav-badge{margin-left:auto;font-size:9px;padding:1px 6px;border-radius:4px;background:rgba(255,255,255,.06)}
+.sidebar.collapsed .nav-item{justify-content:center;padding:8px;width:40px;margin:0 auto}
+.sidebar.collapsed .nav-item span,.sidebar.collapsed .nav-badge,.sidebar.collapsed .btn-new,.sidebar.collapsed .sidebar-history{display:none}
+.sidebar.collapsed .nav-item .badge-dot{display:flex;position:absolute;top:0;right:0;width:16px;height:16px;border-radius:99px;background:var(--accent);font-size:8px;align-items:center;justify-content:center;color:#fff}
+
+.sidebar-history{flex:1;overflow-y:auto;padding:0 8px}
+.sidebar-label{font-size:9px;color:rgba(255,255,255,.15);text-transform:uppercase;letter-spacing:.08em;padding:12px 12px 8px}
+.history-item{width:100%;text-align:left;padding:8px 12px;border-radius:8px;transition:all .15s;margin-bottom:2px}
+.history-item:hover{background:rgba(255,255,255,.02)}
+.history-item.active{background:rgba(255,255,255,.04);color:rgba(255,255,255,.5)}
+.history-item .title{font-size:10px;color:rgba(255,255,255,.25);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block}
+.history-item .date{font-size:8px;color:rgba(255,255,255,.12);margin-top:2px;display:block}
+
+/* Main Content Area */
+.main-area{flex:1;display:flex;overflow:hidden;position:relative}
+
+/* Build View */
+.build-view,.sources-view,.knowledge-view{display:none;flex:1;flex-direction:column;overflow:hidden}
+.build-view.active,.sources-view.active,.knowledge-view.active{display:flex}
+
+/* Chat Header */
+.chat-header{flex-shrink:0;padding:10px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:8px}
+.chat-header h2{font-size:13px;font-weight:500;flex-shrink:0}
+.kb-btn{display:flex;align-items:center;gap:6px;padding:6px 12px;border-radius:8px;background:rgba(255,255,255,.04);font-size:10px;color:rgba(255,255,255,.35);transition:all .15s}
+.kb-btn:hover{background:rgba(255,255,255,.07)}
+.kb-btn svg{width:12px;height:12px}
+.chat-actions{display:flex;gap:6px;flex-shrink:0}
+.btn-quick{padding:6px 12px;border-radius:8px;background:rgba(108,99,255,.15);font-size:10px;color:var(--accent);transition:all .15s}
+.btn-quick:hover{background:rgba(108,99,255,.25)}
+.btn-toggle{padding:6px 10px;border-radius:8px;font-size:10px;transition:all .15s}
+.btn-toggle.off{background:rgba(108,99,255,.08);color:var(--accent)}
+.btn-toggle.on{background:rgba(255,255,255,.04);color:rgba(255,255,255,.25)}
+
+/* Chat Messages */
+.chat-area{flex:1;overflow-y:auto;padding:20px 20px}
+.chat-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;text-align:center}
+.chat-empty-icon{width:56px;height:56px;border-radius:16px;background:rgba(255,255,255,.02);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;margin-bottom:16px;color:rgba(255,255,255,.1)}
+.chat-empty-icon svg{width:24px;height:24px}
+.chat-empty h3{font-size:14px;color:rgba(255,255,255,.25);margin-bottom:4px;font-weight:400}
+.steps{display:flex;align-items:center;gap:12px;margin:16px 0 24px}
+.step{display:flex;align-items:center;gap:6px;font-size:9px;color:rgba(255,255,255,.2)}
+.step-num{width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:9px}
+.step-num.active{background:rgba(108,99,255,.15);color:var(--accent)}
+.step-num.dim{background:rgba(255,255,255,.03);color:rgba(255,255,255,.2)}
+.step-arrow{color:rgba(255,255,255,.08)}
+.quick-prompts{width:100%;max-width:320px}
+.quick-prompts p{font-size:9px;color:rgba(255,255,255,.12);margin-bottom:6px}
+.qp{width:100%;text-align:left;padding:8px 12px;border-radius:8px;background:rgba(255,255,255,.02);border:1px solid var(--line);font-size:11px;color:rgba(255,255,255,.3);margin-bottom:4px;transition:all .15s}
+.qp:hover{color:rgba(255,255,255,.5);background:rgba(255,255,255,.04)}
+
+.msg{display:flex;margin-bottom:12px}
+.msg.user{justify-content:flex-end}
+.msg.assistant{justify-content:flex-start}
+.msg-bubble{max-width:85%;padding:10px 14px;border-radius:12px;font-size:12px;line-height:1.7;white-space:pre-wrap}
+.msg.user .msg-bubble{background:var(--accent);color:#fff}
+.msg.assistant .msg-bubble{background:rgba(255,255,255,.035);color:rgba(255,255,255,.6)}
+.typing{display:flex;gap:4px;padding:12px 16px;border-radius:12px;background:rgba(255,255,255,.035)}
+.typing-dot{width:6px;height:6px;border-radius:50%;background:rgba(255,255,255,.15);animation:pulse .8s ease-in-out infinite}
+.typing-dot:nth-child(2){animation-delay:.15s}
+.typing-dot:nth-child(3){animation-delay:.3s}
+@keyframes pulse{0%,100%{opacity:.3}50%{opacity:1}}
+
+/* Chat Input */
+.chat-input{flex-shrink:0;padding:12px 20px;border-top:1px solid var(--line);display:flex;gap:8px}
+.chat-input input{flex:1;padding:10px 16px;border-radius:12px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.06);font-size:12px;color:var(--text);transition:border-color .15s}
+.chat-input input::placeholder{color:rgba(255,255,255,.15)}
+.chat-input input:focus{border-color:rgba(108,99,255,.4)}
+.btn-send{width:40px;height:40px;border-radius:12px;background:var(--accent);display:flex;align-items:center;justify-content:center;transition:all .15s}
+.btn-send:hover{filter:brightness(1.15)}
+.btn-send svg{width:16px;height:16px;color:#fff}
+
+/* Preview Panel */
+.preview-divider{width:4px;flex-shrink:0;background:rgba(255,255,255,.03);cursor:col-resize;transition:background .15s}
+.preview-divider:hover{background:rgba(108,99,255,.25)}
+.preview-panel{display:flex;flex-direction:column;background:#060606;overflow:hidden}
+.preview-chrome{flex-shrink:0;display:flex;align-items:center;gap:8px;padding:8px 12px;background:rgba(255,255,255,.015);border-bottom:1px solid var(--line)}
+.traffic{display:flex;gap:4px}
+.traffic span{width:10px;height:10px;border-radius:50%}
+.traffic .r{background:rgba(248,113,113,.45)}
+.traffic .y{background:rgba(251,191,36,.45)}
+.traffic .g{background:rgba(74,222,128,.45)}
+.preview-url{flex:1;padding:3px 8px;border-radius:4px;background:rgba(255,255,255,.03);font-size:10px;color:rgba(255,255,255,.2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.preview-btn{padding:4px 8px;border-radius:4px;font-size:9px;color:rgba(255,255,255,.2);background:rgba(255,255,255,.03);transition:all .15s}
+.preview-btn:hover{background:rgba(255,255,255,.06);color:rgba(255,255,255,.4)}
+.preview-content{flex:1;overflow:hidden;background:#fafafa}
+.preview-mock{padding:40px 32px;font-family:var(--font);color:#1a1a2e}
+.preview-mock h1{font-size:28px;font-weight:700;margin-bottom:4px;color:#111}
+.preview-mock .subtitle{font-size:14px;color:#666;margin-bottom:32px}
+.preview-mock .proj-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:32px}
+.preview-mock .proj{border-radius:8px;background:#f0f0f5;height:120px;display:flex;align-items:flex-end;padding:12px}
+.preview-mock .proj span{font-size:11px;color:#555;font-weight:500}
+.preview-mock .skills-row{display:flex;gap:6px;flex-wrap:wrap}
+.preview-mock .skill-tag{padding:4px 10px;border-radius:6px;background:#ebebf0;font-size:11px;color:#555}
+
+/* Sources View */
+.view-header{flex-shrink:0;padding:16px 24px;border-bottom:1px solid var(--line)}
+.view-header h2{font-size:17px;font-weight:600}
+.view-header p{font-size:12px;color:rgba(255,255,255,.2);margin-top:4px}
+.view-scroll{flex:1;overflow-y:auto;padding:24px}
+.view-inner{max-width:680px;margin:0 auto}
+.upload-zone{border:2px dashed rgba(255,255,255,.07);border-radius:16px;padding:32px;text-align:center;cursor:pointer;transition:all .2s}
+.upload-zone:hover{border-color:rgba(255,255,255,.14)}
+.upload-icon{width:48px;height:48px;border-radius:12px;background:rgba(255,255,255,.03);display:flex;align-items:center;justify-content:center;margin:0 auto 12px;color:rgba(255,255,255,.15)}
+.upload-zone p{font-size:13px;color:rgba(255,255,255,.35)}
+.upload-zone .hint{font-size:10px;color:rgba(255,255,255,.12);margin-top:4px}
+.url-row{display:flex;align-items:center;gap:8px;margin-top:24px}
+.url-label{font-size:10px;color:rgba(255,255,255,.15);flex-shrink:0}
+.url-btn{display:flex;align-items:center;gap:6px;padding:8px 12px;border-radius:8px;font-size:12px;transition:all .15s}
+.url-btn.off{background:rgba(255,255,255,.02);color:rgba(255,255,255,.35);border:1px solid transparent}
+.url-btn.on{background:rgba(108,99,255,.12);color:var(--accent);border:1px solid rgba(108,99,255,.2)}
+.source-card{display:flex;align-items:center;gap:12px;padding:16px;border-radius:12px;background:rgba(255,255,255,.015);border:1px solid var(--line);margin-top:8px}
+.source-card .icon{font-size:18px}
+.source-card .info{flex:1}
+.source-card .name{font-size:13px;color:rgba(255,255,255,.5)}
+.source-card .status{font-size:11px}
+.source-card .status.done{color:var(--green)}
+.source-card .status.analyzing{color:var(--accent)}
+.spinner{width:20px;height:20px;border:2px solid rgba(108,99,255,.2);border-top-color:var(--accent);border-radius:50%;animation:spin .6s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.pending-box{margin-top:24px;border-radius:12px;border:1px solid rgba(108,99,255,.15);background:rgba(108,99,255,.04);padding:20px}
+.pending-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
+.pending-head h3{font-size:13px;font-weight:500}
+.pending-actions{display:flex;gap:8px}
+.btn-discard{padding:6px 12px;border-radius:8px;background:rgba(255,255,255,.04);font-size:12px;color:rgba(255,255,255,.35)}
+.btn-save{padding:6px 16px;border-radius:8px;background:var(--accent);font-size:12px;color:#fff}
+.pending-item{display:flex;align-items:flex-start;gap:8px;padding:8px;border-radius:8px;margin-bottom:4px}
+.pending-item.sel{background:rgba(255,255,255,.02)}
+.pending-item.unsel{opacity:.3}
+.check{width:16px;height:16px;border-radius:4px;border:1px solid rgba(255,255,255,.15);flex-shrink:0;margin-top:2px;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:all .15s}
+.check.on{background:var(--accent);border-color:var(--accent)}
+.check svg{width:10px;height:10px;color:#fff}
+.cat-badge{font-size:8px;padding:2px 6px;border-radius:4px;flex-shrink:0}
+.cat-factual{background:rgba(96,165,250,.15);color:#60a5fa}
+.cat-skills{background:rgba(251,191,36,.15);color:#fbbf24}
+.cat-experience{background:rgba(74,222,128,.15);color:#4ade80}
+.cat-relational{background:rgba(168,85,247,.15);color:#a855f7}
+.cat-media{background:rgba(236,72,153,.15);color:#ec4899}
+.cat-opinion{background:rgba(251,146,60,.15);color:#fb923c}
+.cat-meta{background:rgba(34,211,238,.15);color:#22d3ee}
+
+/* Knowledge View */
+.kb-header{flex-shrink:0;padding:16px 24px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:16px}
+.kb-header h2{font-size:17px;font-weight:600}
+.kb-header .sub{font-size:12px;color:rgba(255,255,255,.2);margin-top:2px}
+.kb-tools{display:flex;gap:8px;align-items:center}
+.kb-search{padding:6px 12px;border-radius:8px;background:rgba(255,255,255,.04);border:1px solid var(--line);font-size:12px;width:192px;color:var(--text);transition:border-color .15s}
+.kb-search::placeholder{color:rgba(255,255,255,.15)}
+.kb-search:focus{border-color:rgba(108,99,255,.4)}
+.source-group{border-radius:12px;border:1px solid var(--line);overflow:hidden;margin-bottom:24px}
+.source-group-head{padding:16px 20px;background:rgba(255,255,255,.015);border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px}
+.check-lg{width:20px;height:20px;border-radius:4px}
+.source-group-info{flex:1}
+.source-group-info h3{font-size:13px;font-weight:600;color:rgba(255,255,255,.6)}
+.source-group-info .stats{display:flex;gap:8px;margin-top:4px;align-items:center;font-size:10px;color:rgba(255,255,255,.2)}
+.source-group-info .summary{font-size:10px;color:rgba(255,255,255,.15);margin-top:8px;line-height:1.5}
+.kb-items{padding:12px;display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+.kb-item{padding:12px;border-radius:8px;transition:all .15s}
+.kb-item.sel{background:rgba(255,255,255,.015)}
+.kb-item.unsel{opacity:.3}
+.kb-item-head{display:flex;align-items:center;gap:4px;margin-bottom:4px}
+.kb-item-title{flex:1;font-size:11px;font-weight:500;color:rgba(255,255,255,.5);background:transparent;border:none;outline:none}
+.kb-item-content{width:100%;font-size:10px;color:rgba(255,255,255,.2);line-height:1.5;background:transparent;border:none;outline:none;resize:none}
+.check-sm{width:14px;height:14px;border-radius:3px}
+
+/* Knowledge Dropdown */
+.kb-dropdown{position:absolute;top:100%;left:0;margin-top:4px;width:288px;max-height:320px;border-radius:12px;background:#111;border:1px solid rgba(255,255,255,.08);box-shadow:0 16px 48px rgba(0,0,0,.5);z-index:50;overflow:hidden;display:none}
+.kb-dropdown.open{display:block}
+.kb-dropdown-head{padding:12px;border-bottom:1px solid var(--line)}
+.kb-dropdown-head p{font-size:10px;color:rgba(255,255,255,.25)}
+.kb-dropdown-list{overflow-y:auto;max-height:240px;padding:8px}
+.kb-dropdown-item{width:100%;display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:8px;text-align:left;transition:all .15s}
+.kb-dropdown-item:hover{background:rgba(255,255,255,.03)}
+.kb-dropdown-item.selected{background:rgba(108,99,255,.08)}
+.kb-dropdown-item .meta{flex:1;min-width:0}
+.kb-dropdown-item .meta p{font-size:10px;color:rgba(255,255,255,.5);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.kb-dropdown-item .meta .cnt{font-size:8px;color:rgba(255,255,255,.15)}
+</style>
+</head>
+<body>
+
+<!-- ═══ NAVBAR ═══ -->
+<nav class="nav">
+  <span class="nav-logo">CreateAnySite</span>
+  <div class="nav-links">
+    <div class="page-tabs">
+      <button class="page-tab active" onclick="showPage('landing')">首页</button>
+      <button class="page-tab" onclick="showPage('dashboard')">仪表盘</button>
+      <button class="page-tab" onclick="showPage('create')">创建</button>
+    </div>
+    <span class="nav-link">模板</span>
+    <div class="nav-avatar">M</div>
+    <span class="nav-link" style="font-size:11px;color:rgba(255,255,255,.3)">退出</span>
+  </div>
+</nav>
+
+<!-- ═══ LANDING ═══ -->
+<div id="page-landing" class="page active">
+  <div class="orbs"><div class="orb orb-1"></div><div class="orb orb-2"></div><div class="orb orb-3"></div></div>
+  <div class="page-content">
+    <div class="hero">
+      <span class="hero-badge">AI 驱动的知识建站平台</span>
+      <h1>从知识到网站<br><span class="hl">AI 驱动</span>的建站体验</h1>
+      <p>上传你的简历、GitHub、作品集等数据源，AI 自动提取知识，通过对话生成专业网站</p>
+      <div class="hero-btns">
+        <button class="btn-primary" onclick="showPage('create')">开始创建</button>
+        <button class="btn-ghost">浏览模板</button>
+      </div>
+    </div>
+    <div class="features">
+      <div class="feat-card">
+        <div class="feat-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/></svg></div>
+        <h3>知识驱动</h3>
+        <p>从多种数据源自动提取结构化知识，不再手动填写内容</p>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M13 10V3L4 14h7v7l9-11h-7z"/></svg></div>
+        <h3>AI Skill 系统</h3>
+        <p>渐进式调用设计技能，从排版到打磨，每一步都有专业指导</p>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064"/></svg></div>
+        <h3>一键导出</h3>
+        <p>生成独立的静态 HTML，下载即用，无需技术背景</p>
+      </div>
+    </div>
+    <div class="site-types">
+      <h2>支持多种网站类型</h2>
+      <p>无论个人还是企业，都能找到适合的方案</p>
+      <div class="type-grid">
+        <div class="type-pill">Portfolio</div><div class="type-pill">Brand Site</div>
+        <div class="type-pill">Blog</div><div class="type-pill">Landing Page</div>
+        <div class="type-pill">SaaS</div><div class="type-pill">E-commerce</div>
+        <div class="type-pill">Event Page</div><div class="type-pill">Docs Site</div>
+      </div>
+    </div>
+    <div class="landing-footer"><span>CreateAnySite</span><span>Built with AI</span></div>
+  </div>
+</div>
+
+<!-- ═══ DASHBOARD ═══ -->
+<div id="page-dashboard" class="page">
+  <div class="orbs"><div class="orb orb-1"></div><div class="orb orb-2"></div></div>
+  <div class="page-content">
+    <div class="dash">
+      <div class="dash-header">
+        <div><h1>我的网站</h1><p class="sub">3 个网站</p></div>
+        <button class="btn-primary" onclick="showPage('create')" style="padding:10px 20px;font-size:13px">
+          <span style="margin-right:6px">+</span>新建网站
+        </button>
+      </div>
+      <div class="dash-grid">
+        <div class="site-card">
+          <div class="site-card-head"><h3>My Portfolio</h3><span class="badge badge-draft">draft</span></div>
+          <div class="site-card-meta"><span>Minimalist</span><span>portfolio</span></div>
+          <div class="site-card-foot"><span class="date">2026-03-20</span><button class="btn-sm" onclick="showPage('create')">继续编辑</button></div>
+        </div>
+        <div class="site-card">
+          <div class="site-card-head"><h3>Tech Blog</h3><span class="badge badge-published">published</span></div>
+          <div class="site-card-meta"><span>Editorial</span><span>blog</span></div>
+          <div class="site-card-foot"><span class="date">2026-03-18</span><button class="btn-sm">继续编辑</button></div>
+        </div>
+        <div class="site-card">
+          <div class="site-card-head"><h3>Brand Site</h3><span class="badge badge-draft">draft</span></div>
+          <div class="site-card-meta"><span>Glassmorphism</span><span>brand</span></div>
+          <div class="site-card-foot"><span class="date">2026-03-15</span><button class="btn-sm">继续编辑</button></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ CREATE PAGE ═══ -->
+<div id="page-create" class="create-page">
+  <div class="create-body">
+    <!-- Sidebar -->
+    <div class="sidebar" id="sidebar">
+      <div class="sidebar-top">
+        <button class="btn-icon" onclick="toggleSidebar()" id="sidebar-toggle">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 5l7 7-7 7"/></svg>
+        </button>
+        <button class="btn-new">+ 新对话</button>
+      </div>
+      <div class="sidebar-nav" id="sidebar-nav">
+        <button class="nav-item active" onclick="switchView('build',this)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+          <span>构建</span>
+          <span class="badge-dot" style="display:none">0</span>
+        </button>
+        <button class="nav-item" onclick="switchView('sources',this)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
+          <span>数据源</span>
+        </button>
+        <button class="nav-item" onclick="switchView('knowledge',this)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/></svg>
+          <span>知识库</span>
+          <span class="nav-badge">15</span>
+          <span class="badge-dot" style="display:none">15</span>
+        </button>
+      </div>
+      <div class="sidebar-history" id="sidebar-history">
+        <div class="sidebar-label">对话记录</div>
+        <button class="history-item active"><span class="title">极简风格个人网站</span><span class="date">2026-03-23 · 🌐</span></button>
+        <button class="history-item"><span class="title">技术博客设计方案</span><span class="date">2026-03-21</span></button>
+        <button class="history-item"><span class="title">品牌官网探索</span><span class="date">2026-03-19</span></button>
+      </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="main-area">
+      <!-- BUILD VIEW -->
+      <div class="build-view active" id="view-build" style="flex:1">
+        <div class="chat-header">
+          <div style="display:flex;align-items:center;gap:8px;min-width:0">
+            <h2>构建</h2>
+            <div style="position:relative">
+              <button class="kb-btn" onclick="toggleKBDropdown()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/></svg>
+                知识库 (12/15)
+                <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 9l-7 7-7-7"/></svg>
+              </button>
+              <div class="kb-dropdown" id="kb-dropdown">
+                <div class="kb-dropdown-head"><p>选择构建时使用的知识来源</p></div>
+                <div class="kb-dropdown-list">
+                  <button class="kb-dropdown-item selected">
+                    <div class="check on" style="width:16px;height:16px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 13l4 4L19 7"/></svg></div>
+                    <span>📄</span>
+                    <div class="meta"><p>demo-resume.pdf</p><p class="cnt">8/10 条</p></div>
+                  </button>
+                  <button class="kb-dropdown-item selected">
+                    <div class="check on" style="width:16px;height:16px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 13l4 4L19 7"/></svg></div>
+                    <span>🔀</span>
+                    <div class="meta"><p>github.com/user/repo</p><p class="cnt">4/5 条</p></div>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="chat-actions">
+            <button class="btn-quick">⚡ 快速生成</button>
+            <button class="btn-toggle off" id="preview-toggle" onclick="togglePreview()">显示预览</button>
+          </div>
+        </div>
+        <div class="chat-area" id="chat-area" onclick="closeKBDropdown()">
+          <div class="msg user"><div class="msg-bubble">帮我搭建一个个人作品集网站，极简风格</div></div>
+          <div class="msg assistant"><div class="msg-bubble">好的！我分析了你的知识库，发现你有丰富的前端开发经验和 6 个项目。建议方案：
+
+📋 网站类型：Portfolio
+🎨 风格：Minimalist
+📐 布局：F-Shape
+
+我还发现了 2 个相关技能可以提升效果：
+• Typography Optimization — 你有大量技术内容，需要排版优化
+• Polish — 最终打磨确保像素级完美
+
+要激活这些技能吗？确认后我开始编译 Spec。</div></div>
+          <div class="msg user"><div class="msg-bubble">好的，激活</div></div>
+          <div class="msg assistant"><div class="msg-bubble">已激活 2 个技能 ✓
+
+正在编译 Site Spec...
+✅ 身份信息：已从知识库提取（覆盖率 90%）
+✅ 项目列表：6 个项目
+✅ 技能展示：3 个技能分组
+✅ 工作经历：2 段经历
+⚠️ 缺失：个人头像、项目截图
+
+Spec 编译完成。要查看完整 Spec 还是直接生成？</div></div>
+          <div class="msg user"><div class="msg-bubble">直接生成</div></div>
+        </div>
+        <div class="chat-input">
+          <input type="text" id="chat-input-field" placeholder="描述你的需求..." onkeydown="if(event.key==='Enter')sendMessage()">
+          <button class="btn-send" onclick="sendMessage()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/></svg></button>
+        </div>
+      </div>
+
+      <!-- PREVIEW PANEL (hidden by default) -->
+      <div class="preview-divider" id="preview-divider" style="display:none" onmousedown="startDrag(event)"></div>
+      <div class="preview-panel" id="preview-panel" style="display:none;width:50%">
+        <div class="preview-chrome">
+          <div class="traffic"><span class="r"></span><span class="y"></span><span class="g"></span></div>
+          <div class="preview-url">localhost:3001</div>
+          <button class="preview-btn">重新生成</button>
+          <button class="preview-btn">↗ 新窗口</button>
+        </div>
+        <div class="preview-content">
+          <div class="preview-mock">
+            <h1>张三</h1>
+            <p class="subtitle">全栈工程师 · 北京</p>
+            <div class="proj-grid">
+              <div class="proj"><span>知识库引擎</span></div>
+              <div class="proj"><span>AI 建站平台</span></div>
+              <div class="proj"><span>数据可视化</span></div>
+            </div>
+            <div class="skills-row">
+              <span class="skill-tag">React</span><span class="skill-tag">TypeScript</span>
+              <span class="skill-tag">Python</span><span class="skill-tag">Next.js</span>
+              <span class="skill-tag">PostgreSQL</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- SOURCES VIEW -->
+      <div class="sources-view" id="view-sources">
+        <div class="view-header"><h2>数据源管理</h2><p>上传文件或添加链接，AI 将分析内容并提取知识</p></div>
+        <div class="view-scroll">
+          <div class="view-inner">
+            <div class="upload-zone">
+              <div class="upload-icon"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg></div>
+              <p>拖拽文件到此处，或点击上传</p>
+              <p class="hint">支持 PDF、ZIP 文件</p>
+            </div>
+            <div class="url-row">
+              <span class="url-label">或添加链接：</span>
+              <button class="url-btn off">🔀 Git Repo</button>
+              <button class="url-btn off">📺 Bilibili</button>
+              <button class="url-btn off">▶️ YouTube</button>
+            </div>
+            <div style="margin-top:24px">
+              <div class="source-card"><span class="icon">📄</span><div class="info"><p class="name">demo-resume.pdf</p><p class="status done">✅ 已完成</p></div></div>
+              <div class="source-card"><span class="icon">🔀</span><div class="info"><p class="name">github.com/user/repo</p><p class="status analyzing">分析中...</p></div><div class="spinner"></div></div>
+            </div>
+            <div class="pending-box">
+              <div class="pending-head">
+                <h3>解析完成 — 8 条待保存</h3>
+                <div class="pending-actions"><button class="btn-discard">丢弃</button><button class="btn-save">保存到知识库</button></div>
+              </div>
+              <div class="pending-item sel"><div class="check on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 13l4 4L19 7"/></svg></div><div style="flex:1;min-width:0"><p style="font-size:12px;color:rgba(255,255,255,.5)">张三 — 个人基本信息</p><p style="font-size:10px;color:rgba(255,255,255,.2);margin-top:2px">姓名：张三，全栈工程师，北京</p></div><span class="cat-badge cat-factual">📋</span></div>
+              <div class="pending-item sel"><div class="check on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 13l4 4L19 7"/></svg></div><div style="flex:1;min-width:0"><p style="font-size:12px;color:rgba(255,255,255,.5)">前端技能</p><p style="font-size:10px;color:rgba(255,255,255,.2);margin-top:2px">React, TypeScript, Next.js, Vue</p></div><span class="cat-badge cat-skills">⚡</span></div>
+              <div class="pending-item sel"><div class="check on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 13l4 4L19 7"/></svg></div><div style="flex:1;min-width:0"><p style="font-size:12px;color:rgba(255,255,255,.5)">高级工程师 @ 某科技公司</p><p style="font-size:10px;color:rgba(255,255,255,.2);margin-top:2px">2022-至今，负责前端架构设计</p></div><span class="cat-badge cat-experience">📁</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- KNOWLEDGE VIEW -->
+      <div class="knowledge-view" id="view-knowledge">
+        <div class="kb-header">
+          <div><h2>知识库</h2><p class="sub">12/15 条已选中用于构建</p></div>
+          <div class="kb-tools">
+            <input class="kb-search" placeholder="搜索知识...">
+            <button class="btn-quick" style="background:rgba(255,255,255,.04);color:rgba(255,255,255,.25)">全部选择</button>
+          </div>
+        </div>
+        <div class="view-scroll">
+          <div style="max-width:860px;margin:0 auto">
+            <!-- Source Group 1 -->
+            <div class="source-group">
+              <div class="source-group-head">
+                <div class="check check-lg on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 13l4 4L19 7"/></svg></div>
+                <span style="font-size:20px">📄</span>
+                <div class="source-group-info">
+                  <h3>demo-resume.pdf</h3>
+                  <div class="stats">
+                    <span>8/10 条已选</span><span style="color:rgba(255,255,255,.1)">·</span>
+                    <span class="cat-badge cat-factual">📋 3</span>
+                    <span class="cat-badge cat-skills">⚡ 2</span>
+                    <span class="cat-badge cat-experience">📁 3</span>
+                    <span class="cat-badge cat-media">🖼️ 1</span>
+                    <span class="cat-badge cat-meta">🏷️ 1</span>
+                  </div>
+                  <p class="summary">来源类型：PDF | 包含 事实性知识 3条、技能性知识 2条、经历性知识 3条、媒体资源 1条、元信息 1条</p>
+                </div>
+              </div>
+              <div class="kb-items">
+                <div class="kb-item sel"><div style="display:flex;align-items:flex-start;gap:8px"><div class="check check-sm on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 13l4 4L19 7"/></svg></div><div style="flex:1"><div class="kb-item-head"><span class="cat-badge cat-factual">📋</span><input class="kb-item-title" value="张三 — 基本信息"></div><textarea class="kb-item-content" rows="2">姓名：张三，全栈工程师，北京，zhangsan@email.com</textarea></div></div></div>
+                <div class="kb-item sel"><div style="display:flex;align-items:flex-start;gap:8px"><div class="check check-sm on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 13l4 4L19 7"/></svg></div><div style="flex:1"><div class="kb-item-head"><span class="cat-badge cat-skills">⚡</span><input class="kb-item-title" value="前端技术栈"></div><textarea class="kb-item-content" rows="2">React, TypeScript, Next.js, Vue, Tailwind CSS</textarea></div></div></div>
+                <div class="kb-item sel"><div style="display:flex;align-items:flex-start;gap:8px"><div class="check check-sm on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 13l4 4L19 7"/></svg></div><div style="flex:1"><div class="kb-item-head"><span class="cat-badge cat-experience">📁</span><input class="kb-item-title" value="高级工程师 @ 某科技公司"></div><textarea class="kb-item-content" rows="2">2022-至今，负责前端架构设计和团队管理</textarea></div></div></div>
+                <div class="kb-item sel"><div style="display:flex;align-items:flex-start;gap:8px"><div class="check check-sm on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 13l4 4L19 7"/></svg></div><div style="flex:1"><div class="kb-item-head"><span class="cat-badge cat-meta">🏷️</span><input class="kb-item-title" value="整体概况"></div><textarea class="kb-item-content" rows="2">5年经验的全栈工程师，专注前端架构和 AI 应用</textarea></div></div></div>
+              </div>
+            </div>
+            <!-- Source Group 2 -->
+            <div class="source-group">
+              <div class="source-group-head">
+                <div class="check check-lg on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 13l4 4L19 7"/></svg></div>
+                <span style="font-size:20px">🔀</span>
+                <div class="source-group-info">
+                  <h3>github.com/user/repo</h3>
+                  <div class="stats">
+                    <span>4/5 条已选</span><span style="color:rgba(255,255,255,.1)">·</span>
+                    <span class="cat-badge cat-factual">📋 1</span>
+                    <span class="cat-badge cat-skills">⚡ 2</span>
+                    <span class="cat-badge cat-experience">📁 1</span>
+                    <span class="cat-badge cat-meta">🏷️ 1</span>
+                  </div>
+                </div>
+              </div>
+              <div class="kb-items">
+                <div class="kb-item sel"><div style="display:flex;align-items:flex-start;gap:8px"><div class="check check-sm on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 13l4 4L19 7"/></svg></div><div style="flex:1"><div class="kb-item-head"><span class="cat-badge cat-factual">📋</span><input class="kb-item-title" value="Repo: create-any-portfolio"></div><textarea class="kb-item-content" rows="2">AI 驱动的个人网站生成器，Stars: 128</textarea></div></div></div>
+                <div class="kb-item sel"><div style="display:flex;align-items:flex-start;gap:8px"><div class="check check-sm on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 13l4 4L19 7"/></svg></div><div style="flex:1"><div class="kb-item-head"><span class="cat-badge cat-skills">⚡</span><input class="kb-item-title" value="技术栈: TypeScript + Next.js"></div><textarea class="kb-item-content" rows="2">主要语言 TypeScript 92%, CSS 5%</textarea></div></div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── Page Navigation ──
+function showPage(name) {
+  document.querySelectorAll('.page, .create-page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.page-tab').forEach(t => t.classList.remove('active'));
+
+  const target = document.getElementById('page-' + name);
+  if (target) target.classList.add('active');
+
+  const tabs = document.querySelectorAll('.page-tab');
+  const idx = {landing:0, dashboard:1, create:2}[name] ?? 0;
+  if (tabs[idx]) tabs[idx].classList.add('active');
+}
+
+// ── Sidebar ──
+function toggleSidebar() {
+  const sb = document.getElementById('sidebar');
+  sb.classList.toggle('collapsed');
+  const toggle = document.getElementById('sidebar-toggle');
+  toggle.querySelector('svg').style.transform = sb.classList.contains('collapsed') ? '' : 'rotate(180deg)';
+}
+
+// ── View Switching ──
+function switchView(name, btn) {
+  document.querySelectorAll('.build-view,.sources-view,.knowledge-view').forEach(v => v.classList.remove('active'));
+  document.getElementById('view-' + name).classList.add('active');
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+
+  // Hide preview for non-build views
+  if (name !== 'build') {
+    document.getElementById('preview-panel').style.display = 'none';
+    document.getElementById('preview-divider').style.display = 'none';
+  }
+}
+
+// ── Knowledge Dropdown ──
+function toggleKBDropdown() {
+  document.getElementById('kb-dropdown').classList.toggle('open');
+}
+function closeKBDropdown() {
+  document.getElementById('kb-dropdown').classList.remove('open');
+}
+
+// ── Preview Toggle ──
+function togglePreview() {
+  const panel = document.getElementById('preview-panel');
+  const divider = document.getElementById('preview-divider');
+  const btn = document.getElementById('preview-toggle');
+  const buildView = document.getElementById('view-build');
+
+  if (panel.style.display === 'none') {
+    panel.style.display = 'flex';
+    divider.style.display = 'block';
+    btn.textContent = '隐藏预览';
+    btn.className = 'btn-toggle on';
+  } else {
+    panel.style.display = 'none';
+    divider.style.display = 'none';
+    btn.textContent = '显示预览';
+    btn.className = 'btn-toggle off';
+  }
+}
+
+// ── Chat ──
+function sendMessage() {
+  const input = document.getElementById('chat-input-field');
+  const msg = input.value.trim();
+  if (!msg) return;
+
+  const area = document.getElementById('chat-area');
+
+  // Add user message
+  const userDiv = document.createElement('div');
+  userDiv.className = 'msg user';
+  userDiv.innerHTML = `<div class="msg-bubble">${msg}</div>`;
+  area.appendChild(userDiv);
+  input.value = '';
+
+  // Add typing indicator
+  const typingDiv = document.createElement('div');
+  typingDiv.className = 'msg assistant';
+  typingDiv.id = 'typing';
+  typingDiv.innerHTML = '<div class="typing"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div>';
+  area.appendChild(typingDiv);
+  area.scrollTop = area.scrollHeight;
+
+  // Simulate AI response
+  setTimeout(() => {
+    typingDiv.remove();
+    const aiDiv = document.createElement('div');
+    aiDiv.className = 'msg assistant';
+    aiDiv.innerHTML = '<div class="msg-bubble">好的，我来帮你处理。让我分析一下知识库中的相关内容...</div>';
+    area.appendChild(aiDiv);
+    area.scrollTop = area.scrollHeight;
+  }, 1500);
+}
+
+// ── Draggable Divider ──
+let dragging = false;
+function startDrag(e) {
+  dragging = true;
+  document.body.style.cursor = 'col-resize';
+  document.body.style.userSelect = 'none';
+  e.preventDefault();
+}
+document.addEventListener('mousemove', e => {
+  if (!dragging) return;
+  const body = document.querySelector('.create-body');
+  const rect = body.getBoundingClientRect();
+  const sb = document.getElementById('sidebar');
+  const sbW = sb.classList.contains('collapsed') ? 56 : 224;
+  const pct = Math.min(75, Math.max(25, ((e.clientX - rect.left - sbW) / (rect.width - sbW)) * 100));
+  document.getElementById('view-build').style.flex = '0 0 ' + pct + '%';
+  document.getElementById('preview-panel').style.width = (100 - pct) + '%';
+});
+document.addEventListener('mouseup', () => {
+  dragging = false;
+  document.body.style.cursor = '';
+  document.body.style.userSelect = '';
+});
+
+// ── Click outside to close dropdown ──
+document.addEventListener('click', e => {
+  const dropdown = document.getElementById('kb-dropdown');
+  const btn = e.target.closest('.kb-btn');
+  if (!btn && !e.target.closest('.kb-dropdown')) {
+    dropdown.classList.remove('open');
+  }
+});
+</script>
+</body>
+</html>

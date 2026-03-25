@@ -59,6 +59,8 @@ export const sites = sqliteTable("sites", {
   publishedUrl: text("published_url"),
   templateId: text("template_id"),
   editorState: text("editor_state"),      // JSON
+  prd: text("prd"),                       // Current PRD JSON
+  prdHistory: text("prd_history"),        // JSON array of {version, prd, createdAt, note}
   createdAt: text("created_at").$defaultFn(() => new Date().toISOString()),
   updatedAt: text("updated_at").$defaultFn(() => new Date().toISOString()),
 });

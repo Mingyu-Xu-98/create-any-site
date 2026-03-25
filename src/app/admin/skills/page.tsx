@@ -83,7 +83,7 @@ export default function SkillsAdminPage() {
     layout: "bg-amber-500/20 text-amber-400",
     interaction: "bg-pink-500/20 text-pink-400",
     seo: "bg-green-500/20 text-green-400",
-    other: "bg-white/10 text-white/50",
+    other: "bg-gray-100 text-gray-500",
   };
 
   return (
@@ -95,7 +95,7 @@ export default function SkillsAdminPage() {
       <Navbar />
 
       <div className="relative z-10 max-w-6xl mx-auto px-6 pt-24 pb-12">
-        <Link href="/admin" className="inline-flex items-center gap-1.5 text-xs text-white/30 hover:text-white/60 transition-colors mb-4">
+        <Link href="/admin" className="inline-flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-600 transition-colors mb-4">
           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
           {zh ? "返回管理后台" : "Back to Admin"}
         </Link>
@@ -125,7 +125,7 @@ export default function SkillsAdminPage() {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search skills..."
-              className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-accent/50"
+              className="w-full px-4 py-2.5 rounded-xl bg-gray-100 border border-gray-200 text-sm text-gray-900 placeholder:text-gray-500 focus:outline-none focus:border-accent/50"
             />
           </div>
           <div className="flex gap-1.5">
@@ -136,7 +136,7 @@ export default function SkillsAdminPage() {
                 className={`px-3 py-1.5 rounded-lg text-xs transition-all ${
                   category === c.value
                     ? "bg-accent text-white"
-                    : "bg-white/5 text-white/50 hover:bg-white/10"
+                    : "bg-gray-100 text-gray-500 hover:bg-gray-100"
                 }`}
               >
                 {c.label}
@@ -149,18 +149,18 @@ export default function SkillsAdminPage() {
         {loading ? (
           <div className="space-y-3">
             {[1, 2, 3].map((i) => (
-              <div key={i} className="h-20 rounded-xl bg-white/5 animate-pulse" />
+              <div key={i} className="h-20 rounded-xl bg-gray-100 animate-pulse" />
             ))}
           </div>
         ) : skills.length === 0 ? (
           <div className="text-center py-20">
-            <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-white/5 flex items-center justify-center">
-              <svg className="w-7 h-7 text-white/20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-gray-100 flex items-center justify-center">
+              <svg className="w-7 h-7 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
               </svg>
             </div>
-            <h3 className="text-lg font-medium text-white/60">No skills yet</h3>
-            <p className="text-sm text-white/30 mt-1">Add your first skill to enhance site generation</p>
+            <h3 className="text-lg font-medium text-gray-600">No skills yet</h3>
+            <p className="text-sm text-gray-500 mt-1">Add your first skill to enhance site generation</p>
           </div>
         ) : (
           <div className="space-y-2">
@@ -172,13 +172,13 @@ export default function SkillsAdminPage() {
               return (
                 <div
                   key={skill.id}
-                  className="flex items-center gap-4 p-4 rounded-xl bg-white/[0.03] border border-white/5 hover:border-white/10 transition-all group"
+                  className="flex items-center gap-4 p-4 rounded-xl bg-white border border-gray-200 hover:border-gray-200 transition-all group"
                 >
                   {/* Toggle */}
                   <button
                     onClick={() => toggleEnabled(skill)}
                     className={`w-10 h-6 rounded-full relative transition-colors ${
-                      skill.enabled ? "bg-accent" : "bg-white/10"
+                      skill.enabled ? "bg-accent" : "bg-gray-100"
                     }`}
                   >
                     <div
@@ -196,11 +196,11 @@ export default function SkillsAdminPage() {
                         {skill.category}
                       </span>
                     </div>
-                    <p className="text-xs text-white/30 mt-0.5 truncate">{skill.description}</p>
+                    <p className="text-xs text-gray-500 mt-0.5 truncate">{skill.description}</p>
                     {siteTypes.length > 0 && (
                       <div className="flex gap-1 mt-1.5">
                         {siteTypes.map((t: string) => (
-                          <span key={t} className="text-[10px] px-1.5 py-0.5 rounded bg-white/5 text-white/30">{t}</span>
+                          <span key={t} className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">{t}</span>
                         ))}
                       </div>
                     )}
@@ -210,7 +210,7 @@ export default function SkillsAdminPage() {
                   <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                     <Link
                       href={`/admin/skills/${skill.id}`}
-                      className="px-3 py-1.5 rounded-lg bg-white/5 text-xs text-white/50 hover:bg-white/10 hover:text-white transition-all"
+                      className="px-3 py-1.5 rounded-lg bg-gray-100 text-xs text-gray-500 hover:bg-gray-100 hover:text-gray-900 transition-all"
                     >
                       Edit
                     </Link>
