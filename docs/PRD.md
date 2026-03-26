@@ -1,684 +1,414 @@
-# CreateAnySite — 产品需求文档 (PRD)
+# CreateAnySite — 产品需求文档
 
-> 版本 2.0 | 2026-03-24 | 架构重构版
+## 1. 项目概述
 
----
+**CreateAnySite** 是一个 AI 驱动的建站平台，用户上传内容（PDF/DOCX/TXT/MD/ZIP/Git/视频链接），AI 分析并提取结构化知识，通过对话式交互生成 PRD，按 PRD 构建完整网站，支持增量修改和静态导出部署。
 
-## 1. 产品概述
-
-### 1.1 定位
-
-CreateAnySite 是一个 **AI 驱动的知识建站 SaaS 平台**。用户上传个人/企业数据源（简历、GitHub、文章等），AI 自动提取结构化知识，通过对话式交互编译出网站 Spec，最终生成高质量静态网站。
-
-### 1.2 核心差异化
-
-| | Squarespace/Wix | Framer | **CreateAnySite** |
-|---|---|---|---|
-| 输入 | 手动拖拽组件 | 设计稿导入 | **知识库自动抽取** |
-| 智能程度 | 模板填空 | AI 辅助设计 | **AI 全链路（分析→设计→生成）** |
-| 设计质量 | 模板化 | 高（手动） | **Skill 系统驱动** |
-| 内容来源 | 手动输入 | 手动输入 | **多源自动提取** |
-
-### 1.3 目标用户
-
-**Phase 1（当前）**：个人开发者、设计师、自由职业者，需要快速搭建作品集/个人网站
-**Phase 2**：小型企业、创业团队，需要品牌官网
-
-### 1.4 核心价值
-
-```
-"从散乱数据到专业网站，你只需要一次对话"
-```
+### 核心定位
+- **目标用户**：需要快速搭建个人/品牌网站的非技术用户和开发者
+- **核心价值**：从"上传内容"到"网站上线"全流程 AI 自动化
+- **技术框架**：Next.js 16 + React 19 + Tailwind CSS 4 + SQLite + SiliconFlow AI
 
 ---
 
-## 2. 系统架构
+## 2. 技术架构
 
-### 2.1 三层架构
+### 2.1 技术栈
+
+| 层级 | 技术 | 用途 |
+|------|------|------|
+| **前端** | Next.js 16 + React 19 | SSR/SSG 页面渲染 |
+| **样式** | Tailwind CSS 4 | 原子化 CSS |
+| **认证** | NextAuth 5 (JWT) | 邮箱密码登录 |
+| **数据库** | SQLite + Drizzle ORM | 用户/站点/知识/对话持久化 |
+| **AI 模型** | SiliconFlow (GLM-5) | 知识提取/对话构建/PRD 生成 |
+| **PDF 解析** | MinerU API | 专业 PDF 文档解析 |
+| **DOCX 解析** | mammoth | Word 文档文本提取 |
+| **Markdown** | react-markdown + remark-gfm | PRD 渲染 |
+| **文件处理** | JSZip | ZIP 解压逐文件解析 |
+| **ID 生成** | nanoid + crypto.randomUUID | 短链接/数据库主键 |
+
+### 2.2 架构图
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                     用户交互层                            │
-│  Landing / Dashboard / Create (Chat+Sources+KB) / Admin  │
-└────────────────────────┬────────────────────────────────┘
-                         │
-┌────────────────────────▼────────────────────────────────┐
-│              Layer 1: 通用知识建模                        │
-│                                                         │
-│  数据源接入        AI 提取           知识存储              │
-│  ┌─────────┐    ┌──────────┐    ┌──────────────┐        │
-│  │PDF/ZIP  │───▶│ 分类标签  │───▶│KnowledgeItem │        │
-│  │Git Repo │    │ 实体识别  │    │  7 categories│        │
-│  │Bilibili │    │ 关联发现  │    │  tags, source│        │
-│  │YouTube  │    └──────────┘    └──────────────┘        │
-│  └─────────┘                                            │
-└────────────────────────┬────────────────────────────────┘
-                         │
-┌────────────────────────▼────────────────────────────────┐
-│              Layer 2: Spec 编译                          │
-│                                                         │
-│  ┌──────────┐  ┌────────────┐  ┌──────────────────┐    │
-│  │知识库选择 │  │ Skill 选择  │  │  Design System   │    │
-│  │+ 用户意图 │─▶│ L0→L1→L2  │─▶│  BM25 查询       │    │
-│  └──────────┘  └────────────┘  └──────────────────┘    │
-│                       │                                  │
-│                       ▼                                  │
-│              ┌─────────────────┐                        │
-│              │    SiteSpec     │                         │
-│              │  product       │                         │
-│              │  identity      │                         │
-│              │  sections[]    │                         │
-│              │  designSystem  │                         │
-│              │  skillPlan     │                         │
-│              │  meta.gaps     │                         │
-│              └─────────────────┘                        │
-└────────────────────────┬────────────────────────────────┘
-                         │
-┌────────────────────────▼────────────────────────────────┐
-│              Layer 3: 代码生成                            │
-│                                                         │
-│  SiteSpec ──▶ 逐 Section 生成 ──▶ Skill 打磨 ──▶ 静态导出│
-│              (注入 Skill 指导)     (polish/audit)  (HTML) │
-└─────────────────────────────────────────────────────────┘
-```
-
-### 2.2 技术栈
-
-| 层 | 技术 | 理由 |
-|---|---|---|
-| 前端 | Next.js 16 + React 19 + Tailwind 4 | App Router, 服务端能力 |
-| 后端 | Next.js API Routes | 全栈统一，部署简单 |
-| 数据库 | SQLite (Drizzle ORM) → PostgreSQL | 开发快，SaaS 阶段迁移 |
-| AI | SiliconFlow → **抽象 Provider** | 支持 Claude/GPT/GLM 切换 |
-| 认证 | NextAuth v5 | 支持 Credentials + OAuth |
-| PDF解析 | MinerU API | 高质量 OCR |
-| 设计系统 | ui-skill BM25 引擎 | 50 色板 + 45 字体 + 36 布局模式 |
-
-### 2.3 AI Provider 抽象
-
-```typescript
-interface AIProvider {
-  id: string;
-  name: string;
-  chat(params: {
-    model: string;
-    messages: Message[];
-    temperature?: number;
-    maxTokens?: number;
-  }): Promise<{ content: string; usage: TokenUsage }>;
-}
-
-// 实现
-class SiliconFlowProvider implements AIProvider { ... }
-class AnthropicProvider implements AIProvider { ... }
-class OpenAIProvider implements AIProvider { ... }
-
-// 配置
-const provider = createProvider(process.env.AI_PROVIDER || "siliconflow");
+┌─────────────────────────────────────────────┐
+│                 前端 (Next.js)               │
+│  Landing | Login | Create | Dashboard | Admin│
+├─────────────────────────────────────────────┤
+│              API Routes (27个)               │
+│  auth | sites | knowledge | conversations   │
+│  chat-build | generate | modify | analyze   │
+├─────────┬───────────┬───────────────────────┤
+│ SQLite  │ SiliconFlow│     MinerU API       │
+│ (本地DB) │  (AI模型)  │   (PDF解析)          │
+├─────────┴───────────┴───────────────────────┤
+│           sites-data/{siteId}/              │
+│       生成的网站文件 + 静态导出 (out/)        │
+└─────────────────────────────────────────────┘
 ```
 
 ---
 
-## 3. 核心流程
+## 3. 数据库设计
 
-### 3.1 用户旅程
-
-```
-注册/登录
-    │
-    ▼
-仪表盘（我的网站列表）
-    │
-    ├── 新建网站 ──▶ Create 页面
-    │                  │
-    │                  ├── 1. 添加数据源（PDF/ZIP/URL）
-    │                  │      └── AI 提取 → 待审核 → 保存到知识库
-    │                  │
-    │                  ├── 2. 整理知识库（选择/编辑/删除）
-    │                  │
-    │                  ├── 3. 对话构建
-    │                  │      ├── AI 推荐类型/风格
-    │                  │      ├── AI 推荐 Skill（渐进披露）
-    │                  │      └── 用户确认 → 编译 Spec
-    │                  │
-    │                  ├── 4. Spec 确认
-    │                  │      ├── 查看 Spec（可编辑）
-    │                  │      └── 查看 gaps（缺失信息）
-    │                  │
-    │                  └── 5. 生成 & 预览
-    │                         ├── 实时预览
-    │                         ├── 对话迭代
-    │                         └── 导出静态 HTML
-    │
-    └── 继续编辑 ──▶ 恢复对话上下文
-```
-
-### 3.2 知识建模流程
+### 3.1 表关系图
 
 ```
-数据源                    AI 提取                    存储
-─────────                ─────────                  ──────
-PDF 文件  ──┐            ┌─ factual (事实)          knowledge_items
-ZIP 压缩包 ─┤  解析文本  │  skills (技能)           ┌─ id
-Git 仓库   ─┤ ────────▶ ├─ experience (经历)  ───▶ ├─ category
-Bilibili   ─┤  AI 分析  │  relational (关联)       ├─ title
-YouTube    ─┘            ├─ media (媒体)            ├─ content
-                         │  opinion (观点)          ├─ sourceId
-                         └─ meta (元信息)           ├─ tags[]
-                                                    └─ selected
+users ─┬── sites ──── conversations
+       ├── knowledgeGroups ── knowledgeItems
+       ├── accounts (OAuth, 预留)
+       └── sessions (JWT)
+
+skills (独立，admin管理)
+templates (独立，admin管理)
 ```
 
-### 3.3 Spec 编译流程
+### 3.2 表结构
 
-```
-Phase 1: 需求理解
-  输入: 用户对话历史
-  输出: siteType, 目标受众, 核心目的
-
-Phase 2: 知识抽取
-  输入: KnowledgeItem[] (选中的)
-  输出: identity, sections[], 每个字段标注 source
-
-Phase 3: Skill 选择 (渐进式)
-  ① 读 Level 0 (所有 skill 描述, ~50字/个)
-  ② 选择相关 skill
-  ③ 加载 Level 1 (选中 skill 的 indexContent)
-  ④ 按需加载 Level 2 (深度参考)
-
-Phase 4: 设计系统
-  输入: 用户风格偏好 + BM25 查询
-  输出: colors, typography, spacing, effects
-
-Phase 5: 组装 Spec JSON
-```
-
-### 3.4 Skill 渐进式调用时序
-
-```
-Chat-Build API 调用:
-  ┌──────────────────────────────────────────────┐
-  │ System Prompt 中注入:                         │
-  │   - 知识库摘要 (≤30K chars)                   │
-  │   - 所有 Skill 描述 (Level 0)                 │
-  │   - 已激活 Skill 的 indexContent (Level 1)     │
-  └──────────────────────────────────────────────┘
-           │
-           ▼
-  AI 响应:
-  ┌─────────────────────────────┐
-  │ 文本回复 + action JSON:      │
-  │                             │
-  │ activate_skills →           │
-  │   前端记住 skillIds         │
-  │   下一轮传入 loadedSkills    │
-  │   后端加载 indexContent      │
-  │                             │
-  │ generate →                  │
-  │   携带 skillIds             │
-  │   触发 compile-spec         │
-  │   进入生成流程               │
-  └─────────────────────────────┘
-```
-
----
-
-## 4. 数据模型
-
-### 4.1 ER 图
-
-```
-users ──────┬──── sites
-  │         │      │
-  │         │      └──── conversations
-  │         │
-  │         └──── knowledge_items
-  │
-  └──────── accounts
-  └──────── sessions
-
-skills (独立，不关联用户)
-templates (独立)
-```
-
-### 4.2 表结构
-
-#### users
+#### users（用户表）
 | 字段 | 类型 | 说明 |
-|---|---|---|
+|------|------|------|
 | id | TEXT PK | UUID |
-| email | TEXT UNIQUE | 登录邮箱 |
-| password | TEXT | bcrypt hash |
-| name | TEXT | 显示名 |
-| role | TEXT | "user" / "admin" |
-| createdAt | TEXT | ISO datetime |
+| name | TEXT | 用户名 |
+| email | TEXT UNIQUE | 邮箱 |
+| password | TEXT | bcrypt 哈希 |
+| role | TEXT | user / admin |
+| image | TEXT | 头像 URL |
+| created_at | TEXT | ISO 时间戳 |
 
-#### knowledge_items
+#### sites（站点表）
 | 字段 | 类型 | 说明 |
-|---|---|---|
+|------|------|------|
 | id | TEXT PK | UUID |
-| userId | TEXT FK→users | 所属用户 |
-| sourceId | TEXT | 来源标识 |
-| sourceName | TEXT | 来源显示名 |
-| sourceType | TEXT | pdf/zip/git/bilibili/youtube |
-| category | TEXT | 7 类之一 |
+| user_id | TEXT FK→users | 所有者 |
+| slug | TEXT UNIQUE | 短链接（nanoid 10位） |
+| name | TEXT | 站点名称 |
+| site_type | TEXT | portfolio/brand/blog/landing/custom |
+| theme | TEXT | 视觉主题 |
+| layout | TEXT | 布局类型 |
+| workspace_data | TEXT | 结构化内容数据 (JSON) |
+| selections | TEXT | 用户选择配置 (JSON) |
+| file_map | TEXT | 生成的代码文件 (JSON: {path→content}) |
+| status | TEXT | draft/published/archived |
+| preview_url | TEXT | 预览地址 |
+| prd | TEXT | 当前 PRD 文档 (JSON) |
+| prd_history | TEXT | PRD 版本历史 (JSON[]) |
+| created_at | TEXT | 创建时间 |
+
+#### knowledge_groups（知识组/文件夹）
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | TEXT PK | UUID |
+| user_id | TEXT FK→users | 所有者 |
+| name | TEXT | 知识组名（如"我的简历"） |
+| description | TEXT | AI 生成的描述 |
+| index_md | TEXT | AI 索引文件（模型调用时参考） |
+| tags | TEXT | 标签数组 (JSON) |
+| source_file | TEXT | 原始文件名 |
+| source_type | TEXT | pdf/zip/docx/txt/md |
+
+#### knowledge_items（知识条目）
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | TEXT PK | UUID |
+| user_id | TEXT FK→users | 所有者 |
+| group_id | TEXT FK→knowledge_groups | 所属知识组 |
+| category | TEXT | factual/skills/experience/relational/media/opinion/meta |
 | title | TEXT | 知识标题 |
 | content | TEXT | 知识内容 |
-| tags | TEXT (JSON) | 标签数组 |
-| selected | INTEGER | 是否选中用于构建 |
+| tags | TEXT | 标签 (JSON) |
+| selected | INTEGER | 是否用于构建（1/0） |
 
-#### sites
+#### conversations（对话记录）
 | 字段 | 类型 | 说明 |
-|---|---|---|
+|------|------|------|
 | id | TEXT PK | UUID |
-| userId | TEXT FK→users | |
-| slug | TEXT UNIQUE | URL slug |
-| name | TEXT | 网站名 |
-| siteType | TEXT | portfolio/brand/blog/landing |
-| theme | TEXT | 18 种主题之一 |
-| layout | TEXT | 布局类型 |
-| workspaceData | TEXT (JSON) | 旧版数据（待废弃） |
-| selections | TEXT (JSON) | 用户选择 |
-| fileMap | TEXT (JSON) | 生成的文件映射 |
-| status | TEXT | draft/published/archived |
-| previewUrl | TEXT | 预览地址 |
+| user_id | TEXT FK→users | 所有者 |
+| site_id | TEXT FK→sites | 关联站点（可空） |
+| title | TEXT | 对话标题（首条消息截取） |
+| messages | TEXT | 消息数组 (JSON: [{role,content}]) |
+| preview_url | TEXT | 关联的预览地址 |
 
-#### skills (渐进式三层)
+#### skills（AI 技能）
 | 字段 | 类型 | 说明 |
-|---|---|---|
+|------|------|------|
 | id | TEXT PK | UUID |
 | name | TEXT | 技能名称 |
-| description | TEXT | **Level 0**: 触发描述 (~50字) |
+| description | TEXT | 触发条件描述（~50字） |
 | category | TEXT | design/content/layout/interaction/seo/other |
-| indexContent | TEXT | **Level 1**: 完整指令 (index.md) |
-| references | TEXT (JSON) | **Level 2**: [{name, content}] |
-| siteTypes | TEXT (JSON) | 适用网站类型 |
+| index_content | TEXT | 完整 index.md（如何应用） |
+| references | TEXT | 参考文档 (JSON[{name,content}]) |
 | enabled | INTEGER | 是否启用 |
 
-#### conversations
+#### templates（网站模板）
 | 字段 | 类型 | 说明 |
-|---|---|---|
+|------|------|------|
 | id | TEXT PK | UUID |
-| userId | TEXT FK→users | |
-| siteId | TEXT FK→sites | 关联网站 |
-| messages | TEXT (JSON) | [{role, content}] |
-| previewUrl | TEXT | 最新预览 |
+| name | TEXT | 模板名称 |
+| category | TEXT | starter/professional/creative |
+| site_type | TEXT | 适用站点类型 |
+| theme / layout | TEXT | 默认主题和布局 |
+| file_map | TEXT | 模板代码 (JSON) |
+| preview_image | TEXT | 预览截图 URL |
+| featured | INTEGER | 是否推荐 |
 
-### 4.3 SiteSpec JSON Schema
+---
 
-```typescript
-interface SiteSpec {
-  version: string;               // "1.0"
-  compiledAt: string;            // ISO datetime
+## 4. API 设计
 
-  product: {
-    siteType: string;            // portfolio | brand | blog | landing
-    purpose: string;             // 一句话核心目的
-    targetAudience: string;
-    locale: { primary: string; secondary?: string };
-    tone: string[];              // ["professional", "creative"]
-  };
+### 4.1 认证 API
+| 方法 | 路径 | 功能 |
+|------|------|------|
+| POST | /api/auth/[...nextauth] | NextAuth 处理器 |
+| POST | /api/auth/register | 邮箱密码注册 |
 
-  identity: {
-    name: SourcedValue<string>;
-    nameEn?: SourcedValue<string>;
-    title: SourcedValue<string>;
-    tagline: SourcedValue<string>;
-    bio: SourcedValue<string>;
-    avatar: SourcedValue<string | null>;
-    contact: {
-      email: SourcedValue<string>;
-      github?: SourcedValue<string>;
-      linkedin?: SourcedValue<string>;
-    };
-  };
+### 4.2 站点 API
+| 方法 | 路径 | 功能 |
+|------|------|------|
+| GET | /api/sites | 列出用户站点（含 conversationId） |
+| POST | /api/sites | 创建站点 |
+| GET | /api/sites/[id] | 获取站点详情 |
+| PUT | /api/sites/[id] | 更新站点（fileMap/PRD/状态） |
+| DELETE | /api/sites/[id] | 删除站点 |
 
-  sections: SectionSpec[];        // 有序的页面模块列表
+### 4.3 知识库 API
+| 方法 | 路径 | 功能 |
+|------|------|------|
+| GET | /api/knowledge-groups | 列出知识组（含条目统计） |
+| POST | /api/knowledge-groups | 创建知识组 + 批量插入条目 |
+| GET | /api/knowledge-groups/[id] | 获取组详情 + 所有条目 |
+| PUT | /api/knowledge-groups/[id] | 更新组信息 |
+| DELETE | /api/knowledge-groups/[id] | 删除组（CASCADE 条目） |
+| GET | /api/knowledge | 列出用户所有知识条目 |
+| POST | /api/knowledge | 批量创建条目 |
+| PUT | /api/knowledge/[id] | 更新单条（标题/内容/selected） |
+| DELETE | /api/knowledge/[id] | 删除单条 |
 
-  designSystem: {
-    theme: string;
-    colors: Record<string, string>;    // 完整语义色板
-    typography: { heading: string; body: string; cssImport: string };
-    spacing: { unit: string; scale: number[] };
-    components: { borderRadius: string; shadow: string };
-    effects: string;
-    antiPatterns: string[];
-  };
+### 4.4 AI 构建 API
+| 方法 | 路径 | 功能 |
+|------|------|------|
+| POST | /api/analyze-source | 解析文件（PDF/DOCX/ZIP/TXT/MD/URL）→ 知识提取 |
+| POST | /api/chat-build | 对话式构建（含 PRD 生成/选项卡/技能调用） |
+| POST | /api/generate | 生成网站代码 → 静态导出 → HTTP 服务器 |
+| POST | /api/modify | 增量修改代码文件 → 重新静态导出 |
+| POST | /api/design-system | 查询 BM25 设计系统引擎 |
 
-  motion: { enabled: boolean; philosophy: string; details: string };
-  responsive: { strategy: string; breakpoints: Record<string, string> };
-  features: { i18n: boolean; chatbot: boolean; seo: object };
-  techStack: { framework: string; styling: string; deployment: string };
+### 4.5 对话 API
+| 方法 | 路径 | 功能 |
+|------|------|------|
+| GET | /api/conversations | 列出对话记录 |
+| POST | /api/conversations | 创建对话 |
+| GET | /api/conversations/[id] | 获取对话详情 |
+| PUT | /api/conversations/[id] | 更新对话（消息/关联站点） |
+| DELETE | /api/conversations/[id] | 删除对话 |
 
-  skillPlan: {
-    activated: SkillInvocation[];    // generate 阶段执行
-    postBuild: SkillInvocation[];    // 生成后打磨
-  };
+### 4.6 管理 API（需 admin 权限）
+| 方法 | 路径 | 功能 |
+|------|------|------|
+| GET | /api/admin/stats | 统计数据 |
+| GET | /api/admin/users | 用户列表 |
+| CRUD | /api/admin/skills | 技能管理 |
+| POST | /api/admin/skills/upload | 上传技能包 |
+| CRUD | /api/admin/templates | 模板管理 |
 
-  meta: {
-    knowledgeItemsUsed: number;
-    coverage: number;                // 0-1
-    gaps: Gap[];                     // 缺失信息
-    suggestions: string[];           // AI 建议
-  };
-}
+---
 
-interface SourcedValue<T> {
-  value: T;
-  source: "knowledge" | "inferred" | "missing";
-}
+## 5. 核心流程
 
-interface SectionSpec {
-  id: string;
-  type: "hero" | "about" | "projects" | "skills" | "timeline" | "education" | "contact" | "blog" | "gallery";
-  enabled: boolean;
-  priority: number;
-  data: Record<string, unknown>;
-  sourceEntities: string[];          // knowledge item IDs
-}
+### 5.1 PRD 驱动的建站流程
 
-interface SkillInvocation {
-  skillId: string;
-  skillName: string;
-  phase: "generate" | "refine";
-  reason: string;
-  appliedTo: string | string[];
-}
+```
+用户发起对话
+    ↓
+Phase 1: AI 提问（选项卡形式，3-5个问题）
+    ├── 网站目标（单选）
+    ├── 目标受众（单选）
+    ├── 视觉风格（单选）
+    ├── 核心功能（多选 + 自定义）
+    └── 知识库选择
+    ↓
+Phase 2: AI 生成 PRD 文档
+    ├── Markdown 渲染预览
+    ├── 用户可编辑 PRD
+    └── 确认构建按钮
+    ↓
+Phase 3: 代码生成
+    ├── 文件生成（page.tsx/globals.css/translations.ts 等）
+    ├── 静态导出（next build → out/）
+    ├── HTTP 预览服务器
+    └── 自动保存到 DB（fileMap + PRD）
+    ↓
+Phase 4: 增量修改
+    ├── 对话中描述修改需求
+    ├── AI 读取当前代码（渐进式加载）
+    ├── 输出 modify action（文件级别替换/创建/删除）
+    └── 重新静态导出
+```
 
-interface Gap {
-  field: string;
-  severity: "high" | "medium" | "low";
-  suggestion: string;
-}
+### 5.2 知识库流程
+
+```
+上传文件（PDF/DOCX/TXT/MD/ZIP）
+    ↓
+文件解析
+    ├── PDF → MinerU API（OCR + 表格 + 公式）
+    ├── DOCX → mammoth（纯文本提取）
+    ├── TXT/MD → 直接读取
+    └── ZIP → 逐文件解析（每个文件独立处理）
+    ↓
+AI 知识提取（GLM-5 模型）
+    ├── 输出 Markdown 格式
+    ├── 按类别归类（factual/skills/experience/...）
+    └── 打标签
+    ↓
+用户预览 & 编辑
+    ├── 勾选要保留的知识
+    └── 编辑标题/内容
+    ↓
+保存到知识组
+    ├── 创建 knowledge_group
+    ├── 批量插入 knowledge_items
+    └── 自动生成 index.md
+```
+
+### 5.3 渐进式技能调用
+
+```
+Level 0（始终加载）: 所有技能的 description（~50字触发条件）
+    ↓ AI 判断相关性
+Level 1（按需加载）: 相关技能的 index_content（完整指导文档）
+    ↓ AI 需要深度参考
+Level 2（按需加载）: references（参考文档数组）
+```
+
+### 5.4 代码修改流程
+
+```
+用户在对话中说"把主色改成红色"
+    ↓
+chat-build API:
+    ├── 从 DB 加载当前 fileMap
+    ├── 注入关键源文件到 system prompt
+    │   └── page.tsx / globals.css / layout.tsx / translations.ts
+    └── AI 输出 modify action
+        ├── {file: "src/app/globals.css", action: "replace", content: "..."}
+        └── 只修改需要变的文件
+    ↓
+modify API:
+    ├── 增量写入文件到 sites-data/{siteId}/
+    ├── 更新 DB 中的 fileMap
+    └── 重新 next build → 静态导出
+    ↓
+前端 iframe 刷新
 ```
 
 ---
 
-## 5. 页面与交互设计
+## 6. 前端页面
 
-### 5.1 页面清单
+### 6.1 页面清单
 
-| 路径 | 页面 | 认证 |
-|---|---|---|
-| `/` | Landing 首页 | 否 |
-| `/login` | 登录 | 否 |
-| `/register` | 注册 | 否 |
-| `/dashboard` | 我的网站 | 是 |
-| `/create` | 创建/编辑 (核心) | 是 |
-| `/templates` | 模板浏览 | 否 |
-| `/admin` | 管理后台 | admin |
-| `/admin/skills` | Skill 管理 | admin |
-| `/admin/templates` | 模板管理 | admin |
-| `/admin/users` | 用户管理 | admin |
+| 路由 | 功能 | 认证 |
+|------|------|------|
+| / | 首页（Landing Page） | 无 |
+| /login | 登录 | 无 |
+| /register | 注册 | 无 |
+| /templates | 模板画廊 | 无 |
+| /create | 构建工作台（核心） | 需登录 |
+| /dashboard | 我的网站 | 需登录 |
+| /admin | 管理后台 | 需 admin |
+| /admin/users | 用户管理 | 需 admin |
+| /admin/skills/* | 技能管理 | 需 admin |
+| /admin/templates/* | 模板管理 | 需 admin |
 
-### 5.2 Create 页面核心布局
+### 6.2 构建工作台（/create）
 
+三个视图通过左侧图标菜单切换：
+
+**构建视图**（默认）
+- 左侧：对话框（选项卡消息 + PRD 确认按钮 + 工作状态提示）
+- 右侧：预览面板（Tab: 网页预览 | PRD 文档）
+- 可拖拽分割线调整比例
+- 知识库选择器（顶部下拉菜单）
+
+**数据源视图**
+- 拖拽上传区域（支持 PDF/DOCX/TXT/MD/ZIP）
+- URL 输入（Git/Bilibili/YouTube）
+- 解析进度展示
+- 解析结果预览 + 逐条勾选 + 保存到知识组
+
+**知识库视图**
+- 第一级：知识组列表（文件夹卡片）
+- 第二级：点击进入 → 知识条目详情（可编辑）
+- 组级全选/删除
+- 搜索过滤
+
+---
+
+## 7. 国际化 (i18n)
+
+- 默认中文，顶部可切换英文
+- 语言选择保存到 localStorage
+- 覆盖范围：导航栏、登录/注册、首页、工作台、管理后台
+- 翻译存储在 `src/lib/i18n.ts`（100+ 条翻译项）
+
+---
+
+## 8. 安全机制
+
+| 层面 | 机制 |
+|------|------|
+| 认证 | JWT session + bcrypt 密码哈希 |
+| 授权 | `requireAdmin()` 检查 role 字段 |
+| CSRF | NextAuth 内置 CSRF 保护 |
+| 路径安全 | 静态服务器防止目录遍历 |
+| 文件大小 | 10MB body size limit |
+| DB 并发 | SQLite WAL 模式 + busy_timeout 5s |
+
+---
+
+## 9. 日志系统
+
+- 位置：`data/logs/analyze-YYYY-MM-DD.log`
+- 格式：JSON per line（time, level, module, message, data）
+- 覆盖模块：handler, mineru, ai, zip, git, bilibili, youtube, generate, chat-build, modify, skill-upload
+- 级别：INFO / WARN / ERROR
+
+---
+
+## 10. 部署架构
+
+### 本地开发
 ```
-┌──────────────────────────────────────────────────────┐
-│ Navbar (fixed, h-14, backdrop-blur)                  │
-├──────┬───────────────────────┬───┬───────────────────┤
-│      │                       │   │                   │
-│  S   │     Chat / Sources    │ D │    Preview        │
-│  i   │     / Knowledge       │ i │    (iframe)       │
-│  d   │                       │ v │                   │
-│  e   │  (由 sidebar nav      │ i │  Browser chrome   │
-│  b   │   切换三个视图)        │ d │  + mock content   │
-│  a   │                       │ e │                   │
-│  r   │                       │ r │                   │
-│      ├───────────────────────┤   ├───────────────────┤
-│ w-56 │ Input bar             │w-1│                   │
-│ /w-14│ (border-t)            │   │                   │
-└──────┴───────────────────────┴───┴───────────────────┘
+主应用: localhost:3003 (Next.js dev)
+预览服务: localhost:3002 (静态 HTTP 服务器)
+数据库: data/app.db (SQLite)
+生成站点: sites-data/{siteId}/out/ (静态 HTML)
 ```
 
-### 5.3 状态机
-
-**生成状态**:
+### 生产部署（规划）
 ```
-idle ──(用户确认)──▶ generating ──(成功)──▶ ready
-                         │                    │
-                         └──(失败)──▶ idle    └──(重新生成)──▶ generating
-```
-
-**Skill 激活状态**:
-```
-未加载 ──(AI 推荐)──▶ activate_skills action
-                          │
-                          ▼
-前端记录 loadedSkillIds ──(下次请求)──▶ 后端加载 Level 1
-                                            │
-                                            ▼
-                                   System Prompt 中注入
+DNS: *.createanysite.com → 服务器 IP（通配符 A 记录）
+Nginx: 按 Host 头路由子域名 → sites-data/{slug}/out/
+SSL: Let's Encrypt 通配符证书
+CDN: Cloudflare（可选）
 ```
 
 ---
 
-## 6. API 设计
+## 11. 已知问题 & 规划
 
-### 6.1 完整 API 清单
+### 当前问题
+- [ ] 静态导出偶发 Turbopack 兼容性问题
+- [ ] AI 模型有时不遵循 PRD 生成规则（需要前端 safeguard）
+- [ ] 共享 node_modules 版本管理
+- [ ] 图片生成 API 已禁用（SiliconFlow model disabled）
 
-| Method | Path | 说明 | 认证 |
-|---|---|---|---|
-| POST | `/api/auth/register` | 注册 | 否 |
-| POST | `/api/auth/[...nextauth]` | NextAuth | 否 |
-| GET | `/api/knowledge` | 列出知识项 | user |
-| POST | `/api/knowledge` | 批量创建 | user |
-| PUT | `/api/knowledge/[id]` | 更新 | user |
-| DELETE | `/api/knowledge/[id]` | 删除 | user |
-| DELETE | `/api/knowledge?sourceId=X` | 按源删除 | user |
-| POST | `/api/analyze-source` | 分析数据源 | user |
-| POST | `/api/chat-build` | 对话构建 | user |
-| POST | `/api/compile-spec` | 编译 Spec | user |
-| POST | `/api/generate` | 生成网站 | user |
-| POST | `/api/design-system` | 查询设计系统 | user |
-| GET | `/api/skills?level=0\|1\|2` | 渐进加载 Skill | user |
-| GET/POST | `/api/sites` | 网站 CRUD | user |
-| GET/PUT/DELETE | `/api/sites/[id]` | | user |
-| GET/POST | `/api/conversations` | 对话 CRUD | user |
-| GET/PUT/DELETE | `/api/conversations/[id]` | | user |
-| GET/POST | `/api/admin/skills` | Skill 管理 | admin |
-| POST | `/api/admin/skills/upload` | 上传 Skill 包 | admin |
-| GET/PUT/DELETE | `/api/admin/skills/[id]` | | admin |
-
-### 6.2 关键 API 详情
-
-#### POST /api/chat-build
-
-```json
-// Request
-{
-  "messages": [{"role": "user", "content": "帮我搭建一个极简风格的个人网站"}],
-  "knowledge": [/* KnowledgeItem[] */],
-  "currentSelections": {},
-  "loadedSkills": ["skill-id-1"]   // 已激活的 skill IDs
-}
-
-// Response
-{
-  "content": "AI 回复文本...",
-  "action": {
-    "type": "activate_skills",    // 或 "generate"
-    "skillIds": ["skill-id-2"],
-    "reason": "..."
-  }
-}
-```
-
-#### POST /api/compile-spec
-
-```json
-// Request
-{
-  "knowledge": [/* 选中的 KnowledgeItem[] */],
-  "intent": {
-    "siteType": "portfolio",
-    "theme": "minimalist",
-    "layout": "f-shape",
-    "conversationSummary": "用户想要极简风格个人网站..."
-  },
-  "skillIds": ["skill-1", "skill-2"]
-}
-
-// Response
-{
-  "spec": { /* SiteSpec JSON */ }
-}
-```
-
-#### GET /api/skills (渐进式)
-
-```
-Level 0: GET /api/skills
-  → { skills: [{ id, name, description, category }] }
-
-Level 1: GET /api/skills?level=1&ids=id1,id2
-  → { skills: [{ id, name, indexContent, hasReferences }] }
-
-Level 2: GET /api/skills?level=2&ids=id1
-  → { skills: [{ id, name, indexContent, references: [{name, content}] }] }
-```
-
----
-
-## 7. Skill 系统
-
-### 7.1 Skill 包结构
-
-```
-my-skill.zip
-├── index.md          # 主指令 → Level 1 (indexContent)
-├── reference/
-│   ├── colors.md     # 参考文档 → Level 2 (references)
-│   └── patterns.md
-```
-
-### 7.2 上传解析流程
-
-```
-上传 ZIP/MD → 解析文件结构
-  ├── index.md / SKILL.md → indexContent
-  └── 其他 .md 文件 → references[]
-        │
-        ▼
-  AI 读 indexContent → 自动生成:
-  ├── name (人类可读名称)
-  ├── description (触发条件, ~50字)
-  ├── category (design/content/layout/...)
-  └── siteTypes (适用类型)
-        │
-        ▼
-  存入 skills 表 (enabled=1)
-```
-
-### 7.3 内置 Skill 清单 (20 个)
-
-**内容分析类** (Phase 2 调用):
-| Skill | 触发条件 |
-|---|---|
-| extract | 知识库内容丰富但结构松散 |
-| distill | 知识条目过多需要精简 |
-| clarify | 内容表述不清有歧义 |
-
-**设计决策类** (Phase 4 调用):
-| Skill | 触发条件 |
-|---|---|
-| frontend-design | **每次都调用** |
-| colorize | 需要确定色彩方案 |
-| typeset | 需要确定字体方案 |
-| arrange | 4+ section 需要编排 |
-| critique | Spec 初版完成后自检 |
-
-**构建指导类** (写入 Spec):
-| Skill | 触发条件 |
-|---|---|
-| animate | 用户开启动画 |
-| adapt | 需要响应式 |
-| harden | 企业站需要健壮性 |
-| optimize | 性能敏感 |
-| onboard | 复杂首次体验 |
-| delight | 要求有趣 |
-| bolder | 设计太保守 |
-| quieter | 设计太激进 |
-
-**生成后打磨类** (postBuild):
-| Skill | 触发条件 |
-|---|---|
-| polish | **每次都标记** |
-| audit | 企业/品牌站 |
-| normalize | 有自定义设计系统 |
-
----
-
-## 8. 改造计划
-
-### Phase 1: Spec 层引入 ✅ (已完成)
-- [x] 定义 SiteSpec JSON Schema
-- [x] 创建 compile-spec.md 编排文档
-- [x] 实现 `/api/compile-spec` 端点
-- [x] DB schema 改造 (skills 表三层字段)
-- [x] `/api/skills` 渐进式加载端点
-- [ ] 前端 Create 页面接入 compile-spec
-- [ ] 替代 `buildWorkspaceDataFromKnowledge()`
-
-### Phase 2: 生成器重构
-- [ ] 生成器接受 SiteSpec (不再是 WorkspaceData)
-- [ ] 按 section 生成，注入 skill context
-- [ ] AI 驱动代码生成（替代硬编码模板）
-- [ ] skillPlan.activated 的 skill 注入到生成 prompt
-- [ ] skillPlan.postBuild 的 skill 最后执行
-
-### Phase 3: 静态导出
-- [ ] 替代 dev server 预览为静态 HTML 导出
-- [ ] 生成独立的 `index.html` + assets
-- [ ] 支持下载 ZIP
-- [ ] 预览用 iframe srcdoc 或 blob URL
-
-### Phase 4: AI Provider 抽象
-- [ ] 定义 AIProvider 接口
-- [ ] 实现 SiliconFlow/Anthropic/OpenAI provider
-- [ ] 环境变量配置切换
-- [ ] 每个 API route 使用抽象 provider
-
-### Phase 5: 知识图谱增强
-- [ ] KnowledgeEntity 实体识别
-- [ ] KnowledgeRelation 关系映射
-- [ ] 多源同一实体自动合并
-- [ ] 知识成熟度标记 (confidence)
-
-### 依赖关系
-
-```
-Phase 1 ──▶ Phase 2 ──▶ Phase 3
-                │
-Phase 4 (独立)  │
-                ▼
-            Phase 5 (独立)
-```
-
----
-
-## 9. 非功能需求
-
-### 9.1 性能
-- 知识提取: < 30s / 源
-- Spec 编译: < 15s
-- 网站生成: < 60s
-- Token 预算: chat-build ≤ 40K tokens/请求，compile-spec ≤ 60K tokens/请求
-
-### 9.2 安全
-- API Key 仅存服务端 `.env.local`
-- 用户密码 bcrypt hash
-- 用户数据按 userId 隔离
-- Admin 操作需 role="admin"
-
-### 9.3 可扩展性
-- SQLite → PostgreSQL: Drizzle ORM 迁移（改 driver 即可）
-- 单机 → 多实例: 静态导出后无需 dev server 进程
-
-### 9.4 国际化
-- UI: 中文为主，英文切换 (LocaleProvider)
-- 生成网站: 支持中英双语 (i18n 模块)
-- 知识提取: AI prompt 支持中英文源
-
----
-
-*文档结束。最后更新: 2026-03-24*
+### Phase 2 规划
+- [ ] 子域名托管（*.createanysite.com）
+- [ ] 自定义域名绑定
+- [ ] OAuth 登录（GitHub/Google）
+- [ ] 网页爬取数据源
+- [ ] 视频字幕提取（Bilibili/YouTube）
+- [ ] 解析后交互式提问（AI 引导知识整理）
+- [ ] 模板市场（完整网站模板管理）
