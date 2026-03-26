@@ -5,6 +5,7 @@ import { sites } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import fs from "fs/promises";
 import path from "path";
+import { exec } from "child_process";
 import { logger } from "@/lib/logger";
 
 const SITES_DIR = path.join(process.cwd(), "sites-data");
@@ -64,7 +65,19 @@ export async function POST(req: NextRequest) {
       updatedAt: new Date().toISOString(),
     }).where(eq(sites.id, siteId));
 
-    logger.info("modify", `[${requestId}] Applied ${applied.length} changes`, { applied });
+    logger.info("modify", `[${requestId}] Applied ${applied.length} changes, rebuilding...`, { applied });
+
+    // Rebuild static export after modification
+    try {
+      await new Promise<void>((resolve, reject) => {
+        exec("npx next build", { cwd: siteDir, timeout: 120_000, env: { ...process.env, NODE_ENV: "production" } }, (err) => {
+          if (err) { logger.warn("modify", `Rebuild failed: ${err.message}`); reject(err); }
+          else { logger.info("modify", "Rebuild complete"); resolve(); }
+        });
+      });
+    } catch {
+      // Non-fatal: files are saved, build can be retried
+    }
 
     return NextResponse.json({ ok: true, applied });
   } catch (err) {
