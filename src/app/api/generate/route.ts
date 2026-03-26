@@ -60,13 +60,14 @@ async function ensureNodeModules(siteDir: string) {
 async function staticBuild(siteDir: string): Promise<void> {
   logger.info("generate", "Running next build (static export)...");
 
-  const configContent = `/** @type {import('next').NextConfig} */
-const nextConfig = { output: "export", images: { unoptimized: true } };
-module.exports = nextConfig;`;
-  const configPathJs = path.join(siteDir, "next.config.js");
-  const configPathTs = path.join(siteDir, "next.config.ts");
-  try { await fs.unlink(configPathTs); } catch {}
-  await fs.writeFile(configPathJs, configContent, "utf-8");
+  const configContent = `const nextConfig = { output: "export", images: { unoptimized: true } };
+export default nextConfig;`;
+
+  // Clean up any old config files
+  for (const old of ["next.config.js", "next.config.ts", "next.config.cjs"]) {
+    try { await fs.unlink(path.join(siteDir, old)); } catch {}
+  }
+  await fs.writeFile(path.join(siteDir, "next.config.mjs"), configContent, "utf-8");
 
   return new Promise((resolve, reject) => {
     exec("npx next build", {
