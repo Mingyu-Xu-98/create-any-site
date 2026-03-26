@@ -180,29 +180,10 @@ After all 3-5 questions are answered, proceed to Phase 2 (PRD generation).
 After gathering requirements (at least 3 questions answered), you MUST generate a complete PRD document. Output it as:
 
 \`\`\`action
-{
-  "type": "prd",
-  "prd": {
-    "siteType": "portfolio|brand|blog|landing|custom",
-    "targetAudience": "...",
-    "coreGoal": "...",
-    "contentSections": ["Hero", "About", "Skills", "Projects", "Timeline", "Contact"],
-    "narrativeSkills": [{"skillName": "...", "purpose": "..."}],
-    "theme": "cyberpunk|minimalist|...",
-    "colorScheme": "description of colors",
-    "typography": "font pairing description",
-    "designSkills": [{"skillName": "...", "purpose": "..."}],
-    "techStack": "Next.js 16 + React 19 + Tailwind CSS 4",
-    "features": ["i18n", "chatbot", "animations", "share"],
-    "pages": ["page structure list"],
-    "knowledgeSources": ["source names"],
-    "knowledgeCount": 18,
-    "markdown": "# Full PRD in markdown format\\n\\n## 1. Project Overview\\n...(complete PRD document)"
-  }
-}
+{"type": "prd", "siteType": "portfolio", "theme": "minimalist", "layout": "card-grid"}
 \`\`\`
 
-The markdown field should be a complete, well-structured PRD document including:
+Then write the FULL PRD document in markdown AFTER the action block (not inside JSON). The PRD should include:
 - Project overview (type, audience, goal)
 - Content planning with narrative logic (which storytelling skills to use and why)
 - Visual design plan (theme, colors, typography, which design skills to use)
@@ -210,6 +191,23 @@ The markdown field should be a complete, well-structured PRD document including:
 - Technical implementation (stack, features)
 - Page structure with section descriptions
 - Knowledge data mapping
+
+Example response format:
+\`\`\`action
+{"type": "prd", "siteType": "portfolio", "theme": "cyberpunk", "layout": "interactive"}
+\`\`\`
+
+# Website PRD
+
+## 1. Project Overview
+- Type: Personal Portfolio
+- Audience: Tech recruiters
+...
+
+## 2. Content Planning
+...
+
+(The PRD markdown is written as normal text OUTSIDE the action block, making it easy to parse.)
 
 ### Phase 3: Build Execution
 **ONLY after the user explicitly says "确认构建" / "confirm build" / "ok" / "go ahead" / "build it" in response to a PRD**, output a build action. NEVER generate without PRD confirmation:

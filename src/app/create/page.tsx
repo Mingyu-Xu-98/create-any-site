@@ -313,31 +313,33 @@ function CreatePageInner() {
         setThinkingSteps(thinkingMatch[1].trim().split("\n").filter(Boolean));
       }
 
-      if (d.content) {
-        // Clean display content (remove action/thinking blocks)
-        const cleanContent = d.content.replace(/```(action|thinking)\s*[\s\S]*?```/g, "").trim();
-        if (cleanContent) {
-          const updated = [...newMsgs, { role: "assistant" as const, content: cleanContent }];
-          setChatMessages(updated);
-          await saveConv(updated);
-        }
+      // Clean display content (remove action/thinking blocks)
+      const cleanContent = d.content ? d.content.replace(/```(action|thinking)\s*[\s\S]*?```/g, "").trim() : "";
+      if (cleanContent) {
+        const updated = [...newMsgs, { role: "assistant" as const, content: cleanContent }];
+        setChatMessages(updated);
+        await saveConv(updated);
       }
 
       // Handle actions
       if (d.action?.type === "options") {
         setPendingOptions({ question: d.action.question, options: d.action.options, multiSelect: !!d.action.multiSelect });
-      } else if (d.action?.type === "prd" && d.action.prd) {
-        setPrdData(d.action.prd);
+      } else if (d.action?.type === "prd") {
+        // PRD: action has siteType/theme/layout, markdown is in the cleaned content
+        const prd: PRDData = {
+          version: 1,
+          siteType: d.action.siteType || "portfolio",
+          theme: d.action.theme || "minimalist",
+          ...(d.action.layout ? { layout: d.action.layout } : {}),
+          // The markdown is the cleaned response text (after removing action block)
+          markdown: cleanContent || "",
+          createdAt: new Date().toISOString(),
+        };
+        setPrdData(prd);
         setShowPreview(true);
         setPreviewTab("prd");
-        // Save PRD to site
         if (siteIdRef.current) {
-          await fetch(`/api/sites/${siteIdRef.current}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prd: JSON.stringify(d.action.prd) }) });
-        }
-      } else if (d.action?.type === "update_prd" && d.action.prd) {
-        setPrdData(d.action.prd);
-        if (siteIdRef.current) {
-          await fetch(`/api/sites/${siteIdRef.current}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prd: JSON.stringify(d.action.prd) }) });
+          await fetch(`/api/sites/${siteIdRef.current}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prd: JSON.stringify(prd) }) });
         }
       } else if (d.action?.type === "activate_skills" && Array.isArray(d.action.skillIds)) {
         setLoadedSkillIds(prev => [...new Set([...prev, ...d.action.skillIds])]);
