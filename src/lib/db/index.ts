@@ -84,9 +84,23 @@ function initDb() {
       updated_at TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS knowledge_groups (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      description TEXT,
+      index_md TEXT,
+      tags TEXT,
+      source_file TEXT,
+      source_type TEXT,
+      created_at TEXT,
+      updated_at TEXT
+    );
+
     CREATE TABLE IF NOT EXISTS knowledge_items (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      group_id TEXT REFERENCES knowledge_groups(id) ON DELETE CASCADE,
       source_id TEXT,
       source_name TEXT,
       source_type TEXT,

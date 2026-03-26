@@ -75,6 +75,10 @@ function CreatePageInner() {
   const [itemsLoaded, setItemsLoaded] = useState(false);
   const [knowledgeSearch, setKnowledgeSearch] = useState("");
 
+  // Knowledge Groups
+  interface KGGroup { id: string; name: string; description: string | null; tags: string[]; sourceFile: string | null; sourceType: string | null; indexMd: string | null; itemCount: number; selectedCount: number; categoryCounts: Record<string, number> }
+  const [kGroups, setKGroups] = useState<KGGroup[]>([]);
+
   useEffect(() => { if (authStatus === "unauthenticated") router.push("/login"); }, [authStatus, router]);
 
   const loadKnowledge = useCallback(async () => {
@@ -82,7 +86,11 @@ function CreatePageInner() {
     setItemsLoaded(true);
   }, []);
 
-  useEffect(() => { if (session?.user) loadKnowledge(); }, [session, loadKnowledge]);
+  const loadGroups = useCallback(async () => {
+    try { const r = await fetch("/api/knowledge-groups"); if (r.ok) { const d = await r.json(); setKGroups(d.groups || []); } } catch {}
+  }, []);
+
+  useEffect(() => { if (session?.user) { loadKnowledge(); loadGroups(); } }, [session, loadKnowledge, loadGroups]);
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [chatMessages, pendingOptions, prdData]);
 
   // Conv list
@@ -187,7 +195,14 @@ function CreatePageInner() {
       setSources(p => p.map(s => s.id === sid ? { ...s, status: "done" as const } : s));
     } catch (err) { setSources(p => p.map(s => s.id === sid ? { ...s, status: "error" as const, error: err instanceof Error ? err.message : "Failed" } : s)); }
   };
-  const handleFile = (f: File) => { if (f.name.endsWith(".zip") || f.type.includes("zip")) addFileSource(f, "zip"); else if (f.name.endsWith(".pdf") || f.type.includes("pdf")) addFileSource(f, "pdf"); };
+  const handleFile = (f: File) => {
+    const ext = f.name.split(".").pop()?.toLowerCase();
+    if (ext === "zip" || f.type.includes("zip")) addFileSource(f, "zip");
+    else if (ext === "pdf" || f.type.includes("pdf")) addFileSource(f, "pdf");
+    else if (ext === "docx" || ext === "doc") addFileSource(f, "docx");
+    else if (ext === "txt") addFileSource(f, "txt");
+    else if (ext === "md") addFileSource(f, "md");
+  };
   const removeSource = async (id: string) => { setSources(p => p.filter(s => s.id !== id)); await fetch(`/api/knowledge?sourceId=${id}`, { method: "DELETE" }); await loadKnowledge(); };
 
   // Pending
@@ -195,10 +210,44 @@ function CreatePageInner() {
   const savePendingToKB = async () => {
     const sel = pendingItems.filter(i => i.selected); if (sel.length === 0) return; setSaveError("");
     try {
-      const r = await fetch("/api/knowledge", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ items: sel, sourceId: pendingSourceId, sourceName: pendingSourceName, sourceType: pendingSourceType }) });
+      // Derive group name from source file
+      const groupName = pendingSourceName.replace(/\.[^.]+$/, "") || "Untitled";
+
+      // Build category summary for description
+      const catCounts = sel.reduce<Record<string, number>>((a, i) => { a[i.category] = (a[i.category] || 0) + 1; return a; }, {});
+      const description = `${sel.length} items: ${Object.entries(catCounts).map(([c, n]) => `${c} ${n}`).join(", ")}`;
+
+      // Collect all tags
+      const allTags = [...new Set(sel.flatMap(i => i.tags || []))].slice(0, 10);
+
+      // Create knowledge group with items
+      const r = await fetch("/api/knowledge-groups", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: groupName,
+          description,
+          tags: allTags,
+          sourceFile: pendingSourceName,
+          sourceType: pendingSourceType,
+          items: sel,
+        }),
+      });
       const t = await r.text(); let d; try { d = JSON.parse(t); } catch { setSaveError("Server error"); return; }
       if (!r.ok) { setSaveError(d.error || "Failed"); return; }
-      setPendingItems([]); setPendingSourceId(null); await loadKnowledge(); setView("knowledge");
+
+      // Generate index.md for the group
+      if (d.id) {
+        const indexMd = generateIndexMd(groupName, description, allTags, sel);
+        await fetch(`/api/knowledge-groups/${d.id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ indexMd }),
+        });
+      }
+
+      setPendingItems([]); setPendingSourceId(null); setPendingSourceName(""); setPendingSourceType("");
+      await loadKnowledge(); await loadGroups(); setView("knowledge");
     } catch (e) { setSaveError(e instanceof Error ? e.message : "Failed"); }
   };
 
@@ -416,7 +465,7 @@ function CreatePageInner() {
         </div>
 
         {/* Global file input (always in DOM) */}
-        <input ref={fileRef} type="file" accept=".pdf,.zip" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ""; }} />
+        <input ref={fileRef} type="file" accept=".pdf,.zip,.docx,.doc,.txt,.md" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ""; }} />
 
         {/* ====== BUILD VIEW ====== */}
         {view === "build" && <>
@@ -569,15 +618,17 @@ function CreatePageInner() {
               )}
 
               {/* PRD confirmation buttons */}
-              {prdData && !previewUrl && !chatLoading && (
+              {prdData && !chatLoading && (
                 <div className="flex gap-2">
-                  <button onClick={() => sendChat(locale === "zh" ? "确认构建" : "Confirm build")}
-                    className="px-4 py-2 rounded-xl bg-accent text-white text-xs font-medium hover:bg-accent/90 transition-all shadow-lg shadow-accent/20">
-                    {locale === "zh" ? "✅ 确认构建" : "✅ Confirm Build"}
-                  </button>
+                  {!previewUrl && (
+                    <button onClick={() => sendChat(locale === "zh" ? "确认构建" : "Confirm build")}
+                      className="px-4 py-2 rounded-xl bg-accent text-white text-xs font-medium hover:bg-accent/90 transition-all shadow-lg shadow-accent/20">
+                      {locale === "zh" ? "✅ 确认构建" : "✅ Confirm Build"}
+                    </button>
+                  )}
                   <button onClick={() => { setShowPreview(true); setPreviewTab("prd"); }}
-                    className="px-4 py-2 rounded-xl bg-gray-100 text-xs text-gray-400 hover:bg-gray-200/50 transition-all">
-                    {locale === "zh" ? "📄 查看/编辑 PRD" : "📄 View/Edit PRD"}
+                    className="px-4 py-2 rounded-xl bg-gray-100 text-xs text-gray-500 hover:bg-gray-200/50 transition-all">
+                    {locale === "zh" ? "📄 查看 PRD" : "📄 View PRD"}
                   </button>
                 </div>
               )}
@@ -724,20 +775,20 @@ function CreatePageInner() {
                   onDragOver={e => { e.preventDefault(); e.currentTarget.classList.add("border-accent", "bg-accent/5"); }}
                   onDragLeave={e => { e.currentTarget.classList.remove("border-accent", "bg-accent/5"); }}
                   onDrop={e => { e.preventDefault(); e.currentTarget.classList.remove("border-accent", "bg-accent/5"); const f = e.dataTransfer.files[0]; if (f) handleFile(f); }}
-                  onClick={() => { setAddMode("pdf"); setTimeout(() => fileRef.current?.click(), 100); }}
+                  onClick={() => fileRef.current?.click()}
                   className="border-2 border-dashed border-gray-200 rounded-2xl p-8 text-center cursor-pointer hover:border-gray-300 transition-all"
                 >
                   <div className="w-12 h-12 mx-auto mb-3 rounded-xl bg-gray-100 flex items-center justify-center">
                     <svg className="w-6 h-6 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" /></svg>
                   </div>
                   <p className="text-sm text-gray-400">{locale === "zh" ? "拖拽文件到此处，或点击上传" : "Drop files here, or click to upload"}</p>
-                  <p className="text-[10px] text-gray-500 mt-1">{locale === "zh" ? "支持 PDF、ZIP 文件" : "Supports PDF and ZIP files"}</p>
+                  <p className="text-[10px] text-gray-500 mt-1">{locale === "zh" ? "支持 PDF、DOCX、TXT、MD、ZIP" : "Supports PDF, DOCX, TXT, MD, ZIP"}</p>
                 </div>
 
                 {/* Source type buttons for URLs */}
                 <div className="flex items-center gap-2">
                   <span className="text-[10px] text-gray-500 shrink-0">{locale === "zh" ? "或添加链接：" : "Or add links:"}</span>
-                  {(Object.keys(SOURCE_TYPE_META) as SourceType[]).filter(t => !["pdf", "zip"].includes(t)).map(type => {
+                  {(Object.keys(SOURCE_TYPE_META) as SourceType[]).filter(t => !["pdf", "zip", "docx", "txt", "md"].includes(t)).map(type => {
                     const m = SOURCE_TYPE_META[type];
                     return <button key={type} onClick={() => setAddMode(addMode === type ? null : type)} className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs transition-all ${addMode === type ? "bg-accent/10 text-accent border border-accent/30" : "bg-gray-50 text-gray-400 border border-transparent hover:bg-gray-100"}`}><span>{m.icon}</span><span>{m.label}</span></button>;
                   })}
@@ -795,13 +846,13 @@ function CreatePageInner() {
           </div>
         )}
 
-        {/* ====== KNOWLEDGE VIEW (full width, grouped by source) ====== */}
+        {/* ====== KNOWLEDGE VIEW (folder-based) ====== */}
         {view === "knowledge" && (
           <div className="flex-1 flex flex-col overflow-hidden">
             <div className="shrink-0 px-6 py-4 border-b border-gray-200/60 flex items-center justify-between gap-4">
               <div>
                 <h2 className="text-lg font-bold">{locale === "zh" ? "知识库" : "Knowledge Base"}</h2>
-                <p className="text-xs text-gray-500 mt-0.5">{selectedCount}/{items.length} {locale === "zh" ? "条已选中用于构建" : "selected for building"}</p>
+                <p className="text-xs text-gray-500 mt-0.5">{kGroups.length} {locale === "zh" ? "个知识组" : "groups"} · {selectedCount}/{items.length} {locale === "zh" ? "条已选" : "selected"}</p>
               </div>
               <div className="flex items-center gap-2">
                 <input type="text" placeholder={locale === "zh" ? "搜索知识..." : "Search..."} value={knowledgeSearch} onChange={e => setKnowledgeSearch(e.target.value)}
@@ -814,69 +865,86 @@ function CreatePageInner() {
 
             <div className="flex-1 overflow-y-auto p-6">
               {!itemsLoaded ? <div className="space-y-3">{[1,2,3].map(i => <div key={i} className="h-20 rounded-xl bg-gray-100 animate-pulse" />)}</div>
-              : items.length === 0 ? <div className="text-center py-20 text-gray-500">{locale === "zh" ? "暂无知识。前往数据源添加内容。" : "No knowledge. Add sources first."}</div>
-              : (
-                <div className="max-w-4xl mx-auto space-y-6">
-                  {sourceGroups.map(g => {
-                    // Apply search filter
-                    const filteredGroupItems = knowledgeSearch ? g.items.filter(i => i.title.toLowerCase().includes(knowledgeSearch.toLowerCase()) || i.content.toLowerCase().includes(knowledgeSearch.toLowerCase())) : g.items;
-                    if (filteredGroupItems.length === 0) return null;
-                    const allSel = filteredGroupItems.every(i => i.selected);
-                    const someSel = filteredGroupItems.some(i => i.selected);
-                    const catCounts = g.items.reduce<Record<string, number>>((a, i) => { a[i.category] = (a[i.category] || 0) + 1; return a; }, {});
+              : kGroups.length === 0 ? (
+                <div className="text-center py-20">
+                  <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-gray-100 flex items-center justify-center"><span className="text-2xl opacity-30">📚</span></div>
+                  <p className="text-gray-500">{locale === "zh" ? "暂无知识。前往数据源添加内容。" : "No knowledge. Add sources first."}</p>
+                  <button onClick={() => setView("sources")} className="mt-4 px-4 py-2 rounded-lg bg-accent/10 text-accent text-xs hover:bg-accent/20 transition-all">{locale === "zh" ? "添加数据源" : "Add Sources"}</button>
+                </div>
+              ) : (
+                <div className="max-w-4xl mx-auto space-y-4">
+                  {kGroups.map(g => {
+                    const groupItems = items.filter(i => (i as KnowledgeItem & { groupId?: string }).sourceId === g.id || (i.sourceName === g.sourceFile));
+                    const filteredGroupItems = knowledgeSearch ? groupItems.filter(i => i.title.toLowerCase().includes(knowledgeSearch.toLowerCase()) || i.content.toLowerCase().includes(knowledgeSearch.toLowerCase())) : groupItems;
+                    if (knowledgeSearch && filteredGroupItems.length === 0) return null;
+                    const allSel = g.selectedCount === g.itemCount;
+                    const someSel = g.selectedCount > 0 && g.selectedCount < g.itemCount;
+
                     return (
-                      <div key={g.sourceId} className="rounded-xl border border-gray-200/60 overflow-hidden">
-                        {/* Source header (acts as index.md) */}
-                        <div className="px-5 py-4 bg-gray-50/50 border-b border-gray-200/60">
-                          <div className="flex items-center gap-3 mb-2">
-                            <button onClick={() => toggleSourceGroup(g.sourceId)} className={`w-5 h-5 rounded border shrink-0 flex items-center justify-center ${allSel ? "bg-accent border-accent" : someSel ? "bg-accent/40 border-accent/60" : "border-gray-300"}`}>
-                              {(allSel || someSel) && <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d={allSel ? "M5 13l4 4L19 7" : "M5 12h14"} /></svg>}
-                            </button>
-                            <span className="text-xl">{SOURCE_TYPE_META[g.sourceType as SourceType]?.icon || "📎"}</span>
-                            <div className="flex-1">
-                              <h3 className="text-sm font-semibold text-gray-700">{g.sourceName}</h3>
-                              <div className="flex items-center gap-2 mt-1">
-                                <span className="text-[10px] text-gray-500">{g.items.filter(i => i.selected).length}/{g.items.length} {locale === "zh" ? "条已选" : "selected"}</span>
-                                <span className="text-[10px] text-gray-500">·</span>
-                                {Object.entries(catCounts).map(([cat, count]) => (
-                                  <span key={cat} className={`text-[9px] px-1.5 py-0.5 rounded ${CATEGORY_META[cat as KnowledgeCategory]?.color}`}>{CATEGORY_META[cat as KnowledgeCategory]?.icon} {count}</span>
+                      <div key={g.id} className="rounded-xl border border-gray-200 overflow-hidden bg-white">
+                        {/* Folder header */}
+                        <div className="px-5 py-4 bg-gray-50 border-b border-gray-100">
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-xl bg-white border border-gray-200 flex items-center justify-center text-lg shadow-sm">
+                              {SOURCE_TYPE_META[g.sourceType as SourceType]?.icon || "📁"}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <h3 className="text-sm font-semibold text-gray-800 truncate">{g.name}</h3>
+                                {g.tags.map((tag: string) => (
+                                  <span key={tag} className="text-[9px] px-1.5 py-0.5 rounded bg-accent/8 text-accent">{tag}</span>
                                 ))}
                               </div>
-                              {/* Index summary */}
-                              <p className="text-[10px] text-gray-500 mt-2 leading-relaxed">
-                                {locale === "zh"
-                                  ? `来源类型：${g.sourceType.toUpperCase()} | 包含 ${Object.entries(catCounts).map(([c, n]) => `${CATEGORY_META[c as KnowledgeCategory]?.labelCn || c} ${n}条`).join("、")}`
-                                  : `Type: ${g.sourceType.toUpperCase()} | Contains ${Object.entries(catCounts).map(([c, n]) => `${n} ${CATEGORY_META[c as KnowledgeCategory]?.label || c}`).join(", ")}`
-                                }
-                              </p>
+                              <div className="flex items-center gap-2 mt-1">
+                                <span className="text-[10px] text-gray-400">{g.selectedCount}/{g.itemCount} {locale === "zh" ? "条已选" : "selected"}</span>
+                                {Object.entries(g.categoryCounts).map(([cat, count]) => (
+                                  <span key={cat} className={`text-[8px] px-1 py-0.5 rounded ${CATEGORY_META[cat as KnowledgeCategory]?.color}`}>{CATEGORY_META[cat as KnowledgeCategory]?.icon} {count}</span>
+                                ))}
+                              </div>
+                              {g.description && <p className="text-[10px] text-gray-400 mt-1">{g.description}</p>}
                             </div>
-                            <button onClick={() => { if (confirm(locale === "zh" ? "确认删除该数据源及其所有知识？" : "Delete this source and all its knowledge?")) removeSource(g.sourceId); }} className="px-3 py-1 rounded-lg bg-red-500/10 text-red-400 text-[10px] opacity-50 hover:opacity-100 transition-all">{locale === "zh" ? "删除" : "Remove"}</button>
+                            <div className="flex items-center gap-2">
+                              <button onClick={async () => {
+                                // Toggle all items in this group via the group's items
+                                const newVal = !allSel;
+                                for (const it of groupItems) { await fetch(`/api/knowledge/${it.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ selected: newVal }) }); }
+                                await loadKnowledge(); await loadGroups();
+                              }} className={`w-5 h-5 rounded border shrink-0 flex items-center justify-center ${allSel ? "bg-accent border-accent" : someSel ? "bg-accent/40 border-accent/60" : "border-gray-300"}`}>
+                                {(allSel || someSel) && <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d={allSel ? "M5 13l4 4L19 7" : "M5 12h14"} /></svg>}
+                              </button>
+                              <button onClick={async () => { if (confirm(locale === "zh" ? "确认删除该知识组？" : "Delete this group?")) { await fetch(`/api/knowledge-groups/${g.id}`, { method: "DELETE" }); await loadKnowledge(); await loadGroups(); } }}
+                                className="px-2 py-1 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition-all">
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                              </button>
+                            </div>
                           </div>
                         </div>
-                        {/* Items (inline editable) */}
+
+                        {/* Items list */}
                         <div className="p-3 grid grid-cols-1 lg:grid-cols-2 gap-2">
-                          {filteredGroupItems.map(it => {
+                          {(filteredGroupItems.length > 0 ? filteredGroupItems : groupItems).slice(0, 20).map(it => {
                             const cm = CATEGORY_META[it.category as KnowledgeCategory];
                             return (
-                              <div key={it.id} className={`p-3 rounded-lg transition-all group ${it.selected ? "bg-gray-50/50" : "opacity-30"}`}>
+                              <div key={it.id} className={`p-3 rounded-lg transition-all group ${it.selected ? "bg-gray-50" : "opacity-30"}`}>
                                 <div className="flex items-start gap-2">
-                                  <button onClick={() => toggleItem(it.id)} className={`mt-0.5 w-3.5 h-3.5 rounded border shrink-0 flex items-center justify-center ${it.selected ? "bg-accent border-accent" : "border-gray-300"}`}>{it.selected && <svg className="w-2 h-2 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}</button>
+                                  <button onClick={() => toggleItem(it.id)} className={`mt-0.5 w-3.5 h-3.5 rounded border shrink-0 flex items-center justify-center ${it.selected ? "bg-accent border-accent" : "border-gray-300"}`}>
+                                    {it.selected && <svg className="w-2 h-2 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
+                                  </button>
                                   <div className="flex-1 min-w-0">
-                                    <div className="flex items-center gap-1 mb-1">
+                                    <div className="flex items-center gap-1 mb-0.5">
                                       <span className={`text-[8px] px-1 py-0.5 rounded ${cm?.color}`}>{cm?.icon}</span>
-                                      <input className="flex-1 bg-transparent text-[11px] font-medium text-gray-600 focus:outline-none focus:text-gray-900 truncate" value={it.title}
-                                        onChange={e => { setItems(p => p.map(i => i.id === it.id ? { ...i, title: e.target.value } : i)); }}
-                                        onBlur={e => { fetch(`/api/knowledge/${it.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: e.target.value }) }); }} />
+                                      <span className="text-[11px] font-medium text-gray-600 truncate">{it.title}</span>
                                     </div>
-                                    <textarea className="w-full bg-transparent text-[10px] text-gray-500 leading-relaxed resize-none focus:outline-none focus:text-gray-500" rows={2} value={it.content}
-                                      onChange={e => { setItems(p => p.map(i => i.id === it.id ? { ...i, content: e.target.value } : i)); }}
-                                      onBlur={e => { fetch(`/api/knowledge/${it.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: e.target.value }) }); }} />
+                                    <p className="text-[10px] text-gray-400 line-clamp-2">{it.content}</p>
                                   </div>
-                                  <button onClick={() => { if (confirm(locale === "zh" ? "确认删除？" : "Delete this item?")) deleteItem(it.id); }} className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-400"><svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
+                                  <button onClick={() => { if (confirm(locale === "zh" ? "确认删除？" : "Delete?")) deleteItem(it.id); }} className="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-400">
+                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                                  </button>
                                 </div>
                               </div>
                             );
                           })}
+                          {groupItems.length > 20 && <p className="text-[10px] text-gray-400 text-center col-span-2 py-2">+{groupItems.length - 20} more items</p>}
                         </div>
                       </div>
                     );
@@ -908,6 +976,30 @@ function getSourceGroups(items: KnowledgeItem[]): SourceGroup[] {
     groups.find(g => g.sourceId === key)!.items.push(item);
   }
   return groups;
+}
+
+function generateIndexMd(name: string, description: string, tags: string[], items: KnowledgeItem[]): string {
+  const catCounts = items.reduce<Record<string, number>>((a, i) => { a[i.category] = (a[i.category] || 0) + 1; return a; }, {});
+  const catSummary = Object.entries(catCounts).map(([c, n]) => `- ${c}: ${n} items`).join("\n");
+  const itemList = items.map((it, i) => `${i + 1}. [${it.category}] ${it.title}`).join("\n");
+
+  return `# ${name}
+
+## Trigger
+Use this knowledge group when building websites related to: ${tags.join(", ") || name}.
+
+## Summary
+${description}
+
+## Categories
+${catSummary}
+
+## Items
+${itemList}
+
+## Key Information
+${items.filter(i => i.category === "factual" || i.category === "meta").map(i => `- ${i.title}: ${i.content.slice(0, 100)}`).join("\n") || "See items for details."}
+`;
 }
 
 function buildWorkspaceDataFromKnowledge(items: KnowledgeItem[]) {

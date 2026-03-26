@@ -38,6 +38,8 @@
   "exclude": [
     "node_modules",
     "output",
+    "sites-data",
+    "skills",
     "ui-ux-pro-max-skill",
     "ui-skill",
     "bussiness-portfolio",

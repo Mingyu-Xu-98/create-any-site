@@ -10,7 +10,7 @@ import { logger } from "@/lib/logger";
 
 const SITES_DIR = path.join(process.cwd(), "sites-data");
 const OUTPUT_DIR = path.join(process.cwd(), "output"); // Active preview symlink target
-const PREVIEW_PORT = 3001;
+const PREVIEW_PORT = 3002;
 const SHARED_MODULES = path.join(process.cwd(), "sites-data", "_shared_node_modules");
 
 let devServerStarted = false;

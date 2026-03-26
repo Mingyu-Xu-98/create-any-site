@@ -27,11 +27,7 @@ export default function Navbar() {
               <Link href="/dashboard" className="text-sm text-gray-500 hover:text-gray-900 transition-colors">
                 {t("nav.dashboard")}
               </Link>
-              {role === "admin" && (
-                <Link href="/admin" className="text-sm text-gray-500 hover:text-gray-900 transition-colors">
-                  {t("nav.admin")}
-                </Link>
-              )}
+              {/* Admin link hidden — module paused */}
               <LocaleSwitcher className="!bg-gray-100 !text-gray-500 hover:!bg-gray-200" />
               <div className="flex items-center gap-3">
                 <div className="w-7 h-7 rounded-full bg-gradient-to-br from-violet-500 to-indigo-500 flex items-center justify-center text-xs text-white font-medium">

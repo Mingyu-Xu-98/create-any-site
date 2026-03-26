@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import type { KnowledgeItem } from "@/lib/knowledge";
 import { logger } from "@/lib/logger";
 import { db } from "@/lib/db";
-import { skills, sites } from "@/lib/db/schema";
+import { skills, sites, knowledgeGroups } from "@/lib/db/schema";
 import { eq, inArray } from "drizzle-orm";
 
 const CODE_CONTEXT_FILES = [
@@ -17,6 +17,17 @@ export async function POST(req: NextRequest) {
 
   const { messages, knowledge, currentSelections, loadedSkills, siteId, phase } = await req.json();
   const selectedKnowledge = (knowledge as KnowledgeItem[]).filter(k => k.selected);
+  const session = await (await import("@/lib/auth")).auth();
+
+  // Load knowledge group indexes (Level 0: index.md summaries)
+  let knowledgeGroupIndex = "";
+  if (session?.user?.id) {
+    const groups = await db.select({ name: knowledgeGroups.name, indexMd: knowledgeGroups.indexMd, sourceType: knowledgeGroups.sourceType })
+      .from(knowledgeGroups).where(eq(knowledgeGroups.userId, session.user.id));
+    if (groups.length > 0) {
+      knowledgeGroupIndex = groups.map(g => g.indexMd ? `### ${g.name} (${g.sourceType})\n${g.indexMd.slice(0, 500)}` : `### ${g.name} (${g.sourceType})`).join("\n\n");
+    }
+  }
 
   // Load skill catalog
   const allSkills = await db.select({ id: skills.id, name: skills.name, description: skills.description, category: skills.category })
@@ -73,6 +84,7 @@ export async function POST(req: NextRequest) {
     phase: phase || "auto",
     knowledgeContext,
     knowledgeSummary,
+    knowledgeGroupIndex,
     skillCatalog,
     activatedContext,
     codeContext,
@@ -117,14 +129,15 @@ export async function POST(req: NextRequest) {
 
 // ─── System prompt builder ───
 function buildSystemPrompt(ctx: {
-  phase: string; knowledgeContext: string; knowledgeSummary: string;
+  phase: string; knowledgeContext: string; knowledgeSummary: string; knowledgeGroupIndex: string;
   skillCatalog: string; activatedContext: string;
   codeContext: string; hasSiteCode: boolean; currentPrd: string;
   currentSelections: unknown;
 }): string {
   return `You are a professional website product manager and builder. You guide users through a structured process to create high-quality websites.
 
-## Knowledge Base (${ctx.knowledgeSummary}):
+${ctx.knowledgeGroupIndex ? `## Knowledge Groups (indexes):\n${ctx.knowledgeGroupIndex}\n` : ""}
+## Selected Knowledge (${ctx.knowledgeSummary}):
 ${ctx.knowledgeContext || "(Empty)"}
 
 ## Available Skills:

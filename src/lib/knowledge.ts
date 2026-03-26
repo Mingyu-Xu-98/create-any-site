@@ -1,6 +1,6 @@
 // Knowledge Base types for multi-source analysis
 
-export type SourceType = "pdf" | "zip" | "git" | "bilibili" | "youtube";
+export type SourceType = "pdf" | "zip" | "docx" | "txt" | "md" | "git" | "bilibili" | "youtube";
 
 export interface Source {
   id: string;
@@ -49,9 +49,12 @@ export const CATEGORY_META: Record<KnowledgeCategory, { label: string; labelCn: 
 
 export const SOURCE_TYPE_META: Record<SourceType, { label: string; icon: string; accept?: string; placeholder?: string }> = {
   pdf:      { label: "PDF",      icon: "📄", accept: ".pdf" },
+  docx:     { label: "DOCX",     icon: "📝", accept: ".docx,.doc" },
+  txt:      { label: "TXT",      icon: "📃", accept: ".txt" },
+  md:       { label: "MD",       icon: "📋", accept: ".md" },
   zip:      { label: "ZIP",      icon: "📦", accept: ".zip" },
-  git:      { label: "Git Repo", icon: "🔀", placeholder: "https://github.com/user/repo" },
-  bilibili: { label: "Bilibili", icon: "📺", placeholder: "https://www.bilibili.com/video/BVxxxxxx" },
+  git:      { label: "Git",      icon: "🔀", placeholder: "https://github.com/user/repo" },
+  bilibili: { label: "B站",      icon: "📺", placeholder: "https://www.bilibili.com/video/BVxxxxxx" },
   youtube:  { label: "YouTube",  icon: "▶️",  placeholder: "https://www.youtube.com/watch?v=xxxxx" },
 };
 

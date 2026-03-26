@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import JSZip from "jszip";
+import mammoth from "mammoth";
 import type { KnowledgeItem, KnowledgeCategory } from "@/lib/knowledge";
 import { logger } from "@/lib/logger";
 
@@ -466,6 +467,87 @@ Rules:
   return items;
 }
 
+// ─── DOCX extraction ───
+async function extractFromDocx(buffer: ArrayBuffer): Promise<string> {
+  logger.info("docx", "Extracting text from DOCX...");
+  const result = await mammoth.extractRawText({ buffer: Buffer.from(buffer) });
+  logger.info("docx", `Extracted ${result.value.length} chars`);
+  return result.value;
+}
+
+// ─── Detect file type from name ───
+function detectFileType(name: string): string {
+  const ext = name.split(".").pop()?.toLowerCase() || "";
+  if (ext === "pdf") return "pdf";
+  if (ext === "docx") return "docx";
+  if (ext === "doc") return "docx";
+  if (ext === "txt") return "txt";
+  if (ext === "md") return "md";
+  if (ext === "zip") return "zip";
+  return "unknown";
+}
+
+// ─── Parse a single file buffer by type ───
+async function parseFileContent(buffer: ArrayBuffer, name: string, type: string): Promise<string> {
+  switch (type) {
+    case "pdf": return await parsePdfWithMinerU(buffer, name);
+    case "docx": return await extractFromDocx(buffer);
+    case "txt":
+    case "md": return new TextDecoder("utf-8").decode(new Uint8Array(buffer));
+    default: return "";
+  }
+}
+
+// ─── ZIP: parse each file individually ───
+interface ZipFileResult {
+  name: string;
+  type: string;
+  items: KnowledgeItem[];
+}
+
+async function parseZipPerFile(buffer: ArrayBuffer): Promise<ZipFileResult[]> {
+  const zip = await JSZip.loadAsync(buffer);
+  const results: ZipFileResult[] = [];
+  const supportedExts = ["pdf", "docx", "doc", "txt", "md", "json", "csv", "yaml", "yml", "html"];
+
+  for (const [filePath, entry] of Object.entries(zip.files)) {
+    if (entry.dir) continue;
+    const fileName = filePath.split("/").pop() || filePath;
+    const ext = fileName.split(".").pop()?.toLowerCase() || "";
+    if (!supportedExts.includes(ext)) continue;
+
+    logger.info("zip-per-file", `Processing: ${fileName} (${ext})`);
+
+    try {
+      const fileBuffer = await entry.async("arraybuffer");
+      const fileType = detectFileType(fileName);
+      let content: string;
+
+      if (fileType === "pdf") {
+        content = await parsePdfWithMinerU(fileBuffer, fileName);
+      } else if (fileType === "docx") {
+        content = await extractFromDocx(fileBuffer);
+      } else {
+        // txt, md, json, csv, yaml, html — read as text
+        content = await entry.async("string");
+      }
+
+      if (!content || content.trim().length < 10) {
+        logger.warn("zip-per-file", `Skipping ${fileName}: too short`);
+        continue;
+      }
+
+      const items = await aiExtractKnowledge(content, fileName, ext);
+      results.push({ name: fileName, type: ext, items });
+      logger.info("zip-per-file", `${fileName}: ${items.length} items extracted`);
+    } catch (err) {
+      logger.warn("zip-per-file", `Failed to process ${fileName}: ${err instanceof Error ? err.message : "error"}`);
+    }
+  }
+
+  return results;
+}
+
 // ─── Main handler ───
 export async function POST(req: NextRequest) {
   const requestId = crypto.randomUUID().slice(0, 8);
@@ -473,61 +555,65 @@ export async function POST(req: NextRequest) {
   try {
     const contentType = req.headers.get("content-type") || "";
 
-    let sourceContent: string;
-    let sourceName: string;
-    let sourceType: string;
-
     if (contentType.includes("multipart/form-data")) {
       const formData = await req.formData();
       const file = formData.get("file") as File;
-      sourceType = (formData.get("type") as string) || "zip";
+      if (!file) return NextResponse.json({ error: "No file provided" }, { status: 400 });
 
-      if (!file) {
-        return NextResponse.json({ error: "No file provided" }, { status: 400 });
-      }
-
-      sourceName = file.name;
+      const sourceName = file.name;
       const buffer = await file.arrayBuffer();
+      const fileType = detectFileType(sourceName);
 
-      logger.info("handler", `[${requestId}] File upload: ${sourceName} (${(buffer.byteLength / 1024).toFixed(1)}KB), type: ${sourceType}`);
+      logger.info("handler", `[${requestId}] File upload: ${sourceName} (${(buffer.byteLength / 1024).toFixed(1)}KB), type: ${fileType}`);
 
-      if (sourceType === "pdf" || file.name.endsWith(".pdf")) {
-        sourceType = "pdf";
-        sourceContent = await parsePdfWithMinerU(buffer, sourceName);
+      if (fileType === "zip") {
+        // ZIP: parse each file individually
+        const results = await parseZipPerFile(buffer);
+        const allItems: KnowledgeItem[] = [];
+        const fileResults: { name: string; type: string; itemCount: number }[] = [];
+
+        for (const r of results) {
+          allItems.push(...r.items);
+          fileResults.push({ name: r.name, type: r.type, itemCount: r.items.length });
+        }
+
+        logger.info("handler", `[${requestId}] ZIP complete. ${results.length} files → ${allItems.length} items`);
+        return NextResponse.json({ items: allItems, fileResults, sourceType: "zip" });
+
+      } else if (["pdf", "docx", "txt", "md"].includes(fileType)) {
+        // Single file
+        const content = await parseFileContent(buffer, sourceName, fileType);
+
+        if (!content || content.trim().length < 10) {
+          return NextResponse.json({ error: "No readable content found in file" }, { status: 400 });
+        }
+
+        logger.info("handler", `[${requestId}] Content: ${content.length} chars, sending to AI...`);
+        const items = await aiExtractKnowledge(content, sourceName, fileType);
+        logger.info("handler", `[${requestId}] Complete. ${items.length} items from "${sourceName}"`);
+
+        return NextResponse.json({ items, sourceType: fileType });
       } else {
-        sourceContent = await extractFromZip(buffer);
-        sourceType = "zip";
+        return NextResponse.json({ error: `Unsupported file type: ${fileType}` }, { status: 400 });
       }
 
-      if (!sourceContent || sourceContent.trim().length < 10) {
-        logger.warn("handler", `[${requestId}] No readable content found in file`);
-        return NextResponse.json({ error: "No readable content found in file" }, { status: 400 });
-      }
     } else {
+      // URL source (git, bilibili, youtube)
       const body = await req.json();
-      sourceType = body.type;
-      sourceName = body.url;
+      if (!body.url || !body.type) return NextResponse.json({ error: "URL and type required" }, { status: 400 });
 
-      if (!body.url || !body.type) {
-        return NextResponse.json({ error: "URL and type are required" }, { status: 400 });
-      }
+      logger.info("handler", `[${requestId}] URL source: ${body.url}, type: ${body.type}`);
+      const content = await fetchUrlContent(body.url, body.type);
 
-      logger.info("handler", `[${requestId}] URL source: ${sourceName}, type: ${sourceType}`);
-      sourceContent = await fetchUrlContent(body.url, body.type);
+      logger.info("handler", `[${requestId}] Content: ${content.length} chars, sending to AI...`);
+      const items = await aiExtractKnowledge(content, body.url, body.type);
+      logger.info("handler", `[${requestId}] Complete. ${items.length} items`);
+
+      return NextResponse.json({ items, sourceType: body.type });
     }
-
-    logger.info("handler", `[${requestId}] Content extracted: ${sourceContent.length} chars, sending to AI...`);
-
-    const items = await aiExtractKnowledge(sourceContent, sourceName, sourceType);
-
-    logger.info("handler", `[${requestId}] Complete. ${items.length} knowledge items extracted from "${sourceName}"`);
-
-    return NextResponse.json({ items });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    logger.error("handler", `[${requestId}] Error: ${message}`, {
-      stack: err instanceof Error ? err.stack?.split("\n").slice(0, 3) : undefined,
-    });
+    logger.error("handler", `[${requestId}] Error: ${message}`);
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

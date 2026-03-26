@@ -65,11 +65,27 @@ export const sites = sqliteTable("sites", {
   updatedAt: text("updated_at").$defaultFn(() => new Date().toISOString()),
 });
 
+// ---- Knowledge Groups (folders) ----
+
+export const knowledgeGroups = sqliteTable("knowledge_groups", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  description: text("description"),
+  indexMd: text("index_md"),           // AI-generated index for model consumption
+  tags: text("tags"),                  // JSON array
+  sourceFile: text("source_file"),     // Original filename
+  sourceType: text("source_type"),     // pdf/zip/docx/txt/md
+  createdAt: text("created_at").$defaultFn(() => new Date().toISOString()),
+  updatedAt: text("updated_at").$defaultFn(() => new Date().toISOString()),
+});
+
 // ---- Knowledge Items ----
 
 export const knowledgeItems = sqliteTable("knowledge_items", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  groupId: text("group_id").references(() => knowledgeGroups.id, { onDelete: "cascade" }),
   sourceId: text("source_id"),
   sourceName: text("source_name"),
   sourceType: text("source_type"),
