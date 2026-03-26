@@ -68,9 +68,9 @@ const nextConfig: NextConfig = { output: "export", images: { unoptimized: true }
 export default nextConfig;`;
 
     fs.writeFile(configPath, configContent, "utf-8").then(() => {
-      exec("npx next build", {
+      exec("npx next build --no-turbopack", {
         cwd: siteDir,
-        timeout: 120_000,
+        timeout: 180_000,
         env: { ...process.env, NODE_ENV: "production" },
       }, (err, stdout, stderr) => {
         if (err) {
