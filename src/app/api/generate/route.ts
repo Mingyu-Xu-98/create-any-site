@@ -57,21 +57,22 @@ async function ensureNodeModules(siteDir: string) {
 }
 
 // Static build: next build with static export
-function staticBuild(siteDir: string): Promise<void> {
+async function staticBuild(siteDir: string): Promise<void> {
+  logger.info("generate", "Running next build (static export)...");
+
+  const configContent = `/** @type {import('next').NextConfig} */
+const nextConfig = { output: "export", images: { unoptimized: true } };
+module.exports = nextConfig;`;
+  const configPathJs = path.join(siteDir, "next.config.js");
+  const configPathTs = path.join(siteDir, "next.config.ts");
+  try { await fs.unlink(configPathTs); } catch {}
+  await fs.writeFile(configPathJs, configContent, "utf-8");
+
   return new Promise((resolve, reject) => {
-    logger.info("generate", "Running next build (static export)...");
-
-    // Patch next.config to enable static export
-    const configPath = path.join(siteDir, "next.config.ts");
-    const configContent = `import type { NextConfig } from "next";
-const nextConfig: NextConfig = { output: "export", images: { unoptimized: true } };
-export default nextConfig;`;
-
-    fs.writeFile(configPath, configContent, "utf-8").then(() => {
-      exec("npx next build --no-turbopack", {
+    exec("npx next build", {
         cwd: siteDir,
         timeout: 180_000,
-        env: { ...process.env, NODE_ENV: "production" },
+        env: { ...process.env, NODE_ENV: "production", NEXT_TURBOPACK: "0" },
       }, (err, stdout, stderr) => {
         if (err) {
           logger.error("generate", `Static build failed: ${err.message}`, { stderr: stderr?.slice(0, 500) });
@@ -81,7 +82,6 @@ export default nextConfig;`;
           resolve();
         }
       });
-    });
   });
 }
 

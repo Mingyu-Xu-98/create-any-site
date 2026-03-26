@@ -70,7 +70,7 @@ export async function POST(req: NextRequest) {
     // Rebuild static export after modification
     try {
       await new Promise<void>((resolve, reject) => {
-        exec("npx next build --no-turbopack", { cwd: siteDir, timeout: 180_000, env: { ...process.env, NODE_ENV: "production" } }, (err) => {
+        exec("npx next build", { cwd: siteDir, timeout: 180_000, env: { ...process.env, NODE_ENV: "production", NEXT_TURBOPACK: "0" } }, (err) => {
           if (err) { logger.warn("modify", `Rebuild failed: ${err.message}`); reject(err); }
           else { logger.info("modify", "Rebuild complete"); resolve(); }
         });
