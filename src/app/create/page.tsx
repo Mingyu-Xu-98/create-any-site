@@ -9,6 +9,8 @@ import type { KnowledgeItem, Source, SourceType, KnowledgeCategory } from "@/lib
 import { CATEGORY_META, SOURCE_TYPE_META } from "@/lib/knowledge";
 import { getAutoLayout } from "@/lib/questions";
 import { getImageTasks } from "@/lib/image-prompts";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 type View = "build" | "sources" | "knowledge";
 interface ChatMessage { role: "user" | "assistant"; content: string }
@@ -44,6 +46,8 @@ function CreatePageInner() {
   const [previewTab, setPreviewTab] = useState<"preview" | "prd">("preview");
   const [workingStatus, setWorkingStatus] = useState("");
   const [prdData, setPrdData] = useState<PRDData | null>(null);
+  const [prdEditing, setPrdEditing] = useState(false);
+  const [prdEditText, setPrdEditText] = useState("");
   const [pendingOptions, setPendingOptions] = useState<{ question: string; options: OptionCard[]; multiSelect: boolean } | null>(null);
   const [multiSelectValues, setMultiSelectValues] = useState<string[]>([]);
   const [customOptionInput, setCustomOptionInput] = useState("");
@@ -787,23 +791,54 @@ function CreatePageInner() {
               {/* PRD tab */}
               {previewTab === "prd" && (
                 prdData ? (
-                  <div className="flex-1 overflow-y-auto">
+                  <div className="flex-1 flex flex-col overflow-hidden">
                     {/* PRD header */}
-                    <div className="sticky top-0 z-10 px-4 py-2 bg-gray-50/95 backdrop-blur border-b border-gray-200/60 flex items-center justify-between">
-                      <span className="text-[10px] text-gray-400">v{prdData.version || 1} · {prdData.siteType}</span>
+                    <div className="shrink-0 px-4 py-2 bg-white border-b border-gray-200 flex items-center justify-between">
+                      <span className="text-[10px] text-gray-400">v{prdData.version || 1}{prdData.siteType ? ` · ${prdData.siteType}` : ""}</span>
                       <div className="flex gap-1.5">
-                        {!previewUrl && (
-                          <button onClick={() => sendChat(locale === "zh" ? "确认构建" : "Confirm build")} className="px-3 py-1 rounded-lg bg-accent text-white text-[10px] hover:bg-accent/90">
-                            {locale === "zh" ? "确认构建" : "Build"}
+                        <button onClick={() => {
+                          if (prdEditing) {
+                            // Save edits
+                            setPrdData({ ...prdData, markdown: prdEditText });
+                            if (siteIdRef.current) {
+                              fetch(`/api/sites/${siteIdRef.current}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prd: JSON.stringify({ ...prdData, markdown: prdEditText }) }) });
+                            }
+                            setPrdEditing(false);
+                          } else {
+                            setPrdEditText(prdData.markdown || JSON.stringify(prdData, null, 2));
+                            setPrdEditing(true);
+                          }
+                        }} className={`px-3 py-1 rounded-lg text-[10px] transition-all ${prdEditing ? "bg-green-500 text-white hover:bg-green-600" : "bg-gray-100 text-gray-500 hover:bg-gray-200"}`}>
+                          {prdEditing ? (locale === "zh" ? "💾 保存" : "💾 Save") : (locale === "zh" ? "✏️ 编辑" : "✏️ Edit")}
+                        </button>
+                        {prdEditing && (
+                          <button onClick={() => setPrdEditing(false)} className="px-3 py-1 rounded-lg bg-gray-100 text-gray-400 text-[10px] hover:bg-gray-200">
+                            {locale === "zh" ? "取消" : "Cancel"}
+                          </button>
+                        )}
+                        {!previewUrl && !prdEditing && (
+                          <button onClick={() => sendChat(locale === "zh" ? "确认构建" : "Confirm build")} className="px-3 py-1 rounded-lg bg-accent text-white text-[10px] hover:bg-accent/90 shadow-sm">
+                            {locale === "zh" ? "✅ 确认构建" : "✅ Build"}
                           </button>
                         )}
                       </div>
                     </div>
-                    {/* PRD content (rendered markdown) */}
-                    <div className="p-5 prose prose-invert prose-sm max-w-none">
-                      <div className="text-[12px] text-gray-600 leading-relaxed whitespace-pre-wrap font-mono">
-                        {prdData.markdown || JSON.stringify(prdData, null, 2)}
-                      </div>
+                    {/* PRD content */}
+                    <div className="flex-1 overflow-y-auto">
+                      {prdEditing ? (
+                        <textarea
+                          value={prdEditText}
+                          onChange={e => setPrdEditText(e.target.value)}
+                          className="w-full h-full p-5 bg-white text-[13px] text-gray-700 font-mono leading-relaxed resize-none focus:outline-none"
+                          spellCheck={false}
+                        />
+                      ) : (
+                        <div className="p-5 max-w-none prose prose-sm prose-gray prose-headings:text-gray-800 prose-p:text-gray-600 prose-li:text-gray-600 prose-strong:text-gray-800 prose-code:text-accent prose-code:bg-accent/5 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:before:content-none prose-code:after:content-none">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                            {prdData.markdown || JSON.stringify(prdData, null, 2)}
+                          </ReactMarkdown>
+                        </div>
+                      )}
                     </div>
                   </div>
                 ) : (
