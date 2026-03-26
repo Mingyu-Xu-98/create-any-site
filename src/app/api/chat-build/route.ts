@@ -34,13 +34,24 @@ export async function POST(req: NextRequest) {
     .from(skills).where(eq(skills.enabled, 1));
   const skillCatalog = allSkills.map(s => `- ${s.name} (id:${s.id}) [${s.category}]: ${s.description}`).join("\n") || "No skills.";
 
-  // Load activated skills
+  // Load activated skills (Level 1 + Level 2)
   const loadedSkillIds: string[] = Array.isArray(loadedSkills) ? loadedSkills : [];
   let activatedContext = "";
   if (loadedSkillIds.length > 0) {
-    const loaded = await db.select({ id: skills.id, name: skills.name, indexContent: skills.indexContent })
+    const loaded = await db.select({ id: skills.id, name: skills.name, indexContent: skills.indexContent, references: skills.references })
       .from(skills).where(inArray(skills.id, loadedSkillIds));
-    activatedContext = loaded.map(s => `### Skill: ${s.name}\n${s.indexContent}`).join("\n\n---\n\n");
+    activatedContext = loaded.map(s => {
+      let context = `### Skill: ${s.name}\n${s.indexContent}`;
+      if (s.references) {
+        try {
+          const refs: { name: string; content: string }[] = JSON.parse(s.references);
+          if (refs.length > 0) {
+            context += "\n\n#### References:\n" + refs.map(ref => `**${ref.name}:**\n${ref.content}`).join("\n\n");
+          }
+        } catch { /* ignore invalid JSON */ }
+      }
+      return context;
+    }).join("\n\n---\n\n");
   }
 
   // Load code context if site exists

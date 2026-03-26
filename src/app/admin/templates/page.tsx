@@ -38,7 +38,7 @@ export default function TemplatesAdminPage() {
   useEffect(() => { if (session?.user) load(); }, [session, load]);
 
   const deleteTemplate = async (id: string) => {
-    if (!confirm("Delete this template?")) return;
+    if (!confirm(zh ? "确定删除此模板？" : "Delete this template?")) return;
     await fetch(`/api/admin/templates/${id}`, { method: "DELETE" });
     load();
   };
@@ -69,7 +69,7 @@ export default function TemplatesAdminPage() {
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
             </svg>
-            Add Template
+            {zh ? "添加模板" : "Add Template"}
           </Link>
         </div>
 
@@ -84,8 +84,8 @@ export default function TemplatesAdminPage() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zm0 8a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6z" />
               </svg>
             </div>
-            <h3 className="text-lg font-medium text-gray-600">No templates yet</h3>
-            <p className="text-sm text-gray-500 mt-1">Add your first complete website template</p>
+            <h3 className="text-lg font-medium text-gray-600">{zh ? "暂无模板" : "No templates yet"}</h3>
+            <p className="text-sm text-gray-500 mt-1">{zh ? "添加你的第一个完整网站模板" : "Add your first complete website template"}</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -103,10 +103,10 @@ export default function TemplatesAdminPage() {
                   <div className="flex items-center justify-between mb-1">
                     <h3 className="text-sm font-medium truncate">{tpl.name}</h3>
                     {tpl.featured ? (
-                      <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-yellow-500/20 text-yellow-400">Featured</span>
+                      <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-yellow-500/20 text-yellow-400">{zh ? "推荐" : "Featured"}</span>
                     ) : null}
                   </div>
-                  <p className="text-[10px] text-gray-500 mb-3 line-clamp-2">{tpl.description || "No description"}</p>
+                  <p className="text-[10px] text-gray-500 mb-3 line-clamp-2">{tpl.description || (zh ? "暂无描述" : "No description")}</p>
                   <div className="flex items-center gap-1.5 mb-3">
                     <span className="text-[9px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">{tpl.siteType}</span>
                     <span className="text-[9px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">{tpl.category}</span>
@@ -116,13 +116,13 @@ export default function TemplatesAdminPage() {
                       href={`/admin/templates/${tpl.id}`}
                       className="flex-1 text-center px-3 py-1.5 rounded-lg bg-gray-100 text-xs text-gray-500 hover:bg-gray-100 transition-all"
                     >
-                      Edit
+                      {zh ? "编辑" : "Edit"}
                     </Link>
                     <button
                       onClick={() => deleteTemplate(tpl.id)}
                       className="px-3 py-1.5 rounded-lg bg-red-500/10 text-xs text-red-400 hover:bg-red-500/20 transition-all"
                     >
-                      Delete
+                      {zh ? "删除" : "Delete"}
                     </button>
                   </div>
                 </div>

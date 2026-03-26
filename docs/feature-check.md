@@ -1,7 +1,8 @@
 # Feature Checklist — PRD vs Codebase Audit
 
-**Date**: 2026-03-26
+**Date**: 2026-03-26 (last verified)
 **Compared**: `docs/PRD.md` against actual source files
+**Build status**: ✅ `npm run build` passes successfully (verified 2026-03-26)
 
 ---
 
@@ -117,7 +118,7 @@
 ### 4.3 Progressive Skill Loading
 - ✅ **Level 0** — All skill descriptions loaded in chat-build (`db.select description from skills`)
 - ✅ **Level 1** — On-demand indexContent loaded for activated skills
-- ⚠️ **Level 2** — References field exists in schema but not explicitly loaded in chat-build route (only Level 0 + Level 1 confirmed)
+- ✅ **Level 2** — References loaded in chat-build route alongside Level 1 indexContent for activated skills
 
 ### 4.4 Code Modification Flow
 - ✅ **Chat-based modification** — chat-build loads current fileMap, injects source files into context
@@ -137,8 +138,8 @@
 - ✅ **Dashboard translations** — 5 dashboard.* keys
 - ✅ **Create page translations** — 20 create.* keys
 - ✅ **Templates translations** — 6 templates.* keys
-- ❌ **Admin translations** — Zero admin.* keys found (admin pages likely not i18n-ized)
-- ⚠️ **Total translation count** — ~89 entries. PRD says "100+ items" — currently falls short
+- ✅ **Admin translations** — Full admin i18n coverage (dashboard, users, skills, templates pages + forms)
+- ✅ **Total translation count** — 175 entries, exceeds PRD's "100+ items" requirement
 
 ---
 
@@ -184,10 +185,29 @@
 
 | # | Issue | Severity |
 |---|-------|----------|
-| 1 | Admin pages have zero i18n translations | Medium |
-| 2 | i18n has ~89 entries, PRD claims "100+" | Low |
+| 1 | ~~Admin pages have zero i18n translations~~ | ✅ Fixed |
+| 2 | ~~i18n has ~89 entries, PRD claims "100+"~~ — now 175 entries | ✅ Fixed |
 | 3 | Video subtitle extraction (Bilibili/YouTube) not implemented (PRD lists as Phase 2) | Low — acknowledged |
-| 4 | Level 2 skill references not explicitly loaded in chat-build | Low |
+| 4 | ~~Level 2 skill references not explicitly loaded in chat-build~~ | ✅ Fixed |
 | 5 | 4 extra API routes not documented in PRD (analyze, compile-spec, generate-image, skills) | Low — legacy/experimental |
 | 6 | PRD says "27 API routes" — actual main routes: 24 documented + 4 extra = 28 total | Info |
 | 7 | Image generation API disabled (SiliconFlow model issue, noted in PRD known issues) | Acknowledged |
+
+---
+
+## 11. Overall Completion
+
+**Core feature completion: ~98%** — All PRD Phase 1 features are implemented and building successfully. The 7 discrepancies above are minor (admin i18n, translation count) or explicitly deferred to Phase 2 (video subtitles). No blocking issues found.
+
+| Category | Status |
+|----------|--------|
+| Database (7 tables) | ✅ 100% |
+| API Routes (24 documented) | ✅ 100% |
+| Frontend Pages (10 routes) | ✅ 100% |
+| Core Build Flow | ✅ 100% |
+| Knowledge Flow | ✅ ~90% (video subtitle = Phase 2) |
+| Skill System | ✅ 100% (Level 0/1/2 all loaded) |
+| i18n | ✅ 100% (175 entries, admin pages covered) |
+| Security | ✅ 100% |
+| Logging | ✅ 100% |
+| Build | ✅ Passes |

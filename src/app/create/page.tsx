@@ -387,7 +387,15 @@ function CreatePageInner() {
       for (const task of imageTasks) { try { await fetch("/api/generate-image", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt: task.prompt, filename: task.filename, style: theme }) }); } catch {} }
 
       setThinkingSteps(p => [...p, zh ? "🚀 启动预览服务..." : "🚀 Starting preview server..."]);
-      const start = Date.now(); while (Date.now() - start < 30000) { try { await fetch(url, { mode: "no-cors" }); break; } catch {} await new Promise(r => setTimeout(r, 1000)); }
+      let previewReady = false;
+      const start = Date.now();
+      for (let delay = 500; Date.now() - start < 30000; delay = Math.min(delay * 1.5, 3000)) {
+        try { await fetch(url, { mode: "no-cors" }); previewReady = true; break; } catch {}
+        await new Promise(r => setTimeout(r, delay));
+      }
+      if (!previewReady) {
+        setThinkingSteps(p => [...p, zh ? "⚠️ 预览服务启动超时，页面可能需要手动刷新" : "⚠️ Preview server timed out, you may need to refresh manually"]);
+      }
 
       setThinkingSteps(p => [...p, zh ? "💾 保存项目..." : "💾 Saving project..."]);
       setPreviewUrl(url); setGenStatus("ready"); setShowPreview(true); setPreviewTab("preview");
@@ -400,6 +408,7 @@ function CreatePageInner() {
   // Handle incremental code modification
   const handleModify = async (action: { changes: Array<{ file: string; action: string; content?: string }>; description?: string }) => {
     if (!siteIdRef.current) return;
+    const zh = locale === "zh";
     try {
       const r = await fetch("/api/modify", {
         method: "POST",
@@ -409,17 +418,26 @@ function CreatePageInner() {
       const d = await r.json();
       if (!r.ok) throw new Error(d.error);
 
-      // Refresh preview iframe
+      // Show build failure warning to user
+      if (d.buildSuccess === false) {
+        setChatMessages(p => [...p, { role: "assistant", content: zh ? `⚠️ 文件已保存，但构建失败：${d.buildError || "未知错误"}。预览可能未更新。` : `⚠️ Files saved but build failed: ${d.buildError || "Unknown error"}. Preview may not be updated.` }]);
+      }
+
+      // Refresh preview iframe with cache busting
       setShowPreview(true);
       if (previewUrl) {
-        // Force iframe reload after a short delay for HMR
         setTimeout(() => {
           const iframe = document.querySelector('iframe[title="Preview"]') as HTMLIFrameElement;
-          if (iframe) iframe.src = iframe.src;
+          if (iframe) {
+            const base = iframe.src.split("?")[0];
+            iframe.src = `${base}?t=${Date.now()}`;
+          }
         }, 1500);
       }
     } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error";
       console.error("Modify failed:", err);
+      setChatMessages(p => [...p, { role: "assistant", content: zh ? `❌ 修改失败：${msg}` : `❌ Modification failed: ${msg}` }]);
     }
   };
 

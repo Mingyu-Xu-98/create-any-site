@@ -21,13 +21,13 @@ interface SkillItem {
 }
 
 const CATEGORIES = [
-  { value: "all", label: "All" },
-  { value: "design", label: "Design" },
-  { value: "content", label: "Content" },
-  { value: "layout", label: "Layout" },
-  { value: "interaction", label: "Interaction" },
-  { value: "seo", label: "SEO" },
-  { value: "other", label: "Other" },
+  { value: "all", zh: "全部", en: "All" },
+  { value: "design", zh: "设计", en: "Design" },
+  { value: "content", zh: "内容", en: "Content" },
+  { value: "layout", zh: "布局", en: "Layout" },
+  { value: "interaction", zh: "交互", en: "Interaction" },
+  { value: "seo", zh: "SEO", en: "SEO" },
+  { value: "other", zh: "其他", en: "Other" },
 ];
 
 export default function SkillsAdminPage() {
@@ -66,7 +66,7 @@ export default function SkillsAdminPage() {
   };
 
   const deleteSkill = async (id: string) => {
-    if (!confirm("Delete this skill?")) return;
+    if (!confirm(zh ? "确定删除此技能？" : "Delete this skill?")) return;
     await fetch(`/api/admin/skills/${id}`, { method: "DELETE" });
     fetchSkills();
   };
@@ -113,7 +113,7 @@ export default function SkillsAdminPage() {
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
             </svg>
-            Add Skill
+            {zh ? "添加 Skill" : "Add Skill"}
           </Link>
         </div>
 
@@ -124,7 +124,7 @@ export default function SkillsAdminPage() {
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search skills..."
+              placeholder={zh ? "搜索技能..." : "Search skills..."}
               className="w-full px-4 py-2.5 rounded-xl bg-gray-100 border border-gray-200 text-sm text-gray-900 placeholder:text-gray-500 focus:outline-none focus:border-accent/50"
             />
           </div>
@@ -139,7 +139,7 @@ export default function SkillsAdminPage() {
                     : "bg-gray-100 text-gray-500 hover:bg-gray-100"
                 }`}
               >
-                {c.label}
+                {zh ? c.zh : c.en}
               </button>
             ))}
           </div>
@@ -159,8 +159,8 @@ export default function SkillsAdminPage() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
               </svg>
             </div>
-            <h3 className="text-lg font-medium text-gray-600">No skills yet</h3>
-            <p className="text-sm text-gray-500 mt-1">Add your first skill to enhance site generation</p>
+            <h3 className="text-lg font-medium text-gray-600">{zh ? "暂无技能" : "No skills yet"}</h3>
+            <p className="text-sm text-gray-500 mt-1">{zh ? "添加你的第一个技能来增强网站生成" : "Add your first skill to enhance site generation"}</p>
           </div>
         ) : (
           <div className="space-y-2">
@@ -212,13 +212,13 @@ export default function SkillsAdminPage() {
                       href={`/admin/skills/${skill.id}`}
                       className="px-3 py-1.5 rounded-lg bg-gray-100 text-xs text-gray-500 hover:bg-gray-100 hover:text-gray-900 transition-all"
                     >
-                      Edit
+                      {zh ? "编辑" : "Edit"}
                     </Link>
                     <button
                       onClick={() => deleteSkill(skill.id)}
                       className="px-3 py-1.5 rounded-lg bg-red-500/10 text-xs text-red-400 hover:bg-red-500/20 transition-all"
                     >
-                      Delete
+                      {zh ? "删除" : "Delete"}
                     </button>
                   </div>
                 </div>

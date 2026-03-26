@@ -68,18 +68,21 @@ export async function POST(req: NextRequest) {
     logger.info("modify", `[${requestId}] Applied ${applied.length} changes, rebuilding...`, { applied });
 
     // Rebuild static export after modification
+    let buildSuccess = true;
+    let buildError = "";
     try {
       await new Promise<void>((resolve, reject) => {
-        exec("npx next build", { cwd: siteDir, timeout: 180_000, env: { ...process.env, NODE_ENV: "production", NEXT_TURBOPACK: "0" } }, (err) => {
+        exec("npx next build", { cwd: siteDir, timeout: 180_000, env: { ...process.env, NODE_ENV: "production", NEXT_TURBOPACK: "0" } }, (err, _stdout, stderr) => {
           if (err) { logger.warn("modify", `Rebuild failed: ${err.message}`); reject(err); }
           else { logger.info("modify", "Rebuild complete"); resolve(); }
         });
       });
-    } catch {
-      // Non-fatal: files are saved, build can be retried
+    } catch (buildErr) {
+      buildSuccess = false;
+      buildError = buildErr instanceof Error ? buildErr.message : "Build failed";
     }
 
-    return NextResponse.json({ ok: true, applied });
+    return NextResponse.json({ ok: true, applied, buildSuccess, buildError: buildError || undefined });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unknown error";
     logger.error("modify", `[${requestId}] Failed: ${msg}`);

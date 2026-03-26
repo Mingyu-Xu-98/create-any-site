@@ -110,6 +110,7 @@ function genPackageJson(): string {
       react: "^19.2.4",
       "react-dom": "^19.2.4",
       qrcode: "^1.5.4",
+      "@types/qrcode": "^1.5.5",
       tailwindcss: "^4.2.1",
       typescript: "^5.9.3",
     },
