@@ -45,6 +45,8 @@ function CreatePageInner() {
   const [workingStatus, setWorkingStatus] = useState("");
   const [prdData, setPrdData] = useState<PRDData | null>(null);
   const [pendingOptions, setPendingOptions] = useState<{ question: string; options: OptionCard[]; multiSelect: boolean } | null>(null);
+  const [multiSelectValues, setMultiSelectValues] = useState<string[]>([]);
+  const [customOptionInput, setCustomOptionInput] = useState("");
   const [thinkingSteps, setThinkingSteps] = useState<string[]>([]);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
@@ -78,6 +80,8 @@ function CreatePageInner() {
   // Knowledge Groups
   interface KGGroup { id: string; name: string; description: string | null; tags: string[]; sourceFile: string | null; sourceType: string | null; indexMd: string | null; itemCount: number; selectedCount: number; categoryCounts: Record<string, number> }
   const [kGroups, setKGroups] = useState<KGGroup[]>([]);
+  const [expandedGroupId, setExpandedGroupId] = useState<string | null>(null);
+  const [groupItems, setGroupItems] = useState<KnowledgeItem[]>([]);
 
   useEffect(() => { if (authStatus === "unauthenticated") router.push("/login"); }, [authStatus, router]);
 
@@ -595,25 +599,72 @@ function CreatePageInner() {
 
               {/* Option cards */}
               {pendingOptions && (
-                <div className="space-y-2">
-                  <p className="text-xs text-gray-400">{pendingOptions.question}</p>
+                <div className="space-y-3">
+                  <p className="text-xs text-gray-500 font-medium">{pendingOptions.question}</p>
                   <div className="grid grid-cols-2 gap-2">
-                    {pendingOptions.options.map(opt => (
-                      <button key={opt.id} onClick={() => {
-                        const question = pendingOptions.question;
-                        setPendingOptions(null);
-                        // Send structured message so AI knows to continue with options
-                        sendChat(`[${question}] ${opt.icon} ${opt.label}`);
-                      }}
-                        className="flex items-start gap-2 p-3 rounded-xl bg-gray-50 border border-gray-200 hover:border-accent/30 hover:bg-gray-100 transition-all text-left">
-                        <span className="text-lg">{opt.icon}</span>
-                        <div>
-                          <p className="text-xs font-medium text-gray-700">{opt.label}</p>
-                          <p className="text-[10px] text-gray-400 mt-0.5">{opt.desc}</p>
+                    {pendingOptions.options.map(opt => {
+                      const isMulti = pendingOptions.multiSelect;
+                      const isSelected = multiSelectValues.includes(opt.id);
+                      return (
+                        <button key={opt.id} onClick={() => {
+                          if (isMulti) {
+                            setMultiSelectValues(prev => prev.includes(opt.id) ? prev.filter(v => v !== opt.id) : [...prev, opt.id]);
+                          } else {
+                            const question = pendingOptions.question;
+                            setPendingOptions(null); setMultiSelectValues([]);
+                            sendChat(`[${question}] ${opt.icon} ${opt.label}`);
+                          }
+                        }}
+                          className={`flex items-start gap-2.5 p-3 rounded-xl border transition-all text-left ${isSelected ? "border-accent bg-accent/5" : "border-gray-200 bg-gray-50 hover:border-accent/30 hover:bg-gray-100"}`}>
+                          {isMulti && (
+                            <div className={`mt-0.5 w-4 h-4 rounded border shrink-0 flex items-center justify-center ${isSelected ? "bg-accent border-accent" : "border-gray-300"}`}>
+                              {isSelected && <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
+                            </div>
+                          )}
+                          <span className="text-lg">{opt.icon}</span>
+                          <div>
+                            <p className="text-xs font-medium text-gray-700">{opt.label}</p>
+                            <p className="text-[10px] text-gray-400 mt-0.5">{opt.desc}</p>
+                          </div>
+                        </button>
+                      );
+                    })}
+                    {/* Custom input card */}
+                    <div className="flex items-start gap-2.5 p-3 rounded-xl border border-dashed border-gray-300 bg-gray-50/50">
+                      {pendingOptions.multiSelect && (
+                        <div className={`mt-0.5 w-4 h-4 rounded border shrink-0 flex items-center justify-center ${customOptionInput ? "bg-accent border-accent" : "border-gray-300"}`}>
+                          {customOptionInput && <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
                         </div>
-                      </button>
-                    ))}
+                      )}
+                      <span className="text-lg">✏️</span>
+                      <div className="flex-1">
+                        <input type="text" value={customOptionInput} onChange={e => setCustomOptionInput(e.target.value)}
+                          placeholder={locale === "zh" ? "自定义..." : "Custom..."}
+                          className="w-full bg-transparent text-xs text-gray-700 placeholder:text-gray-400 focus:outline-none"
+                          onKeyDown={e => {
+                            if (e.key === "Enter" && customOptionInput.trim() && !pendingOptions.multiSelect) {
+                              const question = pendingOptions.question;
+                              setPendingOptions(null); setCustomOptionInput("");
+                              sendChat(`[${question}] ✏️ ${customOptionInput.trim()}`);
+                            }
+                          }} />
+                        <p className="text-[10px] text-gray-400 mt-0.5">{locale === "zh" ? "输入你的选项" : "Type your option"}</p>
+                      </div>
+                    </div>
                   </div>
+                  {/* Multi-select confirm button */}
+                  {pendingOptions.multiSelect && (multiSelectValues.length > 0 || customOptionInput.trim()) && (
+                    <button onClick={() => {
+                      const question = pendingOptions.question;
+                      const selectedLabels = pendingOptions.options.filter(o => multiSelectValues.includes(o.id)).map(o => `${o.icon} ${o.label}`);
+                      if (customOptionInput.trim()) selectedLabels.push(`✏️ ${customOptionInput.trim()}`);
+                      setPendingOptions(null); setMultiSelectValues([]); setCustomOptionInput("");
+                      sendChat(`[${question}] ${selectedLabels.join(" + ")}`);
+                    }}
+                      className="px-4 py-2 rounded-xl bg-accent text-white text-xs font-medium hover:bg-accent/90 transition-all shadow-sm">
+                      {locale === "zh" ? `确认选择 (${multiSelectValues.length + (customOptionInput.trim() ? 1 : 0)})` : `Confirm (${multiSelectValues.length + (customOptionInput.trim() ? 1 : 0)})`}
+                    </button>
+                  )}
                 </div>
               )}
 
@@ -864,88 +915,133 @@ function CreatePageInner() {
             </div>
 
             <div className="flex-1 overflow-y-auto p-6">
-              {!itemsLoaded ? <div className="space-y-3">{[1,2,3].map(i => <div key={i} className="h-20 rounded-xl bg-gray-100 animate-pulse" />)}</div>
+              {!itemsLoaded ? <div className="space-y-3">{[1,2,3].map(i => <div key={i} className="h-16 rounded-xl bg-gray-100 animate-pulse" />)}</div>
               : kGroups.length === 0 ? (
                 <div className="text-center py-20">
                   <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-gray-100 flex items-center justify-center"><span className="text-2xl opacity-30">📚</span></div>
                   <p className="text-gray-500">{locale === "zh" ? "暂无知识。前往数据源添加内容。" : "No knowledge. Add sources first."}</p>
                   <button onClick={() => setView("sources")} className="mt-4 px-4 py-2 rounded-lg bg-accent/10 text-accent text-xs hover:bg-accent/20 transition-all">{locale === "zh" ? "添加数据源" : "Add Sources"}</button>
                 </div>
-              ) : (
-                <div className="max-w-4xl mx-auto space-y-4">
-                  {kGroups.map(g => {
-                    const groupItems = items.filter(i => (i as KnowledgeItem & { groupId?: string }).sourceId === g.id || (i.sourceName === g.sourceFile));
-                    const filteredGroupItems = knowledgeSearch ? groupItems.filter(i => i.title.toLowerCase().includes(knowledgeSearch.toLowerCase()) || i.content.toLowerCase().includes(knowledgeSearch.toLowerCase())) : groupItems;
-                    if (knowledgeSearch && filteredGroupItems.length === 0) return null;
-                    const allSel = g.selectedCount === g.itemCount;
-                    const someSel = g.selectedCount > 0 && g.selectedCount < g.itemCount;
+              ) : expandedGroupId ? (
+                /* ── Expanded: show single group's items ── */
+                (() => {
+                  const g = kGroups.find(g => g.id === expandedGroupId);
+                  if (!g) return null;
+                  const allSel = g.selectedCount === g.itemCount;
+                  const someSel = g.selectedCount > 0 && g.selectedCount < g.itemCount;
+                  const filtered = knowledgeSearch ? groupItems.filter(i => i.title.toLowerCase().includes(knowledgeSearch.toLowerCase()) || i.content.toLowerCase().includes(knowledgeSearch.toLowerCase())) : groupItems;
 
-                    return (
-                      <div key={g.id} className="rounded-xl border border-gray-200 overflow-hidden bg-white">
-                        {/* Folder header */}
-                        <div className="px-5 py-4 bg-gray-50 border-b border-gray-100">
-                          <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-xl bg-white border border-gray-200 flex items-center justify-center text-lg shadow-sm">
-                              {SOURCE_TYPE_META[g.sourceType as SourceType]?.icon || "📁"}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2">
-                                <h3 className="text-sm font-semibold text-gray-800 truncate">{g.name}</h3>
-                                {g.tags.map((tag: string) => (
-                                  <span key={tag} className="text-[9px] px-1.5 py-0.5 rounded bg-accent/8 text-accent">{tag}</span>
-                                ))}
-                              </div>
-                              <div className="flex items-center gap-2 mt-1">
-                                <span className="text-[10px] text-gray-400">{g.selectedCount}/{g.itemCount} {locale === "zh" ? "条已选" : "selected"}</span>
-                                {Object.entries(g.categoryCounts).map(([cat, count]) => (
-                                  <span key={cat} className={`text-[8px] px-1 py-0.5 rounded ${CATEGORY_META[cat as KnowledgeCategory]?.color}`}>{CATEGORY_META[cat as KnowledgeCategory]?.icon} {count}</span>
-                                ))}
-                              </div>
-                              {g.description && <p className="text-[10px] text-gray-400 mt-1">{g.description}</p>}
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <button onClick={async () => {
-                                // Toggle all items in this group via the group's items
-                                const newVal = !allSel;
-                                for (const it of groupItems) { await fetch(`/api/knowledge/${it.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ selected: newVal }) }); }
-                                await loadKnowledge(); await loadGroups();
-                              }} className={`w-5 h-5 rounded border shrink-0 flex items-center justify-center ${allSel ? "bg-accent border-accent" : someSel ? "bg-accent/40 border-accent/60" : "border-gray-300"}`}>
-                                {(allSel || someSel) && <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d={allSel ? "M5 13l4 4L19 7" : "M5 12h14"} /></svg>}
-                              </button>
-                              <button onClick={async () => { if (confirm(locale === "zh" ? "确认删除该知识组？" : "Delete this group?")) { await fetch(`/api/knowledge-groups/${g.id}`, { method: "DELETE" }); await loadKnowledge(); await loadGroups(); } }}
-                                className="px-2 py-1 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition-all">
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                              </button>
-                            </div>
+                  return (
+                    <div className="max-w-4xl mx-auto">
+                      {/* Back + group header */}
+                      <button onClick={() => { setExpandedGroupId(null); setGroupItems([]); }} className="inline-flex items-center gap-1.5 text-xs text-gray-400 hover:text-gray-600 transition-colors mb-4">
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+                        {locale === "zh" ? "返回知识库" : "Back to list"}
+                      </button>
+
+                      <div className="flex items-center gap-3 mb-4">
+                        <div className="w-12 h-12 rounded-xl bg-white border border-gray-200 flex items-center justify-center text-2xl shadow-sm">
+                          {SOURCE_TYPE_META[g.sourceType as SourceType]?.icon || "📁"}
+                        </div>
+                        <div className="flex-1">
+                          <h3 className="text-lg font-bold text-gray-800">{g.name}</h3>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            {g.tags.map((tag: string) => <span key={tag} className="text-[9px] px-1.5 py-0.5 rounded bg-accent/8 text-accent">{tag}</span>)}
+                            <span className="text-[10px] text-gray-400">{g.selectedCount}/{g.itemCount} {locale === "zh" ? "条已选" : "selected"}</span>
                           </div>
                         </div>
+                        <button onClick={async () => {
+                          const newVal = !allSel;
+                          for (const it of groupItems) { await fetch(`/api/knowledge/${it.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ selected: newVal }) }); }
+                          // Reload
+                          const r = await fetch(`/api/knowledge-groups/${g.id}`); const d = await r.json(); setGroupItems(d.items || []);
+                          await loadGroups();
+                        }} className={`px-3 py-1.5 rounded-lg text-xs transition-all ${allSel ? "bg-accent text-white" : "bg-gray-100 text-gray-500"}`}>
+                          {allSel ? (locale === "zh" ? "取消全选" : "Deselect all") : (locale === "zh" ? "全选" : "Select all")}
+                        </button>
+                      </div>
 
-                        {/* Items list */}
-                        <div className="p-3 grid grid-cols-1 lg:grid-cols-2 gap-2">
-                          {(filteredGroupItems.length > 0 ? filteredGroupItems : groupItems).slice(0, 20).map(it => {
-                            const cm = CATEGORY_META[it.category as KnowledgeCategory];
-                            return (
-                              <div key={it.id} className={`p-3 rounded-lg transition-all group ${it.selected ? "bg-gray-50" : "opacity-30"}`}>
-                                <div className="flex items-start gap-2">
-                                  <button onClick={() => toggleItem(it.id)} className={`mt-0.5 w-3.5 h-3.5 rounded border shrink-0 flex items-center justify-center ${it.selected ? "bg-accent border-accent" : "border-gray-300"}`}>
-                                    {it.selected && <svg className="w-2 h-2 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
-                                  </button>
-                                  <div className="flex-1 min-w-0">
-                                    <div className="flex items-center gap-1 mb-0.5">
-                                      <span className={`text-[8px] px-1 py-0.5 rounded ${cm?.color}`}>{cm?.icon}</span>
-                                      <span className="text-[11px] font-medium text-gray-600 truncate">{it.title}</span>
-                                    </div>
-                                    <p className="text-[10px] text-gray-400 line-clamp-2">{it.content}</p>
+                      {/* Items grid */}
+                      <div className="space-y-2">
+                        {filtered.map(it => {
+                          const cm = CATEGORY_META[it.category as KnowledgeCategory];
+                          return (
+                            <div key={it.id} className={`p-4 rounded-xl border transition-all group ${it.selected ? "bg-white border-gray-200" : "bg-gray-50 border-gray-100 opacity-40"}`}>
+                              <div className="flex items-start gap-3">
+                                <button onClick={async () => {
+                                  await fetch(`/api/knowledge/${it.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ selected: !it.selected }) });
+                                  setGroupItems(p => p.map(i => i.id === it.id ? { ...i, selected: !i.selected } : i));
+                                  await loadGroups();
+                                }} className={`mt-1 w-4 h-4 rounded border shrink-0 flex items-center justify-center ${it.selected ? "bg-accent border-accent" : "border-gray-300"}`}>
+                                  {it.selected && <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
+                                </button>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <span className={`text-[9px] px-1.5 py-0.5 rounded ${cm?.color}`}>{cm?.icon} {cm?.label}</span>
+                                    <span className="text-sm font-medium text-gray-700">{it.title}</span>
                                   </div>
-                                  <button onClick={() => { if (confirm(locale === "zh" ? "确认删除？" : "Delete?")) deleteItem(it.id); }} className="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-400">
-                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-                                  </button>
+                                  <p className="text-[12px] text-gray-500 leading-relaxed whitespace-pre-wrap">{it.content}</p>
+                                  {it.tags.length > 0 && (
+                                    <div className="flex flex-wrap gap-1 mt-2">{it.tags.map((tag: string, i: number) => <span key={i} className="text-[9px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-400">{tag}</span>)}</div>
+                                  )}
                                 </div>
+                                <button onClick={async () => { if (confirm(locale === "zh" ? "确认删除？" : "Delete?")) { await fetch(`/api/knowledge/${it.id}`, { method: "DELETE" }); setGroupItems(p => p.filter(i => i.id !== it.id)); await loadGroups(); } }}
+                                  className="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-400 transition-all">
+                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                </button>
                               </div>
-                            );
-                          })}
-                          {groupItems.length > 20 && <p className="text-[10px] text-gray-400 text-center col-span-2 py-2">+{groupItems.length - 20} more items</p>}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })()
+              ) : (
+                /* ── Folder list (default) ── */
+                <div className="max-w-4xl mx-auto space-y-3">
+                  {kGroups.map(g => {
+                    const allSel = g.selectedCount === g.itemCount;
+                    const someSel = g.selectedCount > 0 && g.selectedCount < g.itemCount;
+                    return (
+                      <div key={g.id} className="flex items-center gap-4 p-4 rounded-xl bg-white border border-gray-200 hover:border-accent/30 hover:shadow-sm transition-all cursor-pointer"
+                        onClick={async () => {
+                          setExpandedGroupId(g.id);
+                          const r = await fetch(`/api/knowledge-groups/${g.id}`);
+                          const d = await r.json();
+                          setGroupItems(d.items || []);
+                        }}>
+                        <div className="w-12 h-12 rounded-xl bg-gray-50 border border-gray-100 flex items-center justify-center text-xl">
+                          {SOURCE_TYPE_META[g.sourceType as SourceType]?.icon || "📁"}
                         </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <h3 className="text-sm font-semibold text-gray-800 truncate">{g.name}</h3>
+                            {g.tags.slice(0, 3).map((tag: string) => <span key={tag} className="text-[9px] px-1.5 py-0.5 rounded bg-accent/8 text-accent">{tag}</span>)}
+                          </div>
+                          <div className="flex items-center gap-2 mt-1">
+                            <span className="text-[10px] text-gray-400">{g.itemCount} {locale === "zh" ? "条知识" : "items"}</span>
+                            <span className="text-[10px] text-gray-300">·</span>
+                            {Object.entries(g.categoryCounts).map(([cat, count]) => (
+                              <span key={cat} className={`text-[8px] px-1 py-0.5 rounded ${CATEGORY_META[cat as KnowledgeCategory]?.color}`}>{CATEGORY_META[cat as KnowledgeCategory]?.icon} {count}</span>
+                            ))}
+                          </div>
+                        </div>
+                        <button onClick={async (e) => {
+                          e.stopPropagation();
+                          const newVal = !allSel;
+                          // Quick toggle via API
+                          const r = await fetch(`/api/knowledge-groups/${g.id}`); const d = await r.json();
+                          for (const it of (d.items || [])) { await fetch(`/api/knowledge/${it.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ selected: newVal }) }); }
+                          await loadGroups(); await loadKnowledge();
+                        }} className={`w-6 h-6 rounded border shrink-0 flex items-center justify-center ${allSel ? "bg-accent border-accent" : someSel ? "bg-accent/40 border-accent/60" : "border-gray-300"}`}>
+                          {(allSel || someSel) && <svg className="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d={allSel ? "M5 13l4 4L19 7" : "M5 12h14"} /></svg>}
+                        </button>
+                        <button onClick={async (e) => { e.stopPropagation(); if (confirm(locale === "zh" ? "确认删除？" : "Delete?")) { await fetch(`/api/knowledge-groups/${g.id}`, { method: "DELETE" }); await loadKnowledge(); await loadGroups(); } }}
+                          className="text-gray-300 hover:text-red-400 transition-all">
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                        </button>
+                        <svg className="w-4 h-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
                       </div>
                     );
                   })}
