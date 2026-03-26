@@ -340,7 +340,14 @@ function CreatePageInner() {
       } else if (d.action?.type === "modify" && Array.isArray(d.action.changes)) {
         await handleModify(d.action);
       } else if (d.action?.type === "generate") {
-        handleGenerate({ ...d.action, skillIds: [...new Set([...loadedSkillIds, ...(d.action.skillIds || [])])] });
+        if (!prdData) {
+          // AI skipped PRD — create minimal PRD and ask user to confirm
+          const autoPrd = { version: 1, siteType: d.action.siteType || "portfolio", theme: d.action.theme || "minimalist", markdown: `# Auto-generated PRD\n\nSite: ${d.action.siteType}\nTheme: ${d.action.theme}\nLayout: ${d.action.layout || "auto"}`, createdAt: new Date().toISOString(), note: "Auto-generated" };
+          setPrdData(autoPrd as PRDData);
+          setShowPreview(true); setPreviewTab("prd");
+        } else {
+          handleGenerate({ ...d.action, skillIds: [...new Set([...loadedSkillIds, ...(d.action.skillIds || [])])] });
+        }
       }
     } catch { setChatMessages(p => [...p, { role: "assistant", content: "Something went wrong." }]); }
     finally { clearInterval(statusTimer); setWorkingStatus(""); setChatLoading(false); }
