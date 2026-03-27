@@ -52,9 +52,12 @@ async function copyDirectory(sourceDir: string, targetDir: string): Promise<void
 
 async function ensureNodeModules(siteDir: string) {
   const nmPath = path.join(siteDir, "node_modules");
+  let hasNodeModulesLinkOrDir = false;
   try {
     const stat = await fs.lstat(nmPath);
-    if (stat.isSymbolicLink() || stat.isDirectory()) return;
+    if (stat.isSymbolicLink() || stat.isDirectory()) {
+      hasNodeModulesLinkOrDir = true;
+    }
   } catch {}
 
   async function installIntoSiteDir() {
@@ -75,11 +78,13 @@ async function ensureNodeModules(siteDir: string) {
     await fs.rename(path.join(siteDir, "node_modules"), SHARED_MODULES);
   }
 
-  try {
-    await fs.symlink(SHARED_MODULES, nmPath);
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code !== "EEXIST") throw err;
+  if (!hasNodeModulesLinkOrDir) {
+    try {
+      await fs.symlink(SHARED_MODULES, nmPath);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code !== "EEXIST") throw err;
+    }
   }
 
   const missingPackages: string[] = [];
