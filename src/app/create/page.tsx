@@ -25,6 +25,23 @@ interface SiteResourceRef { id: string; title: string; category: string; sourceN
 interface GuidanceAction { label: string; onClick: () => void; tone?: "accent" | "muted" }
 interface NextStepCard { label: string; prompt?: string; onClick?: () => void }
 
+async function readJsonResponse<T>(response: Response): Promise<T> {
+  const text = await response.text();
+  const contentType = response.headers.get("content-type") || "";
+
+  if (!contentType.includes("application/json")) {
+    const snippet = text.replace(/\s+/g, " ").trim().slice(0, 220) || "(empty response)";
+    throw new Error(`HTTP ${response.status} ${response.statusText}: ${snippet}`);
+  }
+
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    const snippet = text.replace(/\s+/g, " ").trim().slice(0, 220) || "(invalid json)";
+    throw new Error(`Invalid JSON response: ${snippet}`);
+  }
+}
+
 function CreatePageInner() {
   const { data: session, status: authStatus } = useSession();
   const router = useRouter();
@@ -333,7 +350,7 @@ function CreatePageInner() {
       });
 
       if (!res.ok) return null;
-      const result = await res.json();
+      const result = await readJsonResponse<{ spec?: SiteSpec | null }>(res);
       const spec = (result.spec || null) as SiteSpec | null;
       if (spec) setCompiledSpec(spec);
       return spec;
@@ -520,7 +537,26 @@ function CreatePageInner() {
           currentPrd: prdData,
         }),
       });
-      const d = await r.json();
+      const d = await readJsonResponse<{
+        content?: string;
+        error?: string;
+        action?: {
+          type?: string;
+          question?: string;
+          options?: OptionCard[];
+          multiSelect?: boolean;
+          version?: number;
+          siteType?: string;
+          theme?: string;
+          layout?: string;
+          planner?: string;
+          skillIds?: string[];
+          changes?: Array<{ file: string; action: string; content?: string }>;
+          executionSteps?: string[];
+          customTheme?: string;
+        };
+      }>(r);
+      if (!r.ok) throw new Error(d.error || `HTTP ${r.status} ${r.statusText}`);
 
       // Extract thinking steps from response
       const thinkingMatch = d.content?.match(/```thinking\s*([\s\S]*?)```/);
@@ -549,7 +585,11 @@ function CreatePageInner() {
 
       // Handle actions
       if (d.action?.type === "options") {
-        setPendingOptions({ question: d.action.question, options: d.action.options, multiSelect: !!d.action.multiSelect });
+        setPendingOptions({
+          question: d.action.question || "",
+          options: Array.isArray(d.action.options) ? d.action.options : [],
+          multiSelect: !!d.action.multiSelect,
+        });
       } else if (d.action?.type === "prd") {
         // PRD: action has siteType/theme/layout, markdown is in the cleaned content
         const prd: PRDData = {
@@ -570,13 +610,21 @@ function CreatePageInner() {
         }
         await handleGenerate({
           ...d.action,
-          skillIds: [...new Set([...loadedSkillIds, ...(d.action.skillIds || [])])],
+          skillIds: [...new Set([...loadedSkillIds, ...(Array.isArray(d.action.skillIds) ? d.action.skillIds : [])])],
           prd,
         });
       } else if (d.action?.type === "activate_skills" && Array.isArray(d.action.skillIds)) {
-        setLoadedSkillIds(prev => [...new Set([...prev, ...d.action.skillIds])]);
+        const skillIds = d.action.skillIds;
+        setLoadedSkillIds(prev => [...new Set([...prev, ...skillIds])]);
       } else if (d.action?.type === "modify" && Array.isArray(d.action.changes)) {
-        await handleModify(d.action);
+        await handleModify({
+          changes: d.action.changes,
+          description: typeof (d.action as { description?: unknown }).description === "string" ? (d.action as { description?: string }).description : undefined,
+          specIntent: typeof (d.action as { specIntent?: unknown }).specIntent === "string" ? (d.action as { specIntent?: string }).specIntent : undefined,
+          prdSummary: typeof (d.action as { prdSummary?: unknown }).prdSummary === "string" ? (d.action as { prdSummary?: string }).prdSummary : undefined,
+          techStackHints: Array.isArray((d.action as { techStackHints?: unknown }).techStackHints) ? (d.action as { techStackHints: string[] }).techStackHints : undefined,
+          assetIdeas: Array.isArray((d.action as { assetIdeas?: unknown }).assetIdeas) ? (d.action as { assetIdeas: string[] }).assetIdeas : undefined,
+        });
       } else if (d.action?.type === "generate") {
         if (!prdData) {
           // AI skipped PRD — create minimal PRD and auto-trigger build
@@ -584,9 +632,9 @@ function CreatePageInner() {
           setPrdData(autoPrd);
           setShowPreview(true); setPreviewTab("preview");
           // Auto-trigger build since user intent is clear
-          handleGenerate({ ...d.action, skillIds: [...new Set([...loadedSkillIds, ...(d.action.skillIds || [])])], prd: autoPrd });
+          handleGenerate({ ...d.action, skillIds: [...new Set([...loadedSkillIds, ...(Array.isArray(d.action.skillIds) ? d.action.skillIds : [])])], prd: autoPrd });
         } else {
-          handleGenerate({ ...d.action, skillIds: [...new Set([...loadedSkillIds, ...(d.action.skillIds || [])])] });
+          handleGenerate({ ...d.action, skillIds: [...new Set([...loadedSkillIds, ...(Array.isArray(d.action.skillIds) ? d.action.skillIds : [])])] });
         }
       }
     } catch (err) {
@@ -637,7 +685,15 @@ function CreatePageInner() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ data, selections, skillIds, siteId: siteIdRef.current, prd: effectivePrd, spec }),
       });
-      const genResult = await r.json();
+      const genResult = await readJsonResponse<{
+        error?: string;
+        logs?: string[];
+        url?: string;
+        fileMap?: Record<string, string>;
+        siteId?: string;
+        verification?: { checks?: Array<{ label: string; ok: boolean }> };
+        previewReachable?: boolean;
+      }>(r);
       if (!r.ok) {
         const logText = Array.isArray(genResult?.logs) && genResult.logs.length > 0 ? `\n\n${genResult.logs.join("\n")}` : "";
         throw new Error(`${genResult?.error || "Generation failed"}${logText}`);
@@ -646,6 +702,7 @@ function CreatePageInner() {
       const fileMap = genResult.fileMap;
       const verification = genResult.verification;
       const previewReachable = genResult.previewReachable !== false;
+      if (!url) throw new Error("Generation response missing preview URL");
       if (genResult.siteId && !siteIdRef.current) { siteIdRef.current = genResult.siteId; setSiteId(genResult.siteId); }
 
       setThinkingSteps(p => [...p, zh ? `✅ 生成完成: ${Object.keys(fileMap || {}).length} 个文件` : `✅ Generated: ${Object.keys(fileMap || {}).length} files`]);
@@ -723,7 +780,14 @@ function CreatePageInner() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ siteId: siteIdRef.current, changes: action.changes, spec, prd: nextPrd || prdData, knowledgeRefs: getSelectedResourceRefs() }),
       });
-      const d = await r.json();
+      const d = await readJsonResponse<{
+        ok?: boolean;
+        error?: string;
+        buildSuccess?: boolean;
+        buildError?: string;
+        buildLogs?: string[];
+        verification?: { checks?: Array<{ label: string; ok: boolean }> };
+      }>(r);
       if (!r.ok) throw new Error(d.error);
 
       // Show build failure warning to user
