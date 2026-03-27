@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { sites } from "@/lib/db/schema";
+import { siteBuilds, sites } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import fs from "fs/promises";
 import path from "path";
 import { exec } from "child_process";
 import { logger } from "@/lib/logger";
+import { syncDraftPreview } from "@/lib/build-runtime";
 
 const SITES_DIR = path.join(process.cwd(), "sites-data");
 
@@ -85,12 +86,19 @@ export async function POST(req: NextRequest) {
     logger.info("modify", `[${requestId}] Modifying site ${siteId}: ${changes.length} changes`);
 
     // Load current fileMap from DB
-    const site = await db.select({ fileMap: sites.fileMap }).from(sites)
+    const site = await db.select({ fileMap: sites.fileMap, draftBuildId: sites.draftBuildId, previewUrl: sites.previewUrl }).from(sites)
       .where(and(eq(sites.id, siteId), eq(sites.userId, session.user.id))).get();
 
     let fileMap: Record<string, string> = {};
+    if (site?.draftBuildId) {
+      const latestBuild = await db.select({ fileMapSnapshot: siteBuilds.fileMapSnapshot }).from(siteBuilds)
+        .where(and(eq(siteBuilds.id, site.draftBuildId), eq(siteBuilds.siteId, siteId))).get();
+      if (latestBuild?.fileMapSnapshot) {
+        try { fileMap = JSON.parse(latestBuild.fileMapSnapshot); } catch {}
+      }
+    }
     if (site?.fileMap) {
-      try { fileMap = JSON.parse(site.fileMap); } catch {}
+      try { fileMap = { ...JSON.parse(site.fileMap), ...fileMap }; } catch {}
     }
 
     const siteDir = path.join(SITES_DIR, siteId);
@@ -137,7 +145,14 @@ export async function POST(req: NextRequest) {
           else { logger.info("modify", "Rebuild complete"); resolve(); }
         });
       });
+      await syncDraftPreview(siteId, siteDir);
       verification = await runVerification(siteDir, spec);
+      await db.update(sites).set({
+        previewUrl: site?.previewUrl || `${(process.env.PREVIEW_BASE_URL?.trim() || "http://localhost:3002").replace(/\/+$/, "")}/drafts/${siteId}`,
+        buildStatus: "ready",
+        buildError: null,
+        updatedAt: new Date().toISOString(),
+      }).where(eq(sites.id, siteId));
     } catch (buildErr) {
       buildSuccess = false;
       buildError = buildErr instanceof Error ? buildErr.message : "Build failed";
@@ -145,6 +160,11 @@ export async function POST(req: NextRequest) {
         (buildErr as { stdout?: string })?.stdout || "",
         (buildErr as { stderr?: string })?.stderr || "",
       );
+      await db.update(sites).set({
+        buildStatus: "failed",
+        buildError,
+        updatedAt: new Date().toISOString(),
+      }).where(eq(sites.id, siteId));
     }
 
     return NextResponse.json({ ok: true, applied, buildSuccess, buildError: buildError || undefined, buildLogs, verification });

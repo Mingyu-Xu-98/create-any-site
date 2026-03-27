@@ -13,6 +13,8 @@ const SHARED_MODULES = path.join(SITES_DIR, "_shared_node_modules");
 const PREVIEW_PORT = 3002;
 const REQUIRED_SHARED_PACKAGES = ["next", "react", "react-dom", "qrcode", "dijkstrajs", "pngjs"];
 const PREVIEW_PUBLISH_DIR = process.env.PREVIEW_PUBLISH_DIR?.trim() || "";
+const PREVIEW_BASE_URL = (process.env.PREVIEW_BASE_URL?.trim() || "http://localhost:3002").replace(/\/+$/, "");
+const DRAFTS_SEGMENT = "drafts";
 
 let staticServer: http.Server | null = null;
 
@@ -48,6 +50,42 @@ async function copyDirectory(sourceDir: string, targetDir: string): Promise<void
       await fs.copyFile(from, to);
     }
   }
+}
+
+function getDraftPublishDir(siteId: string): string {
+  return path.join(PREVIEW_PUBLISH_DIR, DRAFTS_SEGMENT, siteId);
+}
+
+function getPublishedPublishDir(siteId: string): string {
+  return path.join(PREVIEW_PUBLISH_DIR, siteId);
+}
+
+export function getDraftPreviewUrl(siteId: string, baseUrl = PREVIEW_BASE_URL): string {
+  return `${baseUrl}/${DRAFTS_SEGMENT}/${siteId}`;
+}
+
+export function getPublishedPreviewUrl(siteId: string, baseUrl = PREVIEW_BASE_URL): string {
+  return `${baseUrl}/${siteId}`;
+}
+
+export async function syncDraftPreview(siteId: string, siteDir: string): Promise<void> {
+  if (!PREVIEW_PUBLISH_DIR) return;
+  await copyDirectory(path.join(siteDir, "out"), getDraftPublishDir(siteId));
+}
+
+export async function publishDraftPreview(siteId: string): Promise<string> {
+  if (!PREVIEW_PUBLISH_DIR) {
+    throw new Error("PREVIEW_PUBLISH_DIR is not configured");
+  }
+  const draftDir = getDraftPublishDir(siteId);
+  await fs.access(draftDir);
+  await copyDirectory(draftDir, getPublishedPublishDir(siteId));
+  return getPublishedPreviewUrl(siteId);
+}
+
+export async function unpublishPreview(siteId: string): Promise<void> {
+  if (!PREVIEW_PUBLISH_DIR) return;
+  await fs.rm(getPublishedPublishDir(siteId), { recursive: true, force: true });
 }
 
 async function ensureNodeModules(siteDir: string) {
@@ -193,7 +231,10 @@ async function assertPreviewArtifacts(siteDir: string, siteId: string): Promise<
 
 async function probePreviewUrl(url: string): Promise<boolean> {
   try {
-    const res = await fetch(`${url.replace(/\/+$/, "")}/__health`, { cache: "no-store" });
+    const res = await fetch(
+      PREVIEW_PUBLISH_DIR ? url.replace(/\/+$/, "") : `${url.replace(/\/+$/, "")}/__health`,
+      { cache: "no-store" },
+    );
     return res.ok;
   } catch {
     return false;
@@ -342,12 +383,14 @@ export async function runSiteBuild(input: RunSiteBuildInput): Promise<RunSiteBui
   await assertPreviewArtifacts(siteDir, siteId);
 
   if (PREVIEW_PUBLISH_DIR) {
-    await copyDirectory(path.join(siteDir, "out"), path.join(PREVIEW_PUBLISH_DIR, siteId));
+    await syncDraftPreview(siteId, siteDir);
   } else {
     await ensureStaticServer();
   }
 
-  const url = `${previewBaseUrl.replace(/\/+$/, "")}/${siteId}`;
+  const url = PREVIEW_PUBLISH_DIR
+    ? getDraftPreviewUrl(siteId, previewBaseUrl)
+    : `${previewBaseUrl.replace(/\/+$/, "")}/${siteId}`;
   const verification = await runVerification(siteDir, files, spec || undefined);
   const previewReachable = await probePreviewUrl(url);
 

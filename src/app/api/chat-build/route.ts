@@ -10,6 +10,7 @@ import { getChatProviderSummary, hasChatProvider } from "@/lib/llm";
 const CODE_CONTEXT_FILES = [
   "src/app/page.tsx", "src/app/globals.css", "src/app/layout.tsx",
   "src/i18n/translations.ts", "src/components/LanguageProvider.tsx",
+  "public/game.js", "public/main.js", "package.json", "next.config.mjs",
 ];
 
 export async function POST(req: NextRequest) {
@@ -75,7 +76,15 @@ export async function POST(req: NextRequest) {
         }
         for (const [key, content] of Object.entries(fileMap)) {
           if (CODE_CONTEXT_FILES.includes(key)) continue;
-          if (!key.endsWith(".tsx") && !key.endsWith(".css") && !key.endsWith(".ts")) continue;
+          if (
+            !key.endsWith(".tsx") &&
+            !key.endsWith(".css") &&
+            !key.endsWith(".ts") &&
+            !key.endsWith(".js") &&
+            !key.endsWith(".mjs") &&
+            !key.endsWith(".json")
+          ) continue;
+          if (!key.startsWith("src/") && !key.startsWith("public/") && key !== "package.json" && !key.startsWith("next.config")) continue;
           if (totalChars + content.length < 40000) { codeFiles.push(`### ${key}\n\`\`\`\n${content}\n\`\`\``); totalChars += content.length; }
         }
         if (codeFiles.length > 0) { codeContext = codeFiles.join("\n\n"); hasSiteCode = true; }

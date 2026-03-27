@@ -359,13 +359,6 @@ function CreatePageInner() {
     }
   }, [items, prdData, chatMessages, loadedSkillIds]);
 
-  const normalizePublishedUrl = useCallback((value: string) => {
-    const trimmed = value.trim();
-    if (!trimmed) return "";
-    if (/^https?:\/\//i.test(trimmed)) return trimmed;
-    return `https://${trimmed}`;
-  }, []);
-
   // ─── Source upload ───
   const addFileSource = async (file: File, type: SourceType) => {
     const sid = crypto.randomUUID();
@@ -827,33 +820,27 @@ function CreatePageInner() {
     }
   };
 
-  const updateSitePublishState = useCallback(async (nextStatus: "draft" | "published", nextPublishedUrl: string | null) => {
+  const updateSitePublishState = useCallback(async (action: "publish" | "unpublish") => {
     if (!siteIdRef.current) return;
-    await fetch(`/api/sites/${siteIdRef.current}`, {
+    const response = await fetch(`/api/sites/${siteIdRef.current}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        status: nextStatus,
-        publishedUrl: nextPublishedUrl,
-      }),
+      body: JSON.stringify({ action }),
     });
-    setSiteStatus(nextStatus);
-    setPublishedUrl(nextPublishedUrl);
+    const data = await readJsonResponse<{ error?: string; site?: { status?: "draft" | "published" | "archived"; publishedUrl?: string | null } }>(response);
+    if (!response.ok) throw new Error(data.error || "Failed to update publish state");
+    setSiteStatus((data.site?.status || (action === "publish" ? "published" : "draft")) as "draft" | "published" | "archived");
+    setPublishedUrl(data.site?.publishedUrl || null);
   }, []);
 
   const handlePublish = useCallback(async () => {
     if (!siteIdRef.current) return;
-    const promptLabel = locale === "zh" ? "请输入发布域名，例如 portfolio.yourbrand.com" : "Enter the publish domain, for example portfolio.yourbrand.com";
-    const value = window.prompt(promptLabel, publishedUrl || "");
-    if (value === null) return;
-    const normalized = normalizePublishedUrl(value);
-    if (!normalized) return;
-    await updateSitePublishState("published", normalized);
-  }, [locale, normalizePublishedUrl, publishedUrl, updateSitePublishState]);
+    await updateSitePublishState("publish");
+  }, [updateSitePublishState]);
 
   const handleUnpublish = useCallback(async () => {
     if (!siteIdRef.current) return;
-    await updateSitePublishState("draft", null);
+    await updateSitePublishState("unpublish");
   }, [updateSitePublishState]);
 
   const quickGenerate = () => handleGenerate({

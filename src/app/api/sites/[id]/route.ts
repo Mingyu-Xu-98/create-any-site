@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { sites } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
+import { publishDraftPreview, unpublishPreview } from "@/lib/build-runtime";
 
 // GET /api/sites/[id]
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -35,6 +36,51 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
   const body = await req.json();
   const now = new Date().toISOString();
+  const site = await db
+    .select()
+    .from(sites)
+    .where(and(eq(sites.id, id), eq(sites.userId, session.user.id)))
+    .get();
+
+  if (!site) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
+  if (body?.action === "publish") {
+    if (!site.draftBuildId) {
+      return NextResponse.json({ error: "No draft build is ready to publish" }, { status: 400 });
+    }
+
+    const publishedUrl = await publishDraftPreview(id);
+    await db
+      .update(sites)
+      .set({
+        status: "published",
+        publishedBuildId: site.draftBuildId,
+        publishedUrl,
+        publishedAt: now,
+        updatedAt: now,
+      })
+      .where(and(eq(sites.id, id), eq(sites.userId, session.user.id)));
+
+    return NextResponse.json({ ok: true, site: { status: "published", publishedUrl, publishedBuildId: site.draftBuildId } });
+  }
+
+  if (body?.action === "unpublish") {
+    await unpublishPreview(id);
+    await db
+      .update(sites)
+      .set({
+        status: "draft",
+        publishedBuildId: null,
+        publishedUrl: null,
+        publishedAt: null,
+        updatedAt: now,
+      })
+      .where(and(eq(sites.id, id), eq(sites.userId, session.user.id)));
+
+    return NextResponse.json({ ok: true, site: { status: "draft", publishedUrl: null, publishedBuildId: null } });
+  }
 
   await db
     .update(sites)

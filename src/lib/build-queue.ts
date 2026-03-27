@@ -64,6 +64,10 @@ export async function processBuildJob(jobId: string, options?: { alreadyClaimed?
     await db.update(siteBuilds).set({
       status: "ready",
       previewUrl: result.url,
+      fileMapSnapshot: JSON.stringify(result.fileMap),
+      specSnapshot: payload.spec ? JSON.stringify(payload.spec) : null,
+      prdSnapshot: payload.prd ? JSON.stringify(payload.prd) : null,
+      knowledgeRefsSnapshot: Array.isArray(payload.knowledgeRefs) ? JSON.stringify(payload.knowledgeRefs) : null,
       finishedAt,
       updatedAt: finishedAt,
       logs: JSON.stringify(result.verification?.checks || []),
@@ -74,6 +78,7 @@ export async function processBuildJob(jobId: string, options?: { alreadyClaimed?
       workspaceData: JSON.stringify(payload.data),
       selections: JSON.stringify(payload.selections),
       fileMap: JSON.stringify(result.fileMap),
+      draftBuildId: jobId,
       prd: payload.prd ? JSON.stringify(payload.prd) : null,
       editorState: JSON.stringify({ compiledSpec: payload.spec || null, knowledgeRefs: Array.isArray(payload.knowledgeRefs) ? payload.knowledgeRefs : [] }),
       buildStatus: "ready",

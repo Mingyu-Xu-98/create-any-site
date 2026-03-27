@@ -57,8 +57,11 @@ export const sites = sqliteTable("sites", {
   status: text("status").default("draft"), // draft | published | archived
   buildStatus: text("build_status").default("idle"), // idle | queued | building | ready | failed
   buildError: text("build_error"),
+  draftBuildId: text("draft_build_id"),
+  publishedBuildId: text("published_build_id"),
   previewUrl: text("preview_url"),
   publishedUrl: text("published_url"),
+  publishedAt: text("published_at"),
   templateId: text("template_id"),
   editorState: text("editor_state"),      // JSON
   prd: text("prd"),                       // Current PRD JSON
@@ -75,6 +78,10 @@ export const siteBuilds = sqliteTable("site_builds", {
   status: text("status").default("queued"), // queued | building | ready | failed
   payload: text("payload").notNull(), // JSON
   previewUrl: text("preview_url"),
+  fileMapSnapshot: text("file_map_snapshot"),
+  specSnapshot: text("spec_snapshot"),
+  prdSnapshot: text("prd_snapshot"),
+  knowledgeRefsSnapshot: text("knowledge_refs_snapshot"),
   error: text("error"),
   logs: text("logs"), // JSON array
   startedAt: text("started_at"),
