@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { skills, sites, knowledgeGroups } from "@/lib/db/schema";
 import { eq, inArray } from "drizzle-orm";
 import { runBuildConversation } from "@/lib/build-agents";
+import { getChatProviderSummary, hasChatProvider } from "@/lib/llm";
 
 const CODE_CONTEXT_FILES = [
   "src/app/page.tsx", "src/app/globals.css", "src/app/layout.tsx",
@@ -13,8 +14,7 @@ const CODE_CONTEXT_FILES = [
 
 export async function POST(req: NextRequest) {
   const requestId = crypto.randomUUID().slice(0, 8);
-  const apiKey = process.env.SILICONFLOW_API_KEY;
-  if (!apiKey) return NextResponse.json({ error: "SILICONFLOW_API_KEY not configured" }, { status: 500 });
+  if (!hasChatProvider()) return NextResponse.json({ error: "No LLM provider configured. Set OPENROUTER_API_KEY or SILICONFLOW_API_KEY." }, { status: 500 });
 
   const { messages, knowledge, currentSelections, loadedSkills, siteId, phase, currentPrd: requestPrd } = await req.json();
   const selectedKnowledge = (knowledge as KnowledgeItem[]).filter(k => k.selected);
@@ -89,11 +89,10 @@ export async function POST(req: NextRequest) {
     ? `${selectedKnowledge.length} items: ${Object.entries(selectedKnowledge.reduce<Record<string, number>>((a, k) => { a[k.category] = (a[k.category] || 0) + 1; return a; }, {})).map(([c, n]) => `${c}:${n}`).join(", ")}`
     : "None";
 
-  logger.info("chat-build", `[${requestId}] phase=${phase || "auto"}, ${messages.length} msgs, knowledge=${knowledgeSummary}, skills=${allSkills.length}, code=${hasSiteCode}`);
+  logger.info("chat-build", `[${requestId}] phase=${phase || "auto"}, ${messages.length} msgs, knowledge=${knowledgeSummary}, skills=${allSkills.length}, code=${hasSiteCode}, llm=${getChatProviderSummary()}`);
   try {
     const result = await runBuildConversation({
       requestId,
-      apiKey,
       messages,
       knowledgeContext,
       knowledgeSummary,

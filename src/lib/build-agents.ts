@@ -2,6 +2,7 @@ import fs from "fs/promises";
 import path from "path";
 import { logger } from "@/lib/logger";
 import { loadStageSkillBundle } from "./project-skill-bundles";
+import { chatCompletion } from "./llm";
 
 type ChatRole = "system" | "user" | "assistant";
 
@@ -12,7 +13,6 @@ export interface BuildChatMessage {
 
 export interface BuildConversationContext {
   requestId: string;
-  apiKey: string;
   messages: BuildChatMessage[];
   knowledgeContext: string;
   knowledgeSummary: string;
@@ -66,7 +66,6 @@ async function loadPrompt(name: string): Promise<string> {
 }
 
 async function callSiliconFlow(
-  apiKey: string,
   requestId: string,
   label: string,
   systemPrompt: string,
@@ -75,28 +74,16 @@ async function callSiliconFlow(
 ): Promise<AgentRunResult> {
   logger.info("build-agents", `[${requestId}] ${label}: prompt ${systemPrompt.length + userPrompt.length} chars`);
 
-  const response = await fetch("https://api.siliconflow.cn/v1/chat/completions", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({
-      model: "Pro/zai-org/GLM-5",
-      messages: [
-        { role: "system", content: systemPrompt },
-        ...history,
-        { role: "user", content: userPrompt },
-      ],
-      temperature: 0.35,
-      max_tokens: 8192,
-    }),
+  const result = await chatCompletion({
+    requestId,
+    label,
+    systemPrompt,
+    userPrompt,
+    history,
+    temperature: 0.35,
+    maxTokens: 8192,
   });
-
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`${label} AI error: ${response.status} ${text}`);
-  }
-
-  const result = await response.json();
-  const content = result.choices?.[0]?.message?.content || "";
+  const content = result.content;
   return { content, action: extractAction(content) };
 }
 
@@ -157,7 +144,7 @@ ${JSON.stringify(ctx.currentSelections ?? {}, null, 2)}
 ## Conversation
 ${ctx.messages.map(m => `${m.role.toUpperCase()}: ${m.content}`).join("\n\n")}`;
 
-  return callSiliconFlow(ctx.apiKey, ctx.requestId, "ideation-agent", prompt, userPrompt);
+  return callSiliconFlow(ctx.requestId, "ideation-agent", prompt, userPrompt);
 }
 
 async function runPlanningAgent(
@@ -190,7 +177,7 @@ ${ctx.activatedContext ? `## Activated DB Skill Context\n${ctx.activatedContext}
 ## Current Selections
 ${JSON.stringify(ctx.currentSelections ?? {}, null, 2)}`;
 
-  return callSiliconFlow(ctx.apiKey, ctx.requestId, "planning-agent", prompt, userPrompt);
+  return callSiliconFlow(ctx.requestId, "planning-agent", prompt, userPrompt);
 }
 
 async function runExecutionAgent(
@@ -224,5 +211,5 @@ ${JSON.stringify(ctx.currentSelections ?? {}, null, 2)}
 - prefer values supported by the generator
 - use customTheme to preserve nuanced brand guidance from the PRD`;
 
-  return callSiliconFlow(ctx.apiKey, ctx.requestId, "execution-agent", prompt, userPrompt);
+  return callSiliconFlow(ctx.requestId, "execution-agent", prompt, userPrompt);
 }

@@ -24,10 +24,26 @@ PREVIEW_BASE_URL=http://YOUR_HOST/p
 PREVIEW_PUBLISH_DIR=/srv/www/create-any-site/previews
 BUILD_INLINE_JOBS=0
 BUILD_WORKER_POLL_MS=2000
-SILICONFLOW_API_KEY=...
 NEXTAUTH_SECRET=...
 NEXTAUTH_URL=http://YOUR_HOST
 ```
+
+LLM provider options:
+
+```env
+# Option A: OpenRouter (preferred if configured)
+OPENROUTER_API_KEY=...
+OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+OPENROUTER_MODEL=openai/gpt-4.1-mini
+OPENROUTER_HTTP_REFERER=http://YOUR_HOST
+OPENROUTER_APP_NAME=CreateAnySite
+
+# Option B: SiliconFlow fallback
+SILICONFLOW_API_KEY=...
+SILICONFLOW_MODEL=Pro/zai-org/GLM-5
+```
+
+If `OPENROUTER_API_KEY` is present, the app uses OpenRouter first for `chat-build` and `compile-spec`.
 
 ## Directory Layout
 

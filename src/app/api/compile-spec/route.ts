@@ -6,6 +6,7 @@ import { logger } from "@/lib/logger";
 import type { KnowledgeItem } from "@/lib/knowledge";
 import fs from "fs/promises";
 import path from "path";
+import { chatCompletion, getChatProviderSummary, hasChatProvider } from "@/lib/llm";
 
 const SPEC_PROMPT_PATH = path.join(process.cwd(), "src/prompts/compile-spec.md");
 
@@ -25,9 +26,8 @@ const SPEC_PROMPT_PATH = path.join(process.cwd(), "src/prompts/compile-spec.md")
  */
 export async function POST(req: NextRequest) {
   const requestId = crypto.randomUUID().slice(0, 8);
-  const apiKey = process.env.SILICONFLOW_API_KEY;
-  if (!apiKey) {
-    return NextResponse.json({ error: "SILICONFLOW_API_KEY not configured" }, { status: 500 });
+  if (!hasChatProvider()) {
+    return NextResponse.json({ error: "No LLM provider configured. Set OPENROUTER_API_KEY or SILICONFLOW_API_KEY." }, { status: 500 });
   }
 
   const { knowledge, intent, skillIds } = await req.json();
@@ -116,36 +116,31 @@ ${activatedSkillContext ? `## 已激活的 Skill (Level 1 — 完整指令)\n\n$
 
 请严格按照编译指南输出 Site Spec JSON。`;
 
-  logger.info("compile-spec", `[${requestId}] Sending to AI (prompt: ${systemPrompt.length + userMessage.length} chars)`);
+  logger.info("compile-spec", `[${requestId}] Sending to AI (prompt: ${systemPrompt.length + userMessage.length} chars, llm=${getChatProviderSummary()})`);
 
   const startTime = Date.now();
-  const response = await fetch("https://api.siliconflow.cn/v1/chat/completions", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({
-      model: "Pro/zai-org/GLM-5",
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userMessage },
-      ],
+  let completion;
+  try {
+    completion = await chatCompletion({
+      requestId,
+      label: "compile-spec",
+      systemPrompt,
+      userPrompt: userMessage,
       temperature: 0.3,
-      max_tokens: 16384,
-    }),
-  });
-
-  const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-
-  if (!response.ok) {
-    const errText = await response.text();
-    logger.error("compile-spec", `[${requestId}] AI error (${elapsed}s): ${response.status}`);
-    return NextResponse.json({ error: `AI error: ${response.status}` }, { status: 500 });
+      maxTokens: 16384,
+    });
+  } catch (err) {
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+    const message = err instanceof Error ? err.message : "Unknown AI error";
+    logger.error("compile-spec", `[${requestId}] AI error (${elapsed}s): ${message}`);
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 
-  const result = await response.json();
-  const rawContent = result.choices?.[0]?.message?.content || "";
+  const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+  const rawContent = completion.content || "";
 
   logger.info("compile-spec", `[${requestId}] AI response (${elapsed}s): ${rawContent.length} chars`, {
-    tokens: result.usage,
+    tokens: completion.usage,
   });
 
   // ─── Parse the Spec JSON ───
