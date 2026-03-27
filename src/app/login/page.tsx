@@ -34,14 +34,17 @@ export default function LoginPage() {
             {error && <div className="p-3 rounded-xl bg-red-50 border border-red-100 text-red-600 text-sm text-center">{error}</div>}
             <div>
               <label className="block text-xs text-gray-500 mb-1.5">{t("login.email")}</label>
-              <input type="email" value={email} onChange={e => setEmail(e.target.value)} required className="w-full px-4 py-3 rounded-xl bg-gray-50 border border-gray-200 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/10" placeholder="you@example.com" />
+              <input type="email" value={email} onChange={e => setEmail(e.target.value)} required className="w-full px-4 py-3 rounded-xl bg-gray-50 border border-gray-200 text-sm text-gray-900 placeholder:text-gray-500 focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/10" placeholder="you@example.com" />
             </div>
             <div>
               <label className="block text-xs text-gray-500 mb-1.5">{t("login.password")}</label>
-              <input type="password" value={password} onChange={e => setPassword(e.target.value)} required className="w-full px-4 py-3 rounded-xl bg-gray-50 border border-gray-200 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/10" placeholder="••••••" />
+              <input type="password" value={password} onChange={e => setPassword(e.target.value)} required className="w-full px-4 py-3 rounded-xl bg-gray-50 border border-gray-200 text-sm text-gray-900 placeholder:text-gray-500 focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/10" placeholder="••••••" />
             </div>
             <button type="submit" disabled={loading} className="w-full px-4 py-3 rounded-xl bg-accent text-white text-sm font-medium hover:bg-accent/90 transition-all disabled:opacity-50 shadow-lg shadow-accent/20">
-              {loading ? t("login.loading") : t("login.submit")}
+              <span className="inline-flex items-center justify-center gap-2">
+                {loading && <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
+                {loading ? t("login.loading") : t("login.submit")}
+              </span>
             </button>
           </form>
           <p className="text-center text-sm text-gray-400 mt-6">

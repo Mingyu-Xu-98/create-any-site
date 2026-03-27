@@ -14,6 +14,7 @@ interface SiteItem {
   siteType: string;
   theme: string;
   status: string;
+  publishedUrl?: string | null;
   createdAt: string;
   updatedAt: string;
   conversationId?: string | null;
@@ -55,9 +56,9 @@ export default function DashboardPage() {
   };
 
   const statusColors: Record<string, string> = {
-    draft: "bg-yellow-500/20 text-yellow-400",
-    published: "bg-green-500/20 text-green-400",
-    archived: "bg-gray-100 text-gray-400",
+    draft: "bg-amber-100 text-amber-800",
+    published: "bg-emerald-100 text-emerald-800",
+    archived: "bg-gray-200 text-gray-700",
   };
 
   return (
@@ -112,7 +113,9 @@ export default function DashboardPage() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {sites.map((site) => (
-              <div key={site.id} className="group p-5 rounded-2xl bg-white border border-gray-200 hover:border-accent/30 hover:bg-gray-50 transition-all">
+              <div key={site.id} className="group overflow-hidden rounded-3xl bg-white border border-gray-200 hover:border-accent/30 transition-all shadow-sm hover:shadow-lg">
+                <div className="h-2 w-full" style={{ background: `linear-gradient(90deg, ${site.theme === "cyberpunk" ? "#00fff0" : site.theme === "ghibli" ? "#7d9b5f" : site.theme === "glassmorphism" ? "#c89bda" : site.theme === "bold-creative" ? "#ff6b6b" : "#111827"}, ${site.theme === "cyberpunk" ? "#ff00ff" : site.theme === "ghibli" ? "#e8a87c" : site.theme === "glassmorphism" ? "#e8b88a" : site.theme === "bold-creative" ? "#4d96ff" : "#6b7280"})` }} />
+                <div className="p-5">
                 <div className="flex items-start justify-between mb-3">
                   <h3 className="font-medium text-sm group-hover:text-accent transition-colors truncate">
                     {site.name}
@@ -121,18 +124,43 @@ export default function DashboardPage() {
                     {site.status}
                   </span>
                 </div>
-                <div className="flex items-center gap-2 text-xs text-gray-400">
-                  <span className="px-2 py-0.5 rounded bg-gray-100">{themeLabels[site.theme] || site.theme}</span>
-                  <span>{site.siteType}</span>
+                <div className="mt-4 rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                  <div className="flex items-center justify-between text-[10px] text-gray-500 uppercase tracking-[0.16em]">
+                    <span>{themeLabels[site.theme] || site.theme}</span>
+                    <span>{site.siteType}</span>
+                  </div>
+                  <div className="mt-3 h-24 rounded-2xl border border-white bg-white shadow-inner px-4 py-3">
+                    <div className="w-16 h-1.5 rounded-full bg-gray-200" />
+                    <div className="mt-3 w-28 h-3 rounded-full bg-gray-900/80" />
+                    <div className="mt-2 w-20 h-2 rounded-full bg-gray-300" />
+                    <div className="mt-4 grid grid-cols-3 gap-2">
+                      <div className="h-8 rounded-lg bg-gray-100" />
+                      <div className="h-8 rounded-lg bg-gray-100" />
+                      <div className="h-8 rounded-lg bg-gray-100" />
+                    </div>
+                  </div>
                 </div>
                 <div className="mt-3 pt-3 border-t border-gray-200 flex items-center justify-between">
                   <span className="text-[10px] text-gray-500">{new Date(site.createdAt).toLocaleDateString()}</span>
-                  <Link
-                    href={site.conversationId ? `/create?siteId=${site.id}` : `/create`}
-                    className="px-3 py-1 rounded-lg bg-accent/10 text-accent text-[10px] hover:bg-accent/20 transition-all"
-                  >
-                    {locale === "zh" ? "继续编辑" : "Continue Editing"}
-                  </Link>
+                  <div className="flex items-center gap-2">
+                    {site.publishedUrl && (
+                      <a
+                        href={site.publishedUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-3 py-1 rounded-lg bg-gray-100 text-gray-600 text-[10px] hover:bg-gray-200 transition-all"
+                      >
+                        {locale === "zh" ? "访问站点" : "Visit Site"}
+                      </a>
+                    )}
+                    <Link
+                      href={site.conversationId ? `/create?siteId=${site.id}` : `/create`}
+                      className="px-3 py-1 rounded-lg bg-accent/10 text-accent text-[10px] hover:bg-accent/20 transition-all"
+                    >
+                      {locale === "zh" ? "继续编辑" : "Continue Editing"}
+                    </Link>
+                  </div>
+                </div>
                 </div>
               </div>
             ))}

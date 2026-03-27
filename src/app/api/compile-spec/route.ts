@@ -103,6 +103,8 @@ export async function POST(req: NextRequest) {
 - 布局偏好: ${intent?.layout || "自动"}
 - 自定义风格描述: ${intent?.customTheme || "无"}
 - 用户对话摘要: ${intent?.conversationSummary || "无"}
+ - 技术栈增强建议: ${Array.isArray(intent?.techStackHints) ? intent.techStackHints.join(", ") : (intent?.techStackHints || "无")}
+ - 资产/图片/渲染建议: ${Array.isArray(intent?.assetIdeas) ? intent.assetIdeas.join(", ") : (intent?.assetIdeas || "无")}
 
 ## 知识库内容 (${selectedKnowledge.length} 条)
 ${knowledgeSummary}

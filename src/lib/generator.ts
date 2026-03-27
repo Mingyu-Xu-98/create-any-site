@@ -1,4 +1,5 @@
 import type { WorkspaceData, UserSelections, ThemeStyle, LayoutType, FeatureFlags, DesignIntelligence } from "./types";
+import type { SiteSpec, SiteSpecSection } from "./site-spec";
 
 /** Resolve "custom" selections to the closest preset for actual generation */
 function resolveSelections(selections: UserSelections): { theme: ThemeStyle; layout: LayoutType } {
@@ -30,10 +31,40 @@ const LAYOUT_FAMILY: Record<LayoutType, LayoutFamily> = {
  * Pure function — no I/O side effects. Used both client-side and server-side.
  */
 export function generateFileMap(
-  data: WorkspaceData,
+  rawData: WorkspaceData,
   selections: UserSelections,
   designIntel?: DesignIntelligence | null,
+  spec?: SiteSpec | null,
 ): Record<string, string> {
+  // Sanitize data: ensure all array fields exist to prevent undefined crashes
+  const data: WorkspaceData = {
+    ...rawData,
+    name: rawData.name || "Your Name",
+    nameEn: rawData.nameEn || rawData.name || "Your Name",
+    title: rawData.title || "",
+    titleEn: rawData.titleEn || rawData.title || "",
+    email: rawData.email || "",
+    location: rawData.location || "",
+    locationEn: rawData.locationEn || rawData.location || "",
+    bio: rawData.bio || "",
+    bioEn: rawData.bioEn || rawData.bio || "",
+    bioTags: rawData.bioTags || [],
+    bioTagsEn: rawData.bioTagsEn || rawData.bioTags || [],
+    skills: Array.isArray(rawData.skills) ? rawData.skills : [],
+    skillsEn: Array.isArray(rawData.skillsEn) ? rawData.skillsEn : (Array.isArray(rawData.skills) ? rawData.skills : []),
+    projects: Array.isArray(rawData.projects) ? rawData.projects : [],
+    projectsEn: Array.isArray(rawData.projectsEn) ? rawData.projectsEn : (Array.isArray(rawData.projects) ? rawData.projects : []),
+    timeline: Array.isArray(rawData.timeline) ? rawData.timeline : [],
+    timelineEn: Array.isArray(rawData.timelineEn) ? rawData.timelineEn : (Array.isArray(rawData.timeline) ? rawData.timeline : []),
+    education: Array.isArray(rawData.education) ? rawData.education : [],
+    educationEn: Array.isArray(rawData.educationEn) ? rawData.educationEn : (Array.isArray(rawData.education) ? rawData.education : []),
+    tags: Array.isArray(rawData.tags) ? rawData.tags : [],
+    tagsEn: Array.isArray(rawData.tagsEn) ? rawData.tagsEn : (Array.isArray(rawData.tags) ? rawData.tags : []),
+    links: Array.isArray(rawData.links) ? rawData.links : [],
+    visibleSections: Array.isArray(rawData.visibleSections) ? rawData.visibleSections : ["about"],
+    chatbotContext: rawData.chatbotContext || "",
+  };
+
   const { theme, layout } = resolveSelections(selections);
   const features = selections.features;
   const files: Record<string, string> = {};
@@ -57,10 +88,10 @@ export function generateFileMap(
     ? `/* ==== DESIGN CONTEXT ====\n${customNotes.map(n => ` * ${n}`).join("\n")}\n * ======================== */\n\n`
     : "";
 
-  files["src/app/layout.tsx"] = genLayout(data, theme, features, styleConfig);
+  files["src/app/layout.tsx"] = genLayout(data, theme, features, styleConfig, spec);
   files["src/app/globals.css"] = customHeader + genGlobalCSS(theme, layout, features, styleConfig);
   files["src/app/page.tsx"] = genPage(data, layout, theme, features);
-  files["src/i18n/translations.ts"] = genTranslations(data);
+  files["src/i18n/translations.ts"] = genTranslations(data, spec);
   files["src/components/LanguageProvider.tsx"] = genLanguageProvider();
 
   files["src/components/ChatBot.tsx"] = genChatBot();
@@ -69,10 +100,11 @@ export function generateFileMap(
 
   // Dynamic knowledge base for AI chatbot
   files["src/data/knowledge.json"] = JSON.stringify(
-    buildKnowledgeChunks(data),
+    buildKnowledgeChunks(data, spec),
     null,
     2,
   );
+  files["src/data/site-spec.json"] = JSON.stringify(spec || {}, null, 2);
 
   // Style-specific extra components
   if (theme === "cyberpunk") {
@@ -105,8 +137,10 @@ function genPackageJson(): string {
       "@tailwindcss/postcss": "^4.2.1",
       "@types/node": "^25.4.0",
       "@types/react": "^19.2.14",
-      next: "^16.1.6",
+      dijkstrajs: "^1.0.3",
+      next: "16.1.6",
       postcss: "^8.5.8",
+      pngjs: "^7.0.0",
       react: "^19.2.4",
       "react-dom": "^19.2.4",
       qrcode: "^1.5.4",
@@ -152,7 +186,287 @@ function getStyleBgMarkup(theme: ThemeStyle): string {
   }
 }
 
-function genLayout(data: WorkspaceData, theme: ThemeStyle, features: FeatureFlags, resolved?: ResolvedStyle): string {
+function readSpecValue(input: unknown): string {
+  if (!input) return "";
+  if (typeof input === "string") return input;
+  if (typeof input === "object" && input !== null && "value" in input && typeof (input as { value?: unknown }).value === "string") {
+    return (input as { value: string }).value;
+  }
+  return "";
+}
+
+function getSpecTitle(spec?: SiteSpec | null): string {
+  return readSpecValue(spec?.identity?.title) || "";
+}
+
+function getSpecName(spec?: SiteSpec | null): string {
+  return readSpecValue(spec?.identity?.name) || "";
+}
+
+function getSectionTitles(spec?: SiteSpec | null): Partial<Record<string, string>> {
+  const map: Partial<Record<string, string>> = {};
+  for (const section of spec?.sections || []) {
+    const key = section.id || section.type;
+    if (!key) continue;
+    const data = section.data || {};
+    const title = typeof data.heading === "string"
+      ? data.heading
+      : typeof data.title === "string"
+        ? data.title
+        : "";
+    if (title) map[key] = title;
+  }
+  return map;
+}
+
+function getAvailableSections(data: WorkspaceData, spec?: SiteSpec | null): string[] {
+  const specSections = (spec?.sections || [])
+    .filter((section: SiteSpecSection) => section.enabled !== false)
+    .map((section: SiteSpecSection) => section.id || section.type)
+    .filter((value): value is string => Boolean(value) && value !== "links");
+  if (specSections.length > 0) return specSections;
+
+  return data.visibleSections && data.visibleSections.length > 0
+    ? data.visibleSections.filter(s => s !== "links")
+    : [
+      "about",
+      ...(data.projects.length > 0 ? ["projects"] : []),
+      ...(data.timeline.length > 0 ? ["timeline"] : []),
+      ...(data.skills.length > 0 ? ["skills"] : []),
+      ...(data.education.length > 0 ? ["education"] : []),
+      "contact",
+    ];
+}
+
+function findSpecSection(spec: SiteSpec | null | undefined, id: string): SiteSpecSection | undefined {
+  return spec?.sections?.find(section => (section.id || section.type) === id);
+}
+
+function readStringArray(input: unknown): string[] {
+  return Array.isArray(input) ? input.filter((item): item is string => typeof item === "string") : [];
+}
+
+function readProjectItems(input: unknown): WorkspaceData["projects"] | null {
+  if (!Array.isArray(input)) return null;
+  return input.map((item, index) => {
+    const record = (item && typeof item === "object") ? item as Record<string, unknown> : {};
+    return {
+      title: typeof record.title === "string" ? record.title : `Project ${index + 1}`,
+      org: typeof record.org === "string" ? record.org : "",
+      desc: typeof record.description === "string"
+        ? record.description
+        : typeof record.desc === "string"
+          ? record.desc
+          : "",
+      tags: readStringArray(record.tags),
+      image: typeof record.image === "string" ? record.image : "",
+      link: typeof record.link === "string" ? record.link : "",
+      badge: typeof record.badge === "string" ? record.badge : "",
+    };
+  });
+}
+
+function readTimelineItems(input: unknown): WorkspaceData["timeline"] | null {
+  if (!Array.isArray(input)) return null;
+  return input.map((item, index) => {
+    const record = (item && typeof item === "object") ? item as Record<string, unknown> : {};
+    return {
+      date: typeof record.period === "string"
+        ? record.period
+        : typeof record.date === "string"
+          ? record.date
+          : "",
+      title: typeof record.title === "string" ? record.title : `Experience ${index + 1}`,
+      desc: typeof record.description === "string"
+        ? record.description
+        : typeof record.desc === "string"
+          ? record.desc
+          : "",
+      active: Boolean(record.current ?? record.active),
+    };
+  });
+}
+
+function buildHeroLines(data: WorkspaceData, spec?: SiteSpec | null, isEnglish = false): string[] {
+  const heroSection = findSpecSection(spec, "hero");
+  const headline = typeof heroSection?.data?.headline === "string" ? heroSection.data.headline : "";
+  const subheadline = typeof heroSection?.data?.subheadline === "string" ? heroSection.data.subheadline : "";
+  const ctaLabel = heroSection?.data && typeof heroSection.data === "object" && heroSection.data !== null && "cta" in heroSection.data
+    ? typeof (heroSection.data.cta as Record<string, unknown>)?.label === "string"
+      ? ((heroSection.data.cta as Record<string, unknown>).label as string)
+      : ""
+    : "";
+
+  const fallback = isEnglish
+    ? [`> Hello World`, `> ${data.nameEn || data.name}`, `> ${data.titleEn || data.title}`, `> ${data.locationEn || data.location} · ${data.email}`]
+    : [`> Hello World`, `> ${data.name}`, `> ${data.title}`, `> ${data.location} · ${data.email}`];
+
+  const lines = [
+    `> ${headline || (isEnglish ? (data.nameEn || data.name) : data.name)}`,
+    subheadline ? `> ${subheadline}` : `> ${isEnglish ? (data.titleEn || data.title) : data.title}`,
+    ctaLabel ? `> ${ctaLabel}` : "",
+    `> ${(isEnglish ? (data.locationEn || data.location) : data.location) || ""}${data.email ? ` · ${data.email}` : ""}`,
+  ].filter(line => line !== "> " && line.trim() !== ">");
+
+  return lines.length > 0 ? lines : fallback;
+}
+
+function genThemeShowcaseHero(theme: ThemeStyle, sectionClass = ""): string {
+  const themeClassMap: Partial<Record<ThemeStyle, string>> = {
+    cyberpunk: "theme-hero-cyberpunk",
+    cinematic: "theme-hero-cinematic",
+    retro: "theme-hero-retro",
+    nature: "theme-hero-nature",
+    "gradient-mesh": "theme-hero-gradient-mesh",
+    "neo-tokyo": "theme-hero-neo-tokyo",
+  };
+
+  const themeHeroClass = themeClassMap[theme] || "theme-hero-default";
+  const visual = theme === "cyberpunk"
+    ? `
+            <div className="showcase-terminal">
+              <div className="showcase-terminal-bar">
+                <span />
+                <span />
+                <span />
+              </div>
+              <div className="showcase-terminal-body">
+                {t.hero.lines.slice(0, 4).map((line) => (
+                  <div key={line} className="showcase-terminal-line">{line}</div>
+                ))}
+              </div>
+            </div>`
+    : theme === "cinematic"
+      ? `
+            <div className="showcase-poster-frame">
+              <div className="showcase-poster-noise" />
+              <div className="showcase-poster-label">Scene 01</div>
+              <div className="showcase-poster-title">{t.hero.lines[0]?.replace("> ", "") || t.ui.heyIm}</div>
+              <div className="showcase-poster-subtitle">{t.hero.lines[1]?.replace("> ", "") || ""}</div>
+            </div>`
+      : theme === "retro"
+        ? `
+            <div className="showcase-retro-stack">
+              <div className="showcase-retro-card">
+                <div className="showcase-retro-sticker">{t.hero.tags[0] || "Now"}</div>
+                <div className="showcase-retro-initials">{t.hero.lines[0]?.replace("> ", "").slice(0, 2)}</div>
+              </div>
+              <div className="showcase-retro-shadow" />
+            </div>`
+        : theme === "nature"
+          ? `
+            <div className="showcase-nature-panel">
+              <div className="showcase-nature-sun" />
+              <div className="showcase-nature-hill hill-1" />
+              <div className="showcase-nature-hill hill-2" />
+              <div className="showcase-nature-copy">{t.about.tags.slice(0, 3).join(" · ")}</div>
+            </div>`
+          : theme === "neo-tokyo"
+            ? `
+            <div className="showcase-tokyo-panel">
+              <div className="showcase-tokyo-grid" />
+              <div className="showcase-tokyo-copy">
+                <span className="showcase-tokyo-kicker">// signal</span>
+                <strong>{t.hero.lines[0]?.replace("> ", "") || t.ui.heyIm}</strong>
+                <span>{t.hero.lines[1]?.replace("> ", "") || ""}</span>
+              </div>
+            </div>`
+            : `
+            <div className="showcase-orbital-panel">
+              <div className="showcase-orbital-ring ring-1" />
+              <div className="showcase-orbital-ring ring-2" />
+              <div className="showcase-orbital-core">{t.hero.tags[0] || "AI"}</div>
+            </div>`;
+
+  return `
+        <section className="max-w-[1100px] mx-auto px-6 pt-20 pb-14${sectionClass ? ` ${sectionClass}` : ""}">
+          <div className="showcase-hero ${themeHeroClass}">
+            <div className="showcase-copy">
+              <span className="showcase-kicker">{t.ui.availableForHire}</span>
+              <h1 className="showcase-title">{t.hero.lines[0]?.replace("> ", "") || t.ui.heyIm}</h1>
+              <p className="showcase-subtitle">{t.hero.lines[1]?.replace("> ", "") || t.about.text}</p>
+              <div className="showcase-actions">
+                <a href="#projects" className="showcase-btn showcase-btn-primary">{t.nav.projects}</a>
+                <a href="#contact" className="showcase-btn showcase-btn-secondary">{t.nav.contact}</a>
+              </div>
+              <div className="showcase-tag-row">
+                {t.hero.tags.slice(0, 4).map((tag) => (<span key={tag} className="badge">{tag}</span>))}
+              </div>
+            </div>
+            <div className="showcase-visual">
+              ${visual}
+            </div>
+          </div>
+        </section>`;
+}
+
+function genSidebarThemePanel(theme: ThemeStyle): string {
+  if (theme === "cyberpunk") {
+    return `
+            <div className="sidebar-theme-panel sidebar-panel-cyberpunk">
+              <div className="sidebar-signal" />
+              <div className="sidebar-code-line" />
+              <div className="sidebar-code-line short" />
+              <div className="sidebar-code-line" />
+            </div>`;
+  }
+  if (theme === "nature") {
+    return `
+            <div className="sidebar-theme-panel sidebar-panel-nature">
+              <div className="sidebar-leaf leaf-1" />
+              <div className="sidebar-leaf leaf-2" />
+              <div className="sidebar-hill" />
+            </div>`;
+  }
+  if (theme === "retro") {
+    return `
+            <div className="sidebar-theme-panel sidebar-panel-retro">
+              <div className="sidebar-retro-stamp">ARCHIVE</div>
+            </div>`;
+  }
+  if (theme === "neo-tokyo") {
+    return `
+            <div className="sidebar-theme-panel sidebar-panel-tokyo">
+              <div className="sidebar-tokyo-grid" />
+              <span className="sidebar-tokyo-label">signal://live</span>
+            </div>`;
+  }
+  return `
+            <div className="sidebar-theme-panel sidebar-panel-default">
+              <div className="sidebar-orbit" />
+            </div>`;
+}
+
+function genSplitThemePanel(theme: ThemeStyle): string {
+  if (theme === "cinematic") {
+    return `
+          <div className="split-theme-panel split-panel-cinematic">
+            <div className="split-frame-line top" />
+            <div className="split-frame-line bottom" />
+            <span className="split-scene-label">Scene 01</span>
+          </div>`;
+  }
+  if (theme === "gradient-mesh" || theme === "glassmorphism") {
+    return `
+          <div className="split-theme-panel split-panel-orbital">
+            <div className="split-orb orb-a" />
+            <div className="split-orb orb-b" />
+            <div className="split-orb orb-c" />
+          </div>`;
+  }
+  if (theme === "cyberpunk" || theme === "neo-tokyo") {
+    return `
+          <div className="split-theme-panel split-panel-grid">
+            <div className="split-grid-scan" />
+          </div>`;
+  }
+  return `
+          <div className="split-theme-panel split-panel-default">
+            <div className="split-panel-crest" />
+          </div>`;
+}
+
+function genLayout(data: WorkspaceData, theme: ThemeStyle, features: FeatureFlags, resolved?: ResolvedStyle, spec?: SiteSpec | null): string {
   const bgThemes = ["ghibli", "nature", "cinematic"];
   const bodyClassMap: Partial<Record<ThemeStyle, string>> = { ghibli: "ghibli-bg", nature: "nature-bg", cinematic: "cinematic-page-bg" };
   const bodyClass = bgThemes.includes(theme) ? (bodyClassMap[theme] || "") : "";
@@ -173,8 +487,10 @@ function genLayout(data: WorkspaceData, theme: ThemeStyle, features: FeatureFlag
       brutalist: "https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&display=swap",
       cyberpunk: "https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap",
       ghibli: "https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500;700&display=swap",
+      glassmorphism: "https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Cormorant+Garamond:wght@500;600;700&display=swap",
       minimalist: "https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap",
       cinematic: "https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;700&family=Playfair+Display:wght@300;400;700&display=swap",
+      retro: "https://fonts.googleapis.com/css2?family=IBM+Plex+Serif:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap",
       "bold-creative": "https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700;900&display=swap",
       editorial: "https://fonts.googleapis.com/css2?family=Libre+Baskerville:wght@400;700&family=Playfair+Display:ital,wght@0,400;0,700;1,400&display=swap",
       nature: "https://fonts.googleapis.com/css2?family=Nunito:wght@300;400;500;600;700&display=swap",
@@ -193,8 +509,8 @@ import "./globals.css";
 import LanguageProvider from "@/components/LanguageProvider";
 
 export const metadata: Metadata = {
-  title: "${data.name} - Resume",
-  description: "${data.title}",
+  title: "${getSpecName(spec) || data.name} - ${getSpecTitle(spec) || data.title || "Portfolio"}",
+  description: "${spec?.product?.purpose || data.title || data.bio.slice(0, 120)}",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -359,8 +675,8 @@ const STYLE_CONFIG: Record<ThemeStyle, {
       accent: "#c89bda", "accent-soft": "rgba(180,130,200,0.15)", "accent-alt": "#e8b88a",
       line: "rgba(255,255,255,0.1)", green: "#34d399",
     },
-    fontSans: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-    fontHeading: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+    fontSans: '"Manrope", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+    fontHeading: '"Cormorant Garamond", Georgia, serif',
     borderRadius: "20px",
   },
   retro: {
@@ -370,8 +686,8 @@ const STYLE_CONFIG: Record<ThemeStyle, {
       accent: "#c0392b", "accent-soft": "rgba(192,57,43,0.1)", "accent-alt": "#d4881c",
       line: "rgba(100,80,50,0.2)", green: "#27ae60",
     },
-    fontSans: 'Georgia, "Times New Roman", "Noto Serif SC", serif',
-    fontHeading: '"Courier New", Courier, monospace',
+    fontSans: '"IBM Plex Serif", Georgia, "Times New Roman", serif',
+    fontHeading: '"Space Mono", "Courier New", monospace',
     borderRadius: "2px",
   },
   brutalist: {
@@ -2897,7 +3213,320 @@ h1, h2, h3 { font-family: var(--font-heading); letter-spacing: 0.04em; }
     ? `.avatar-glow { display: none; }`
     : `.avatar-glow { position: absolute; inset: -8px; border-radius: 50%; background: var(--color-accent); filter: blur(30px); opacity: 0.3; }`;
 
-  return bgEffects + headingStyle + badgeCSS + `
+  const showcaseHeroCSS = `
+.showcase-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(280px, 0.9fr);
+  gap: 32px;
+  align-items: center;
+}
+.showcase-copy { min-width: 0; }
+.showcase-kicker {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 8px 14px; border-radius: 999px; font-size: 0.74rem; font-weight: 600;
+  letter-spacing: 0.14em; text-transform: uppercase;
+  border: 1px solid var(--color-line); background: var(--color-bg-card);
+  color: var(--color-accent); margin-bottom: 18px;
+}
+.showcase-title {
+  font-size: clamp(2.75rem, 6vw, 5.2rem);
+  line-height: 0.95; letter-spacing: -0.05em; margin-bottom: 16px;
+}
+.showcase-subtitle {
+  max-width: 640px; font-size: 1rem; line-height: 1.8;
+  color: var(--color-text-muted); margin-bottom: 22px;
+}
+.showcase-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 18px; }
+.showcase-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 132px; padding: 12px 18px; border-radius: 999px;
+  font-size: 0.9rem; font-weight: 600; text-decoration: none; transition: all 0.25s ease;
+}
+.showcase-btn-primary { background: var(--color-text); color: var(--color-bg); }
+.showcase-btn-primary:hover { transform: translateY(-2px); }
+.showcase-btn-secondary { border: 1px solid var(--color-line); color: var(--color-text); background: transparent; }
+.showcase-btn-secondary:hover { background: var(--color-accent-soft); border-color: var(--color-accent); }
+.showcase-tag-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.showcase-visual {
+  min-height: 360px; position: relative; display: flex; align-items: stretch; justify-content: center;
+}
+.showcase-terminal,
+.showcase-poster-frame,
+.showcase-retro-stack,
+.showcase-nature-panel,
+.showcase-tokyo-panel,
+.showcase-orbital-panel {
+  width: 100%;
+  height: 100%;
+}
+.showcase-terminal {
+  border: 1px solid var(--color-line); border-radius: 24px; overflow: hidden;
+  background: rgba(0, 0, 0, 0.45); box-shadow: 0 20px 60px rgba(0,0,0,0.25);
+}
+.showcase-terminal-bar {
+  display: flex; gap: 8px; padding: 14px 16px; border-bottom: 1px solid var(--color-line);
+  background: rgba(255,255,255,0.03);
+}
+.showcase-terminal-bar span { width: 10px; height: 10px; border-radius: 999px; background: var(--color-accent); opacity: 0.75; }
+.showcase-terminal-body { padding: 22px; display: flex; flex-direction: column; gap: 10px; font-family: var(--font-mono); }
+.showcase-terminal-line { color: #a6f6ff; text-shadow: 0 0 10px rgba(0,255,240,0.3); }
+.showcase-poster-frame {
+  position: relative; padding: 28px; border-radius: 28px; overflow: hidden;
+  border: 1px solid var(--color-line); background: linear-gradient(160deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02));
+  display: flex; flex-direction: column; justify-content: flex-end; box-shadow: 0 24px 80px rgba(0,0,0,0.3);
+}
+.showcase-poster-noise {
+  position: absolute; inset: 0; opacity: 0.18;
+  background-image: linear-gradient(180deg, transparent 0%, rgba(0,0,0,0.45) 100%);
+}
+.showcase-poster-label,
+.showcase-poster-title,
+.showcase-poster-subtitle { position: relative; z-index: 1; }
+.showcase-poster-label {
+  margin-bottom: auto; font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.2em; font-size: 0.72rem; color: var(--color-accent-alt);
+}
+.showcase-poster-title { font-size: clamp(2.1rem, 4vw, 3.4rem); line-height: 0.98; color: #fff; }
+.showcase-poster-subtitle { margin-top: 10px; color: rgba(255,255,255,0.75); }
+.showcase-retro-stack { position: relative; display: flex; align-items: center; justify-content: center; }
+.showcase-retro-card {
+  position: relative; width: min(100%, 340px); aspect-ratio: 0.9;
+  border: 3px solid var(--color-text); background: #f7edd2; box-shadow: 14px 14px 0 rgba(45,45,45,0.2);
+  transform: rotate(-4deg); display: flex; align-items: center; justify-content: center;
+}
+.showcase-retro-shadow {
+  position: absolute; inset: auto 24px 24px auto; width: 72%; height: 72%;
+  border: 2px dashed var(--color-line); transform: rotate(3deg);
+}
+.showcase-retro-sticker {
+  position: absolute; top: 18px; right: 18px; padding: 8px 12px;
+  background: var(--color-accent); color: #fff; font-family: var(--font-heading); transform: rotate(7deg);
+}
+.showcase-retro-initials {
+  font-size: clamp(3.5rem, 9vw, 6rem); font-family: var(--font-heading); letter-spacing: -0.08em;
+}
+.showcase-nature-panel {
+  position: relative; overflow: hidden; border-radius: 32px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.6), rgba(255,255,255,0.2));
+  border: 1px solid var(--color-line);
+}
+.showcase-nature-sun {
+  position: absolute; top: 30px; right: 34px; width: 72px; height: 72px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(255,255,255,0.8), rgba(255,255,255,0.1));
+}
+.showcase-nature-hill {
+  position: absolute; left: -10%; right: -10%; border-radius: 50%;
+}
+.showcase-nature-hill.hill-1 { bottom: -14%; height: 48%; background: #7da06a; }
+.showcase-nature-hill.hill-2 { bottom: -28%; height: 54%; background: #4d6d3e; }
+.showcase-nature-copy {
+  position: absolute; left: 28px; bottom: 28px; z-index: 2;
+  padding: 10px 14px; border-radius: 16px; background: rgba(255,255,255,0.72);
+  color: #355028; max-width: 70%;
+}
+.showcase-tokyo-panel {
+  position: relative; overflow: hidden; border-radius: 28px;
+  border: 1px solid var(--color-line); background: rgba(10, 6, 18, 0.75);
+  box-shadow: inset 0 0 40px rgba(255,46,99,0.08), 0 18px 60px rgba(0,0,0,0.3);
+}
+.showcase-tokyo-grid {
+  position: absolute; inset: 0;
+  background-image: linear-gradient(rgba(255,46,99,0.08) 1px, transparent 1px), linear-gradient(90deg, rgba(8,217,214,0.08) 1px, transparent 1px);
+  background-size: 26px 26px;
+  mask-image: linear-gradient(180deg, rgba(0,0,0,1), rgba(0,0,0,0.2));
+}
+.showcase-tokyo-copy {
+  position: absolute; inset: auto 24px 24px 24px;
+  display: flex; flex-direction: column; gap: 8px; padding: 18px;
+  border: 1px solid rgba(255,255,255,0.08); background: rgba(0,0,0,0.45);
+}
+.showcase-tokyo-copy strong { font-size: 1.8rem; color: #fff; }
+.showcase-tokyo-copy span { color: #cfc5dc; }
+.showcase-tokyo-kicker { color: #08d9d6 !important; font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.16em; font-size: 0.7rem; }
+.showcase-orbital-panel {
+  position: relative; border-radius: 28px; border: 1px solid var(--color-line);
+  background: linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.02));
+  overflow: hidden; display: flex; align-items: center; justify-content: center;
+}
+.showcase-orbital-ring {
+  position: absolute; border-radius: 50%; border: 1px solid var(--color-line);
+}
+.showcase-orbital-ring.ring-1 { width: 240px; height: 240px; }
+.showcase-orbital-ring.ring-2 { width: 320px; height: 320px; opacity: 0.4; }
+.showcase-orbital-core {
+  width: 96px; height: 96px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  font-weight: 700; color: #fff; background: linear-gradient(135deg, var(--color-accent), var(--color-accent-alt));
+}
+.sidebar-theme-panel,
+.split-theme-panel {
+  position: relative; overflow: hidden; border: 1px solid var(--color-line);
+  margin-bottom: 18px;
+}
+.sidebar-theme-panel {
+  width: 100%; height: 110px; border-radius: 18px;
+  background: linear-gradient(135deg, var(--color-accent-soft), transparent 70%);
+}
+.sidebar-panel-cyberpunk .sidebar-signal {
+  position: absolute; top: 18px; left: 18px; width: 14px; height: 14px; border-radius: 50%;
+  background: var(--color-accent); box-shadow: 0 0 16px rgba(0,255,240,0.4);
+}
+.sidebar-code-line {
+  position: absolute; left: 18px; right: 18px; height: 2px; background: rgba(255,255,255,0.18);
+}
+.sidebar-code-line:nth-of-type(2) { top: 38px; }
+.sidebar-code-line:nth-of-type(3) { top: 56px; }
+.sidebar-code-line:nth-of-type(4) { top: 74px; }
+.sidebar-code-line.short { right: 42%; }
+.sidebar-panel-nature .sidebar-leaf {
+  position: absolute; width: 58px; height: 28px; border-radius: 999px 999px 0 999px; background: rgba(90,114,71,0.38);
+}
+.sidebar-panel-nature .leaf-1 { top: 18px; right: 28px; transform: rotate(18deg); }
+.sidebar-panel-nature .leaf-2 { top: 40px; right: 68px; transform: rotate(-8deg); }
+.sidebar-panel-nature .sidebar-hill {
+  position: absolute; left: -10%; right: -10%; bottom: -20px; height: 70px; border-radius: 50%; background: rgba(90,114,71,0.55);
+}
+.sidebar-panel-retro .sidebar-retro-stamp {
+  position: absolute; inset: 50% auto auto 50%; transform: translate(-50%, -50%) rotate(-8deg);
+  border: 2px solid var(--color-text); padding: 10px 16px; font-family: var(--font-heading); letter-spacing: 0.2em;
+}
+.sidebar-panel-tokyo .sidebar-tokyo-grid {
+  position: absolute; inset: 0;
+  background-image: linear-gradient(rgba(255,46,99,0.08) 1px, transparent 1px), linear-gradient(90deg, rgba(8,217,214,0.08) 1px, transparent 1px);
+  background-size: 18px 18px;
+}
+.sidebar-panel-tokyo .sidebar-tokyo-label {
+  position: absolute; left: 18px; bottom: 16px; font-family: var(--font-mono); color: #08d9d6; font-size: 0.72rem; letter-spacing: 0.14em;
+}
+.sidebar-panel-default .sidebar-orbit {
+  position: absolute; inset: 20px; border-radius: 50%; border: 1px solid var(--color-line);
+}
+.sidebar-panel-default .sidebar-orbit::after {
+  content: ""; position: absolute; inset: 28px; border-radius: 50%; background: linear-gradient(135deg, var(--color-accent), var(--color-accent-alt));
+}
+.split-theme-panel {
+  width: min(100%, 320px); height: 150px; margin: 0 auto 24px; border-radius: 24px;
+  background: linear-gradient(135deg, var(--color-accent-soft), transparent 72%);
+}
+.split-panel-cinematic .split-frame-line {
+  position: absolute; left: 18px; right: 18px; height: 1px; background: rgba(255,255,255,0.18);
+}
+.split-panel-cinematic .split-frame-line.top { top: 18px; }
+.split-panel-cinematic .split-frame-line.bottom { bottom: 18px; }
+.split-scene-label {
+  position: absolute; left: 18px; bottom: 18px; font-family: var(--font-mono); font-size: 0.7rem; letter-spacing: 0.2em; text-transform: uppercase;
+}
+.split-panel-orbital .split-orb {
+  position: absolute; border-radius: 50%; filter: blur(2px);
+}
+.split-panel-orbital .orb-a { width: 78px; height: 78px; background: rgba(255,255,255,0.28); top: 18px; left: 26px; }
+.split-panel-orbital .orb-b { width: 96px; height: 96px; background: rgba(255,255,255,0.14); bottom: 10px; right: 24px; }
+.split-panel-orbital .orb-c { width: 42px; height: 42px; background: var(--color-accent); top: 34px; right: 80px; }
+.split-panel-grid .split-grid-scan {
+  position: absolute; inset: 0;
+  background-image: linear-gradient(rgba(255,46,99,0.08) 1px, transparent 1px), linear-gradient(90deg, rgba(8,217,214,0.08) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+.split-panel-default .split-panel-crest {
+  position: absolute; inset: 24px; border-radius: 22px; border: 1px solid var(--color-line);
+}
+.split-panel-default .split-panel-crest::after {
+  content: ""; position: absolute; inset: 24px; border-radius: 50%; background: linear-gradient(135deg, var(--color-accent), var(--color-accent-alt));
+}
+.theme-hero-cyberpunk .showcase-title,
+.theme-hero-neo-tokyo .showcase-title { text-shadow: 0 0 16px rgba(255,255,255,0.1); }
+.theme-hero-cyberpunk .showcase-btn-primary {
+  background: linear-gradient(90deg, var(--color-accent), var(--color-accent-alt));
+  color: #071014; box-shadow: 0 0 26px rgba(0,255,240,0.22);
+}
+.theme-hero-cinematic .showcase-kicker { background: rgba(255,255,255,0.04); color: var(--color-accent-alt); }
+.theme-hero-cinematic .showcase-title { font-family: var(--font-heading); max-width: 8ch; }
+.theme-hero-retro .showcase-btn-primary,
+.theme-hero-retro .showcase-btn-secondary { border-radius: 10px; }
+.theme-hero-retro .showcase-btn-primary { box-shadow: 5px 5px 0 rgba(45,45,45,0.4); }
+.theme-hero-nature .showcase-kicker { background: rgba(255,255,255,0.8); color: #355028; }
+.theme-hero-nature .showcase-title { max-width: 9ch; }
+.theme-hero-gradient-mesh .showcase-btn-primary {
+  background: linear-gradient(90deg, var(--color-accent), var(--color-accent-alt)); color: #140f24;
+}
+.theme-hero-neo-tokyo .showcase-btn-primary {
+  background: linear-gradient(90deg, var(--color-accent), var(--color-accent-alt));
+  box-shadow: 0 0 30px rgba(255,46,99,0.25);
+}
+.section-heading {
+  position: relative;
+}
+.section-heading::before {
+  content: "";
+  display: block;
+  width: 120px;
+  height: 10px;
+  margin-bottom: 14px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--color-accent-soft), transparent);
+}
+.theme-divider-cyberpunk .section-heading::before,
+.theme-divider-neo-tokyo .section-heading::before {
+  width: 140px;
+  height: 1px;
+  box-shadow: 0 0 18px rgba(255,255,255,0.08);
+}
+.theme-divider-retro .section-heading::before {
+  width: 90px;
+  height: 12px;
+  border-radius: 0;
+  background: repeating-linear-gradient(90deg, var(--color-accent), var(--color-accent) 16px, transparent 16px, transparent 24px);
+}
+.theme-divider-nature .section-heading::before {
+  width: 84px;
+  height: 16px;
+  border-radius: 999px 999px 0 999px;
+  background: linear-gradient(90deg, rgba(90,114,71,0.75), rgba(196,168,130,0.35));
+}
+.theme-divider-cinematic .section-heading::before {
+  width: 160px;
+  height: 2px;
+  background: linear-gradient(90deg, rgba(233,69,96,0.75), rgba(201,169,110,0.2));
+}
+.theme-divider-glassmorphism .section-heading::before,
+.theme-divider-gradient-mesh .section-heading::before {
+  width: 112px;
+  height: 12px;
+  backdrop-filter: blur(10px);
+}
+@keyframes cyberpunkPulse {
+  0%, 100% { transform: translateY(0); box-shadow: 0 0 18px rgba(0,255,240,0.15); }
+  50% { transform: translateY(-3px); box-shadow: 0 0 32px rgba(0,255,240,0.24); }
+}
+@keyframes retroJitter {
+  0%, 100% { transform: rotate(-4deg) translate(0, 0); }
+  50% { transform: rotate(-5deg) translate(-2px, -2px); }
+}
+@keyframes natureDrift {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+@keyframes cinematicBreathe {
+  0%, 100% { transform: scale(1); opacity: 0.95; }
+  50% { transform: scale(1.02); opacity: 1; }
+}
+@keyframes tokyoSweep {
+  0% { transform: translateX(-16px); opacity: 0.55; }
+  100% { transform: translateX(16px); opacity: 1; }
+}
+.theme-hero-cyberpunk .showcase-terminal { animation: cyberpunkPulse 3.2s ease-in-out infinite; }
+.theme-hero-retro .showcase-retro-card { animation: retroJitter 4s steps(2, end) infinite; }
+.theme-hero-nature .showcase-nature-panel { animation: natureDrift 4.8s ease-in-out infinite; }
+.theme-hero-cinematic .showcase-poster-frame { animation: cinematicBreathe 5s ease-in-out infinite; }
+.theme-hero-neo-tokyo .showcase-tokyo-copy { animation: tokyoSweep 2.8s ease-in-out infinite alternate; }
+@media (max-width: 900px) {
+  .showcase-hero { grid-template-columns: 1fr; }
+  .showcase-copy { text-align: center; }
+  .showcase-actions, .showcase-tag-row { justify-content: center; }
+  .showcase-visual { min-height: 280px; }
+  .showcase-poster-title { font-size: 2.2rem; }
+}
+`;
+
+  return bgEffects + headingStyle + badgeCSS + showcaseHeroCSS + `
 ${avatarGlow}
 .timeline-line {
   position: absolute; left: 5px; top: 0; bottom: 0; width: 2px;
@@ -4284,25 +4913,7 @@ function genSingleColumnPage(data: WorkspaceData, layout: LayoutType, theme: The
           </div>
         </section>`;
   } else {
-    hero = `
-        {/* Hero */}
-        <section className="max-w-[1100px] mx-auto px-6 pt-20 pb-12${sectionClass ? ` ${sectionClass}` : ""}">
-          <div className="flex flex-col md:flex-row items-center md:items-start gap-10">
-            <div className="relative w-[120px] h-[120px] shrink-0">
-              <div className="avatar-glow" />
-              <div className="w-[120px] h-[120px] rounded-full overflow-hidden relative z-10 border-2 border-line">
-                <Image src="/images/avatar.png" alt="" width={120} height={120} className="w-full h-full object-cover" unoptimized />
-              </div>
-            </div>
-            <div className="flex-1">
-              <h1 className="text-3xl font-bold mb-2">{lang === "zh" ? "${data.name}" : "${data.nameEn}"}</h1>
-              <p className="text-text-muted">{lang === "zh" ? "${data.title}" : "${data.titleEn}"}</p>
-              <div className="flex flex-wrap gap-2 mt-6">
-                {t.hero.tags.map((tag) => (<span key={tag} className="badge">{tag}</span>))}
-              </div>
-            </div>
-          </div>
-        </section>`;
+    hero = genThemeShowcaseHero(theme, sectionClass);
   }
 
   // --- About section ---
@@ -4403,7 +5014,7 @@ export default function Home() {
   const { lang, t, toggle } = useLanguage();${hiddenNavState}${scrollScript}
 
   return (
-    <div className="min-h-screen relative bg-bg text-text">
+    <div className="min-h-screen relative bg-bg text-text theme-divider-${theme}">
       ${styleBg}
       ${layout === "interactive" ? `<div className="parallax-bg" />` : ""}
       <div className="relative z-10${wrapClass ? ` ${wrapClass}` : ""}"${layout === "interactive" ? ` ref={sectionsRef}` : ""}>
@@ -4531,6 +5142,7 @@ export default function Home() {
       <div className="two-column-layout">
         <aside className="sidebar-panel">
           <div className="sidebar-card">
+            ${genSidebarThemePanel(theme)}
             <div className="relative w-28 h-28 mx-auto mb-5">
               <div className="avatar-glow" />
               <Image src="/images/avatar.png" alt="" width={112} height={112} className="relative z-10 w-full h-full rounded-full object-cover border-3 border-white/60 shadow-lg" unoptimized />
@@ -4556,7 +5168,7 @@ export default function Home() {
           </div>
         </aside>
 
-        <main className="content-panel">
+        <main className="content-panel theme-divider-${theme}">
           <section id="about" className="mb-14">
             <h2 className="section-heading">{t.sections.about}</h2>
             <div className="card p-6">
@@ -4760,7 +5372,7 @@ export default function Home() {
   const { lang, t, toggle } = useLanguage();
 
   return (
-    <div className="min-h-screen relative bg-bg text-text">
+    <div className="min-h-screen relative bg-bg text-text theme-divider-${theme}">
       ${styleBg}
       <div className="relative z-10">
         <nav className="sticky top-0 z-50 bg-bg/80 backdrop-blur-xl border-b border-line">
@@ -4779,23 +5391,7 @@ export default function Home() {
           </div>
         </nav>
 
-        <section className="max-w-[1100px] mx-auto px-6 pt-20 pb-12">
-          <div className="flex flex-col md:flex-row items-center md:items-start gap-10">
-            <div className="relative w-[120px] h-[120px] shrink-0">
-              <div className="avatar-glow" />
-              <div className="w-[120px] h-[120px] rounded-full overflow-hidden relative z-10 border-2 border-line">
-                <Image src="/images/avatar.png" alt="" width={120} height={120} className="w-full h-full object-cover" unoptimized />
-              </div>
-            </div>
-            <div className="flex-1">
-              <h1 className="text-3xl font-bold mb-2">{lang === "zh" ? "${data.name}" : "${data.nameEn}"}</h1>
-              <p className="text-text-muted">{lang === "zh" ? "${data.title}" : "${data.titleEn}"}</p>
-              <div className="flex flex-wrap gap-2 mt-6">
-                {t.hero.tags.map((tag) => (<span key={tag} className="badge">{tag}</span>))}
-              </div>
-            </div>
-          </div>
-        </section>
+        ${genThemeShowcaseHero(theme)}
 
         <section id="about" className="max-w-[1100px] mx-auto px-6 py-16">
           <h2 className="section-heading">{t.sections.about}</h2>
@@ -4926,9 +5522,10 @@ export default function Home() {
   return (
     <>
       ${styleBg}
-      <div className="split-layout">
+      <div className="split-layout theme-divider-${theme}">
         <div className="split-left">
           <div className="text-center">
+            ${genSplitThemePanel(theme)}
             <div className="relative w-32 h-32 mx-auto mb-6">
               <div className="avatar-glow" />
               <Image src="/images/avatar.png" alt="" width={128} height={128} className="relative z-10 w-full h-full rounded-full object-cover border-2 border-line" unoptimized />
@@ -5072,28 +5669,61 @@ export default function Home() {
 
 // ---- Component generators ----
 
-function genTranslations(data: WorkspaceData): string {
+function genTranslations(data: WorkspaceData, spec?: SiteSpec | null): string {
+  const sectionTitles = getSectionTitles(spec);
+  const availableSections = getAvailableSections(data, spec);
+  const purpose = spec?.product?.purpose;
+  const audience = spec?.product?.targetAudience;
+  const aboutSection = findSpecSection(spec, "about");
+  const projectsSection = findSpecSection(spec, "projects");
+  const timelineSection = findSpecSection(spec, "timeline");
+  const contactSection = findSpecSection(spec, "contact");
+  const heroSection = findSpecSection(spec, "hero");
+  const aboutText = typeof aboutSection?.data?.bio === "string"
+    ? aboutSection.data.bio
+    : typeof aboutSection?.data?.text === "string"
+      ? aboutSection.data.text
+      : data.bio;
+  const aboutTags = readStringArray(aboutSection?.data?.highlights).length > 0
+    ? readStringArray(aboutSection?.data?.highlights)
+    : data.bioTags;
+  const specProjects = readProjectItems(projectsSection?.data?.items) || data.projects;
+  const specProjectsEn = readProjectItems(projectsSection?.data?.items) || (data.projectsEn || data.projects);
+  const specTimeline = readTimelineItems(timelineSection?.data?.items) || data.timeline;
+  const specTimelineEn = readTimelineItems(timelineSection?.data?.items) || (data.timelineEn || data.timeline);
+  const contactHeading = typeof contactSection?.data?.heading === "string" ? contactSection.data.heading : "";
+  const contactCta = typeof contactSection?.data?.cta === "string" ? contactSection.data.cta : "";
+  const heroTags = readStringArray(heroSection?.data?.highlights).length > 0
+    ? readStringArray(heroSection?.data?.highlights)
+    : (readStringArray(heroSection?.data?.keywords).length > 0 ? readStringArray(heroSection?.data?.keywords) : data.tags);
   const zh = {
     nav: { projects: "项目经验", timeline: "职业经历", skills: "专业技能", education: "教育背景", contact: "联系方式" },
     hero: {
-      lines: [`> Hello World`, `> ${data.name}`, `> ${data.title}`, `> ${data.location} · ${data.email}`],
-      tags: data.tags,
+      lines: buildHeroLines(data, spec, false),
+      tags: heroTags,
     },
-    sections: { about: "关于我", projects: "项目经验", timeline: "职业经历", skills: "专业技能", education: "教育背景", contact: "联系方式" },
-    about: { text: data.bio, tags: data.bioTags },
-    projects: data.projects.map((p, i) => ({ title: p.title, org: p.org, desc: p.desc, tags: p.tags, image: p.image || `/images/project-${i + 1}.png`, link: p.link || "", badge: p.badge || "" })),
-    timeline: data.timeline,
+    sections: {
+      about: sectionTitles.about || "关于我",
+      projects: sectionTitles.projects || "项目经验",
+      timeline: sectionTitles.timeline || "职业经历",
+      skills: sectionTitles.skills || "专业技能",
+      education: sectionTitles.education || "教育背景",
+      contact: sectionTitles.contact || "联系方式",
+    },
+    about: { text: aboutText, tags: aboutTags },
+    projects: specProjects.map((p, i) => ({ title: p.title, org: p.org, desc: p.desc, tags: p.tags, image: p.image || `/images/project-${i + 1}.png`, link: p.link || "", badge: p.badge || "" })),
+    timeline: specTimeline,
     skills: data.skills,
     education: data.education,
     footer: `\u00A9 ${new Date().getFullYear()} ${data.name}. 保留所有权利。`,
     chatbot: {
       title: `${data.name} AI`,
-      subtitle: "有什么想问的？",
-      welcome: `你好！可以问我关于${data.name}的经历和技能。`,
+      subtitle: contactHeading || "有什么想问的？",
+      welcome: `你好！可以问我关于${data.name}的经历和技能。${purpose ? ` 本站目标：${purpose}。` : ""}`,
       placeholder: "输入你的问题...",
       send: "发送",
       tooltip: "AI 对话",
-      suggestions: ["你是做什么的？", "介绍一下你的工作经历", "你有哪些专业技能？"],
+      suggestions: [contactCta || "你是做什么的？", "介绍一下你的工作经历", "你有哪些专业技能？"],
     },
     share: {
       button: "分享",
@@ -5109,10 +5739,10 @@ function genTranslations(data: WorkspaceData): string {
     },
     ui: {
       heyIm: `嗨，我是 ${data.name}`,
-      welcomeToSite: `欢迎来到 ${data.name} 的个人主页`,
+      welcomeToSite: `欢迎来到 ${data.name} 的个人主页${audience ? `，面向${audience}` : ""}`,
       availableForHire: "开放合作机会",
-      letsCollaborate: "一起合作",
-      openForOpportunities: "期待新机遇",
+      letsCollaborate: contactHeading || "一起合作",
+      openForOpportunities: contactCta || "期待新机遇",
       contactMe: "联系我",
       scrollDown: "向下滚动",
       viewProject: "查看项目",
@@ -5131,39 +5761,37 @@ function genTranslations(data: WorkspaceData): string {
         education: "教育",
       },
     },
-    availableSections: data.visibleSections && data.visibleSections.length > 0
-      ? data.visibleSections.filter(s => s !== "links")
-      : [
-        "about",
-        ...(data.projects.length > 0 ? ["projects"] : []),
-        ...(data.timeline.length > 0 ? ["timeline"] : []),
-        ...(data.skills.length > 0 ? ["skills"] : []),
-        ...(data.education.length > 0 ? ["education"] : []),
-        "contact",
-      ],
+    availableSections,
     links: (data.links || []).map(l => ({ label: l.label, url: l.url, icon: l.icon || "other" })),
   };
   const en = {
     nav: { projects: "Projects", timeline: "Experience", skills: "Skills", education: "Education", contact: "Contact" },
     hero: {
-      lines: [`> Hello World`, `> ${data.nameEn || data.name}`, `> ${data.titleEn || data.title}`, `> ${data.locationEn || data.location} · ${data.email}`],
-      tags: data.tagsEn || data.tags,
+      lines: buildHeroLines(data, spec, true),
+      tags: heroTags,
     },
-    sections: { about: "About Me", projects: "Projects", timeline: "Experience", skills: "Skills", education: "Education", contact: "Contact" },
-    about: { text: data.bioEn, tags: data.bioTagsEn },
-    projects: (data.projectsEn || data.projects).map((p, i) => ({ title: p.title, org: p.org, desc: p.desc, tags: p.tags, image: p.image || `/images/project-${i + 1}.png`, link: p.link || "", badge: p.badge || "" })),
-    timeline: data.timelineEn || data.timeline,
+    sections: {
+      about: sectionTitles.about || "About Me",
+      projects: sectionTitles.projects || "Projects",
+      timeline: sectionTitles.timeline || "Experience",
+      skills: sectionTitles.skills || "Skills",
+      education: sectionTitles.education || "Education",
+      contact: sectionTitles.contact || "Contact",
+    },
+    about: { text: aboutText || data.bioEn, tags: aboutTags.length > 0 ? aboutTags : data.bioTagsEn },
+    projects: specProjectsEn.map((p, i) => ({ title: p.title, org: p.org, desc: p.desc, tags: p.tags, image: p.image || `/images/project-${i + 1}.png`, link: p.link || "", badge: p.badge || "" })),
+    timeline: specTimelineEn,
     skills: data.skillsEn || data.skills,
     education: data.educationEn || data.education,
     footer: `\u00A9 ${new Date().getFullYear()} ${data.nameEn || data.name}. All rights reserved.`,
     chatbot: {
       title: `${data.nameEn || data.name} AI`,
-      subtitle: "Ask me anything",
-      welcome: `Hi! Ask me about ${data.nameEn || data.name}'s experience and skills.`,
+      subtitle: contactHeading || "Ask me anything",
+      welcome: `Hi! Ask me about ${data.nameEn || data.name}'s experience and skills.${purpose ? ` Site goal: ${purpose}.` : ""}`,
       placeholder: "Type your question...",
       send: "Send",
       tooltip: "Chat with AI",
-      suggestions: ["What do you do?", "Tell me about your projects", "What are your skills?"],
+      suggestions: [contactCta || "What do you do?", "Tell me about your projects", "What are your skills?"],
     },
     share: {
       button: "Share",
@@ -5179,10 +5807,10 @@ function genTranslations(data: WorkspaceData): string {
     },
     ui: {
       heyIm: `Hey, I'm ${data.nameEn || data.name}`,
-      welcomeToSite: `Welcome to ${data.nameEn || data.name}'s portfolio`,
+      welcomeToSite: `Welcome to ${(data.nameEn || data.name)}'s portfolio${audience ? ` for ${audience}` : ""}`,
       availableForHire: "Available for hire",
-      letsCollaborate: "Let's collaborate",
-      openForOpportunities: "Open for opportunities",
+      letsCollaborate: contactHeading || "Let's collaborate",
+      openForOpportunities: contactCta || "Open for opportunities",
       contactMe: "Contact Me",
       scrollDown: "Scroll down",
       viewProject: "View Project",
@@ -5201,16 +5829,7 @@ function genTranslations(data: WorkspaceData): string {
         education: "Education",
       },
     },
-    availableSections: data.visibleSections && data.visibleSections.length > 0
-      ? data.visibleSections.filter(s => s !== "links")
-      : [
-        "about",
-        ...((data.projectsEn || data.projects).length > 0 ? ["projects"] : []),
-        ...((data.timelineEn || data.timeline).length > 0 ? ["timeline"] : []),
-        ...((data.skillsEn || data.skills).length > 0 ? ["skills"] : []),
-        ...((data.educationEn || data.education).length > 0 ? ["education"] : []),
-        "contact",
-      ],
+    availableSections,
     links: (data.links || []).map(l => ({ label: l.labelEn || l.label, url: l.url, icon: l.icon || "other" })),
   };
 
@@ -5961,7 +6580,7 @@ export default function ChatBot() {
 `;
 }
 
-function buildKnowledgeChunks(data: WorkspaceData): { chunks: { topic: string; content: string }[] } {
+function buildKnowledgeChunks(data: WorkspaceData, spec?: SiteSpec | null): { chunks: { topic: string; content: string }[] } {
   const chunks: { topic: string; content: string }[] = [];
 
   // Personal info chunk
@@ -5969,6 +6588,13 @@ function buildKnowledgeChunks(data: WorkspaceData): { chunks: { topic: string; c
     topic: "personal",
     content: `Name: ${data.name} (${data.nameEn})\nTitle: ${data.title} (${data.titleEn})\nEmail: ${data.email}\nLocation: ${data.location}\nBio: ${data.bio}\nBio (EN): ${data.bioEn}`,
   });
+
+  if (spec) {
+    chunks.push({
+      topic: "site-spec",
+      content: `Purpose: ${spec.product?.purpose || ""}\nAudience: ${spec.product?.targetAudience || ""}\nSite Type: ${spec.product?.siteType || ""}\nTheme: ${spec.designSystem?.theme || ""}\nSections: ${(spec.sections || []).map(section => section.id || section.type).filter(Boolean).join(", ")}`,
+    });
+  }
 
   // Skills chunk
   if (data.skills.length > 0) {

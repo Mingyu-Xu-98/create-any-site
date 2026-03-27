@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Luma Atelier</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Cormorant+Garamond:wght@500;600;700&display=swap');
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Manrope',system-ui,sans-serif;background:radial-gradient(circle at top,#2f1f3a 0%,#1a1225 48%,#130d1a 100%);color:#f3ebf7}
+.frame{max-width:1200px;margin:0 auto;padding:28px 32px 56px}
+.nav{display:flex;justify-content:space-between;align-items:center;padding:8px 0 28px}
+.brand{font-family:'Cormorant Garamond',serif;font-size:28px;letter-spacing:.04em}
+.nav ul{display:flex;gap:28px;list-style:none;color:#cdb8da;font-size:13px}
+.hero{display:grid;grid-template-columns:1.1fr .9fr;gap:28px;align-items:stretch}
+.glass{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);backdrop-filter:blur(18px);border-radius:28px;box-shadow:0 20px 60px rgba(0,0,0,.25)}
+.hero-copy{padding:40px}
+.eyebrow{display:inline-block;padding:7px 14px;border-radius:999px;background:rgba(255,255,255,.08);color:#dcbbe8;font-size:11px;letter-spacing:.16em;text-transform:uppercase;margin-bottom:18px}
+h1{font-family:'Cormorant Garamond',serif;font-size:72px;line-height:.92;font-weight:600;max-width:8ch}
+.hero-copy p{margin-top:18px;color:#cdb8da;line-height:1.8;max-width:52ch}
+.cta{display:flex;gap:12px;margin-top:24px}
+.btn{padding:12px 18px;border-radius:999px;font-size:13px}
+.btn.primary{background:#d3a8e2;color:#26172e}
+.btn.secondary{border:1px solid rgba(255,255,255,.16);color:#f3ebf7}
+.hero-visual{padding:26px;display:grid;grid-template-rows:1fr auto;gap:16px}
+.visual-card{position:relative;border-radius:24px;background:linear-gradient(135deg,rgba(255,255,255,.18),rgba(255,255,255,.03));min-height:300px;overflow:hidden}
+.visual-card:before,.visual-card:after{content:"";position:absolute;border-radius:50%;filter:blur(0)}
+.visual-card:before{width:220px;height:220px;background:rgba(216,159,196,.22);top:-60px;right:-40px}
+.visual-card:after{width:180px;height:180px;background:rgba(125,188,220,.16);bottom:-50px;left:-20px}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.stat{padding:16px;border-radius:18px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08)}
+.stat strong{display:block;font-size:26px}
+.stat span{font-size:11px;color:#cdb8da;text-transform:uppercase;letter-spacing:.14em}
+.services{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:24px}
+.service{padding:22px}
+.service h3{font-size:17px;margin-bottom:10px}
+.service p{font-size:13px;color:#bcaac6;line-height:1.7}
+.story{margin-top:24px;padding:28px;display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.story-copy h2{font-family:'Cormorant Garamond',serif;font-size:36px;margin-bottom:10px}
+.story-copy p{color:#cdb8da;line-height:1.8;font-size:14px}
+.quote{padding:22px;border-radius:22px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);align-self:end}
+.quote strong{display:block;margin-top:14px;font-size:12px;color:#e8d5ef;letter-spacing:.14em;text-transform:uppercase}
+@media(max-width:800px){.hero,.services,.story{grid-template-columns:1fr}h1{font-size:48px}.frame{padding:20px}}
+</style>
+</head>
+<body>
+  <div class="frame">
+    <div class="nav">
+      <div class="brand">Luma Atelier</div>
+      <ul><li>Services</li><li>Cases</li><li>Process</li><li>Contact</li></ul>
+    </div>
+    <section class="hero">
+      <div class="glass hero-copy">
+        <div class="eyebrow">Brand Studio</div>
+        <h1>We shape brands people remember.</h1>
+        <p>Luma Atelier is a fictional boutique studio helping design-led founders clarify positioning, visual systems, and launch narratives across digital touchpoints.</p>
+        <div class="cta">
+          <div class="btn primary">Book Discovery</div>
+          <div class="btn secondary">View Signature Work</div>
+        </div>
+      </div>
+      <div class="glass hero-visual">
+        <div class="visual-card"></div>
+        <div class="stats">
+          <div class="stat"><strong>18</strong><span>Launches</span></div>
+          <div class="stat"><strong>6 wks</strong><span>Avg. Sprint</span></div>
+          <div class="stat"><strong>92%</strong><span>Referral Rate</span></div>
+        </div>
+      </div>
+    </section>
+    <section class="services">
+      <div class="glass service"><h3>Positioning</h3><p>Sharper messaging architecture, offer framing, and audience language.</p></div>
+      <div class="glass service"><h3>Identity Systems</h3><p>Visual direction, typography pairing, art direction, and brand rules.</p></div>
+      <div class="glass service"><h3>Launch Pages</h3><p>Premium conversion-focused pages that feel editorial and intentional.</p></div>
+    </section>
+    <section class="glass story">
+      <div class="story-copy">
+        <h2>From rough idea to launch-ready narrative</h2>
+        <p>Every engagement moves through a clear sequence: narrative audit, positioning workshop, art direction sprint, and a polished launch system ready for product, content, and campaigns.</p>
+      </div>
+      <div class="quote">
+        “The site finally looked as premium as the offer itself. The whole flow felt calm, clear, and expensive.”
+        <strong>Mock client testimonial</strong>
+      </div>
+    </section>
+  </div>
+</body>
+</html>

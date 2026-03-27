@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Aya Lin Portfolio</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500;700&family=Nunito:wght@400;500;600;700&display=swap');
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Nunito',system-ui,sans-serif;background:#f5efe6;color:#3d3929}
+.page{max-width:1080px;margin:0 auto;padding:24px 26px 70px}
+.nav{display:flex;justify-content:space-between;align-items:center;padding-bottom:20px}
+.brand{font-family:'Noto Serif SC',serif;font-size:24px}
+.nav ul{display:flex;gap:22px;list-style:none;color:#8a7f6e;font-size:13px}
+.hero{display:grid;grid-template-columns:.85fr 1.15fr;gap:24px;align-items:center}
+.photo{height:420px;border-radius:28px;background:linear-gradient(180deg,#d8c9b4,#f7f1e7);position:relative;overflow:hidden;border:1px solid rgba(139,119,90,.18)}
+.photo:before{content:"";position:absolute;inset:auto 20px 30px 20px;height:120px;border-radius:50%;background:rgba(125,155,95,.25);filter:blur(10px)}
+.copy{background:rgba(255,253,247,.72);border:1px solid rgba(139,119,90,.18);border-radius:28px;padding:34px}
+.kicker{font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:#7d9b5f}
+h1{font-family:'Noto Serif SC',serif;font-size:54px;line-height:1.08;margin:12px 0 14px}
+.copy p{color:#6f6557;line-height:1.9;font-size:15px}
+.chips{display:flex;flex-wrap:wrap;gap:10px;margin-top:18px}
+.chips span{padding:8px 14px;border-radius:999px;background:rgba(125,155,95,.12);color:#6b7a5e;font-size:12px}
+.narrative{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:22px}
+.card{background:rgba(255,253,247,.72);border:1px solid rgba(139,119,90,.18);border-radius:24px;padding:22px}
+.card h3{font-family:'Noto Serif SC',serif;font-size:24px;margin-bottom:10px}
+.card p{font-size:14px;color:#6f6557;line-height:1.85}
+.timeline{margin-top:22px;display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.step{padding:18px;border-radius:22px;background:rgba(255,253,247,.72);border:1px solid rgba(139,119,90,.18)}
+.step strong{display:block;font-size:12px;color:#7d9b5f;letter-spacing:.14em;text-transform:uppercase;margin-bottom:8px}
+.step span{font-family:'Noto Serif SC',serif;font-size:22px}
+@media(max-width:800px){.hero,.narrative,.timeline{grid-template-columns:1fr}h1{font-size:40px}.photo{height:280px}}
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="nav"><div class="brand">Aya Lin</div><ul><li>故事</li><li>案例</li><li>过程</li><li>联系</li></ul></div>
+  <section class="hero">
+    <div class="photo"></div>
+    <div class="copy">
+      <div class="kicker">叙事型作品集示例</div>
+      <h1>把品牌、空间与情绪，翻译成可被感知的体验。</h1>
+      <p>这是一个虚构的跨学科设计师个人网站案例。它不是简历式罗列，而是更偏向故事展开，通过项目片段、过程语言和视觉气氛去呈现一个人的方法与审美。</p>
+      <div class="chips"><span>品牌叙事</span><span>空间体验</span><span>视觉系统</span><span>策展型表达</span></div>
+    </div>
+  </section>
+  <section class="narrative">
+    <div class="card"><h3>从调研到情绪线索</h3><p>每个项目都从人物、场景和感受开始。网站以故事为主线，而不是先罗列产出物。</p></div>
+    <div class="card"><h3>让作品自己说话</h3><p>案例被拆成“背景、动作、结果、反思”四段，便于浏览时形成记忆点，也更适合对话式沟通。</p></div>
+  </section>
+  <section class="timeline">
+    <div class="step"><strong>Chapter 01</strong><span>观察</span></div>
+    <div class="step"><strong>Chapter 02</strong><span>提炼</span></div>
+    <div class="step"><strong>Chapter 03</strong><span>表达</span></div>
+  </section>
+</div>
+</body>
+</html>

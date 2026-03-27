@@ -21,6 +21,7 @@ export async function GET() {
       theme: sites.theme,
       layout: sites.layout,
       status: sites.status,
+      publishedUrl: sites.publishedUrl,
       createdAt: sites.createdAt,
       updatedAt: sites.updatedAt,
     })
@@ -47,7 +48,7 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json();
-  const { name, siteType, theme, layout, workspaceData, selections, fileMap, previewUrl } = body;
+  const { name, siteType, theme, layout, workspaceData, selections, fileMap, previewUrl, prd, editorState } = body;
 
   if (!name || !siteType || !theme || !layout) {
     return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
@@ -70,6 +71,8 @@ export async function POST(req: NextRequest) {
     fileMap: fileMap ? JSON.stringify(fileMap) : null,
     status: "draft",
     previewUrl: previewUrl || null,
+    prd: prd || null,
+    editorState: editorState || null,
     createdAt: now,
     updatedAt: now,
   });

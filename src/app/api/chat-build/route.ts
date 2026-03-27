@@ -4,6 +4,7 @@ import { logger } from "@/lib/logger";
 import { db } from "@/lib/db";
 import { skills, sites, knowledgeGroups } from "@/lib/db/schema";
 import { eq, inArray } from "drizzle-orm";
+import { runBuildConversation } from "@/lib/build-agents";
 
 const CODE_CONTEXT_FILES = [
   "src/app/page.tsx", "src/app/globals.css", "src/app/layout.tsx",
@@ -15,7 +16,7 @@ export async function POST(req: NextRequest) {
   const apiKey = process.env.SILICONFLOW_API_KEY;
   if (!apiKey) return NextResponse.json({ error: "SILICONFLOW_API_KEY not configured" }, { status: 500 });
 
-  const { messages, knowledge, currentSelections, loadedSkills, siteId, phase } = await req.json();
+  const { messages, knowledge, currentSelections, loadedSkills, siteId, phase, currentPrd: requestPrd } = await req.json();
   const selectedKnowledge = (knowledge as KnowledgeItem[]).filter(k => k.selected);
   const session = await (await import("@/lib/auth")).auth();
 
@@ -57,10 +58,10 @@ export async function POST(req: NextRequest) {
   // Load code context if site exists
   let codeContext = "";
   let hasSiteCode = false;
-  let currentPrd = "";
+  let persistedPrd = "";
   if (siteId) {
     const site = await db.select({ fileMap: sites.fileMap, prd: sites.prd }).from(sites).where(eq(sites.id, siteId)).get();
-    if (site?.prd) currentPrd = site.prd;
+    if (site?.prd) persistedPrd = site.prd;
     if (site?.fileMap) {
       try {
         const fileMap: Record<string, string> = JSON.parse(site.fileMap);
@@ -89,189 +90,34 @@ export async function POST(req: NextRequest) {
     : "None";
 
   logger.info("chat-build", `[${requestId}] phase=${phase || "auto"}, ${messages.length} msgs, knowledge=${knowledgeSummary}, skills=${allSkills.length}, code=${hasSiteCode}`);
+  try {
+    const result = await runBuildConversation({
+      requestId,
+      apiKey,
+      messages,
+      knowledgeContext,
+      knowledgeSummary,
+      knowledgeGroupIndex,
+      skillCatalog,
+      activatedContext,
+      codeContext,
+      hasSiteCode,
+      currentPrd: typeof requestPrd === "string" && requestPrd.trim()
+        ? requestPrd
+        : requestPrd
+          ? JSON.stringify(requestPrd, null, 2)
+          : persistedPrd,
+      currentSelections,
+    });
 
-  // ─── Build system prompt based on phase ───
-  const systemPrompt = buildSystemPrompt({
-    phase: phase || "auto",
-    knowledgeContext,
-    knowledgeSummary,
-    knowledgeGroupIndex,
-    skillCatalog,
-    activatedContext,
-    codeContext,
-    hasSiteCode,
-    currentPrd,
-    currentSelections,
-  });
+    logger.info("chat-build", `[${requestId}] Response: ${result.content.length} chars`, {
+      action: result.action?.type || null,
+    });
 
-  const response = await fetch("https://api.siliconflow.cn/v1/chat/completions", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({
-      model: "Pro/zai-org/GLM-5",
-      messages: [{ role: "system", content: systemPrompt }, ...messages],
-      temperature: 0.5,
-      max_tokens: 8192,
-    }),
-  });
-
-  if (!response.ok) {
-    const errText = await response.text();
-    logger.error("chat-build", `[${requestId}] AI error: ${response.status}`);
-    return NextResponse.json({ error: `AI error: ${response.status} ${errText}` }, { status: 500 });
+    return NextResponse.json(result);
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : "Unknown error";
+    logger.error("chat-build", `[${requestId}] AI error: ${errMsg}`);
+    return NextResponse.json({ error: errMsg }, { status: 500 });
   }
-
-  const result = await response.json();
-  const content = result.choices?.[0]?.message?.content || "";
-  logger.info("chat-build", `[${requestId}] Response: ${content.length} chars`, { tokens: result.usage });
-
-  // Extract all action blocks
-  let action = null;
-  const actionMatch = content.match(/```action\s*([\s\S]*?)```/);
-  if (actionMatch) {
-    try {
-      action = JSON.parse(actionMatch[1].trim());
-      logger.info("chat-build", `[${requestId}] Action: ${action.type}`);
-    } catch { logger.warn("chat-build", `[${requestId}] Invalid action JSON`); }
-  }
-
-  return NextResponse.json({ content, action });
-}
-
-// ─── System prompt builder ───
-function buildSystemPrompt(ctx: {
-  phase: string; knowledgeContext: string; knowledgeSummary: string; knowledgeGroupIndex: string;
-  skillCatalog: string; activatedContext: string;
-  codeContext: string; hasSiteCode: boolean; currentPrd: string;
-  currentSelections: unknown;
-}): string {
-  return `You are a professional website product manager and builder. You guide users through a structured process to create high-quality websites.
-
-${ctx.knowledgeGroupIndex ? `## Knowledge Groups (indexes):\n${ctx.knowledgeGroupIndex}\n` : ""}
-## Selected Knowledge (${ctx.knowledgeSummary}):
-${ctx.knowledgeContext || "(Empty)"}
-
-## Available Skills:
-${ctx.skillCatalog}
-${ctx.activatedContext ? `\n## Activated Skills:\n${ctx.activatedContext}` : ""}
-${ctx.currentPrd ? `\n## Current PRD:\n${ctx.currentPrd}` : ""}
-${ctx.hasSiteCode ? `\n## Current Site Code:\n${ctx.codeContext}` : ""}
-
-## Workflow: PRD-Driven Build Process
-
-### Phase 1: Requirements Gathering
-Ask the user 3-5 questions to understand their needs. Output questions as **option cards** using this format:
-
-\`\`\`action
-{
-  "type": "options",
-  "question": "Question text",
-  "options": [
-    {"id": "value1", "icon": "emoji", "label": "Label", "desc": "Short description"},
-    {"id": "value2", "icon": "emoji", "label": "Label", "desc": "Short description"}
-  ],
-  "multiSelect": false
-}
-\`\`\`
-
-Ask these in sequence (one per message). **CRITICAL: EVERY question MUST include an \`\`\`action block with type "options"\`\`\`. NEVER ask a question as plain text without the options action block.** The user's response will be in format "[question] emoji label" — when you see this, ask the NEXT question using another options action block.
-
-Questions to ask:
-1. Site type & goal
-2. Target audience
-3. Visual style preference
-4. Core features (multiSelect: true)
-5. Knowledge source selection (if knowledge base has data)
-
-After all 3-5 questions are answered, proceed to Phase 2 (PRD generation).
-
-**CRITICAL RULE: You MUST complete Phase 2 (output a PRD) before Phase 3 (generate). NEVER skip the PRD step. NEVER output a "generate" action without first having output a "prd" action in a previous message. The flow is ALWAYS: options → prd → user confirms → generate.**
-
-### Phase 2: PRD Generation
-After gathering requirements (at least 3 questions answered), you MUST generate a complete PRD document. Output it as:
-
-\`\`\`action
-{"type": "prd", "siteType": "portfolio", "theme": "minimalist", "layout": "card-grid"}
-\`\`\`
-
-Then write the FULL PRD document in markdown AFTER the action block (not inside JSON). The PRD should include:
-- Project overview (type, audience, goal)
-- Content planning with narrative logic (which storytelling skills to use and why)
-- Visual design plan (theme, colors, typography, which design skills to use)
-- Design system approach (which ui-skills to query)
-- Technical implementation (stack, features)
-- Page structure with section descriptions
-- Knowledge data mapping
-
-Example response format:
-\`\`\`action
-{"type": "prd", "siteType": "portfolio", "theme": "cyberpunk", "layout": "interactive"}
-\`\`\`
-
-# Website PRD
-
-## 1. Project Overview
-- Type: Personal Portfolio
-- Audience: Tech recruiters
-...
-
-## 2. Content Planning
-...
-
-(The PRD markdown is written as normal text OUTSIDE the action block, making it easy to parse.)
-
-### Phase 3: Build Execution
-**ONLY after the user explicitly says "确认构建" / "confirm build" / "ok" / "go ahead" / "build it" in response to a PRD**, output a build action. NEVER generate without PRD confirmation:
-
-\`\`\`action
-{
-  "type": "generate",
-  "siteType": "...",
-  "theme": "...",
-  "layout": "...",
-  "customTheme": "detailed style description from PRD"
-}
-\`\`\`
-
-Include a thinking process in your response:
-\`\`\`thinking
-[分析] Analyzing knowledge base: found 18 items...
-[决策] Site type: portfolio based on resume data
-[设计] Calling ui-skill for design system...
-[构建] Generating page structure...
-\`\`\`
-
-### Phase 4: Modification (if site exists)
-${ctx.hasSiteCode ? `The site already exists. For modifications, use:
-\`\`\`action
-{
-  "type": "modify",
-  "changes": [
-    {"file": "path", "action": "replace", "content": "full new content"}
-  ],
-  "description": "what changed"
-}
-\`\`\`
-
-Also update the PRD if the modification changes the spec:
-\`\`\`action
-{
-  "type": "update_prd",
-  "changes": "description of what changed in the spec",
-  "prd": { ...updated PRD object }
-}
-\`\`\`` : "No site exists yet. Follow Phase 1-3."}
-
-## Rules:
-- Ask ONE question at a time using option cards
-- **MANDATORY FLOW: options (3-5 questions) → prd action → user confirms → generate action**
-- **NEVER output "generate" action without outputting "prd" action first**
-- **After 3+ questions answered, your NEXT response MUST contain a "prd" action block**
-- After PRD confirmed by user, THEN output "generate" action
-- Always include thinking process during build decisions
-- For modifications to existing sites, prefer "modify" over "generate"
-- When updating PRD, increment version number
-- Respond in the same language the user uses (Chinese or English)
-- Be concise but thorough in PRD content
-- If user says "确认构建" or "confirm build" or similar, proceed to Phase 3`;
 }

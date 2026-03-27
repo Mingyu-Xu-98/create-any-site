@@ -72,6 +72,45 @@ export async function POST(req: NextRequest) {
   }
 }
 
+// PATCH /api/knowledge - Batch update items (e.g., toggle selected for all)
+export async function PATCH(req: NextRequest) {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const { ids, selected, sourceId: batchSourceId } = await req.json();
+
+  if (batchSourceId !== undefined && selected !== undefined) {
+    // Toggle all items for a sourceId
+    await db.update(knowledgeItems)
+      .set({ selected: selected ? 1 : 0, updatedAt: new Date().toISOString() })
+      .where(and(eq(knowledgeItems.userId, session.user.id), eq(knowledgeItems.sourceId, batchSourceId)));
+    return NextResponse.json({ ok: true });
+  }
+
+  if (Array.isArray(ids) && selected !== undefined) {
+    // Toggle specific items by ids
+    const now = new Date().toISOString();
+    for (const id of ids) {
+      await db.update(knowledgeItems)
+        .set({ selected: selected ? 1 : 0, updatedAt: now })
+        .where(and(eq(knowledgeItems.id, id), eq(knowledgeItems.userId, session.user.id)));
+    }
+    return NextResponse.json({ ok: true, count: ids.length });
+  }
+
+  // Toggle ALL items for this user
+  if (selected !== undefined) {
+    await db.update(knowledgeItems)
+      .set({ selected: selected ? 1 : 0, updatedAt: new Date().toISOString() })
+      .where(eq(knowledgeItems.userId, session.user.id));
+    return NextResponse.json({ ok: true });
+  }
+
+  return NextResponse.json({ error: "Invalid batch update" }, { status: 400 });
+}
+
 // DELETE /api/knowledge - Delete items by sourceId or all
 export async function DELETE(req: NextRequest) {
   const session = await auth();
