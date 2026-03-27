@@ -55,12 +55,30 @@ export const sites = sqliteTable("sites", {
   selections: text("selections"),         // JSON
   fileMap: text("file_map"),              // JSON
   status: text("status").default("draft"), // draft | published | archived
+  buildStatus: text("build_status").default("idle"), // idle | queued | building | ready | failed
+  buildError: text("build_error"),
   previewUrl: text("preview_url"),
   publishedUrl: text("published_url"),
   templateId: text("template_id"),
   editorState: text("editor_state"),      // JSON
   prd: text("prd"),                       // Current PRD JSON
   prdHistory: text("prd_history"),        // JSON array of {version, prd, createdAt, note}
+  lastBuiltAt: text("last_built_at"),
+  createdAt: text("created_at").$defaultFn(() => new Date().toISOString()),
+  updatedAt: text("updated_at").$defaultFn(() => new Date().toISOString()),
+});
+
+export const siteBuilds = sqliteTable("site_builds", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  siteId: text("site_id").notNull().references(() => sites.id, { onDelete: "cascade" }),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  status: text("status").default("queued"), // queued | building | ready | failed
+  payload: text("payload").notNull(), // JSON
+  previewUrl: text("preview_url"),
+  error: text("error"),
+  logs: text("logs"), // JSON array
+  startedAt: text("started_at"),
+  finishedAt: text("finished_at"),
   createdAt: text("created_at").$defaultFn(() => new Date().toISOString()),
   updatedAt: text("updated_at").$defaultFn(() => new Date().toISOString()),
 });

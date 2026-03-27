@@ -678,67 +678,81 @@ function CreatePageInner() {
       const selections = spec ? deriveSelectionsFromSpec(spec, baseSelections) : baseSelections;
 
       setThinkingSteps(p => [...p, zh ? `🎨 主题: ${theme} | 布局: ${selections.layout}` : `🎨 Theme: ${theme} | Layout: ${selections.layout}`]);
-      setThinkingSteps(p => [...p, zh ? "⚙️ 生成代码文件..." : "⚙️ Generating code files..."]);
+      setThinkingSteps(p => [...p, zh ? "📦 创建构建任务..." : "📦 Creating build job..."]);
 
       const r = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ data, selections, skillIds, siteId: siteIdRef.current, prd: effectivePrd, spec }),
+        body: JSON.stringify({ data, selections, skillIds, siteId: siteIdRef.current, prd: effectivePrd, spec, knowledgeRefs: getSelectedResourceRefs() }),
       });
       const genResult = await readJsonResponse<{
         error?: string;
         logs?: string[];
-        url?: string;
-        fileMap?: Record<string, string>;
+        jobId?: string;
         siteId?: string;
-        verification?: { checks?: Array<{ label: string; ok: boolean }> };
-        previewReachable?: boolean;
+        status?: string;
       }>(r);
       if (!r.ok) {
         const logText = Array.isArray(genResult?.logs) && genResult.logs.length > 0 ? `\n\n${genResult.logs.join("\n")}` : "";
         throw new Error(`${genResult?.error || "Generation failed"}${logText}`);
       }
-      const url = genResult.url;
-      const fileMap = genResult.fileMap;
-      const verification = genResult.verification;
-      const previewReachable = genResult.previewReachable !== false;
-      if (!url) throw new Error("Generation response missing preview URL");
-      if (genResult.siteId && !siteIdRef.current) { siteIdRef.current = genResult.siteId; setSiteId(genResult.siteId); }
+      if (!genResult.jobId) throw new Error("Generation response missing job ID");
+      if (genResult.siteId) {
+        siteIdRef.current = genResult.siteId;
+        setSiteId(genResult.siteId);
+      }
 
-      setThinkingSteps(p => [...p, zh ? `✅ 生成完成: ${Object.keys(fileMap || {}).length} 个文件` : `✅ Generated: ${Object.keys(fileMap || {}).length} files`]);
-      setThinkingSteps(p => [...p, zh ? "🖼️ 生成图片资源..." : "🖼️ Generating images..."]);
+      const cid = await saveConv(chatMessages, previewUrl);
+      if (cid && genResult.siteId) {
+        await fetch(`/api/conversations/${cid}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ siteId: genResult.siteId }) });
+      }
 
-      const imageTasks = getImageTasks(theme as import("@/lib/types").ThemeStyle, data.name, data.projects.map((p: { title: string; tags: string[] }) => ({ title: p.title, tags: p.tags })));
-      for (const task of imageTasks) { try { await fetch("/api/generate-image", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt: task.prompt, filename: task.filename, style: theme }) }); } catch {} }
+      setThinkingSteps(p => [...p, zh ? "⏳ 任务已入队，等待 worker 构建..." : "⏳ Job queued, waiting for worker build..."]);
 
-      setThinkingSteps(p => [...p, zh ? "🚀 启动预览服务..." : "🚀 Starting preview server..."]);
-      let previewReady = previewReachable;
-      if (!previewReady) {
-        const healthUrl = `${url.replace(/\/+$/, "")}/__health`;
-        const start = Date.now();
-        for (let delay = 500; Date.now() - start < 30000; delay = Math.min(delay * 1.5, 3000)) {
-          try {
-            const health = await fetch(healthUrl, { cache: "no-store" });
-            if (health.ok) {
-              previewReady = true;
-              break;
-            }
-          } catch {}
-          await new Promise(r => setTimeout(r, delay));
+      const pollStart = Date.now();
+      let finished = false;
+      while (!finished && Date.now() - pollStart < 300000) {
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        const jobRes = await fetch(`/api/builds/${genResult.jobId}`, { cache: "no-store" });
+        const jobResult = await readJsonResponse<{
+          error?: string;
+          job?: {
+            status: string;
+            previewUrl?: string | null;
+            error?: string | null;
+            logs?: string[];
+          };
+        }>(jobRes);
+        if (!jobRes.ok) throw new Error(jobResult.error || `HTTP ${jobRes.status} ${jobRes.statusText}`);
+        const job = jobResult.job;
+        if (!job) throw new Error("Build job not found");
+
+        if (job.status === "building") {
+          setThinkingSteps([zh ? "🏗️ Worker 正在构建站点..." : "🏗️ Worker is building the site..."]);
+          continue;
+        }
+
+        if (job.status === "ready") {
+          const url = job.previewUrl;
+          if (!url) throw new Error("Build completed without preview URL");
+          setThinkingSteps([zh ? "✅ 构建完成，正在载入预览..." : "✅ Build completed, loading preview..."]);
+          setPreviewUrl(url);
+          setGenStatus("ready");
+          setShowPreview(true);
+          setPreviewTab("preview");
+          setPreviewKey(k => k + 1);
+          await saveConv(chatMessages, url);
+          finished = true;
+          break;
+        }
+
+        if (job.status === "failed") {
+          const logText = Array.isArray(job.logs) && job.logs.length > 0 ? `\n\n${job.logs.join("\n")}` : "";
+          throw new Error(`${job.error || "Build failed"}${logText}`);
         }
       }
-      if (!previewReady) {
-        setThinkingSteps(p => [...p, zh ? "⚠️ 预览服务启动超时，页面可能需要手动刷新" : "⚠️ Preview server timed out, you may need to refresh manually"]);
-      }
 
-      setThinkingSteps(p => [...p, zh ? "💾 保存项目..." : "💾 Saving project..."]);
-      setPreviewUrl(url); setGenStatus("ready"); setShowPreview(true); setPreviewTab("preview"); setPreviewKey(k => k + 1);
-      const cid = await saveConv(chatMessages, url);
-      await autoSaveSite(url, { ...config, prd: effectivePrd, spec }, cid || convIdRef.current, fileMap, data as unknown as Record<string, unknown>, selections as unknown as Record<string, unknown>);
-      if (verification?.checks?.length) {
-        const verificationLines = verification.checks.map((check: { label: string; ok: boolean }) => `${check.ok ? "✅" : "⚠️"} ${check.label}`);
-        setChatMessages(p => [...p, { role: "assistant", content: `${zh ? "构建验证结果" : "Build verification"}\n\n${verificationLines.join("\n")}` }]);
-      }
+      if (!finished) throw new Error(zh ? "构建任务超时，请稍后在工作台查看状态" : "Build job timed out, check the dashboard status later");
       setThinkingSteps([]);
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : "Unknown error";

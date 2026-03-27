@@ -12,7 +12,7 @@ if (!fs.existsSync(dataDir)) {
   fs.mkdirSync(dataDir, { recursive: true });
 }
 
-const sqlite = new Database(DB_PATH);
+export const sqlite = new Database(DB_PATH);
 sqlite.pragma("journal_mode = WAL");
 sqlite.pragma("busy_timeout = 5000");
 sqlite.pragma("foreign_keys = ON");
@@ -74,12 +74,30 @@ function initDb() {
       selections TEXT,
       file_map TEXT,
       status TEXT DEFAULT 'draft',
+      build_status TEXT DEFAULT 'idle',
+      build_error TEXT,
       preview_url TEXT,
       published_url TEXT,
       template_id TEXT,
       editor_state TEXT,
       prd TEXT,
       prd_history TEXT,
+      last_built_at TEXT,
+      created_at TEXT,
+      updated_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS site_builds (
+      id TEXT PRIMARY KEY,
+      site_id TEXT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      status TEXT DEFAULT 'queued',
+      payload TEXT NOT NULL,
+      preview_url TEXT,
+      error TEXT,
+      logs TEXT,
+      started_at TEXT,
+      finished_at TEXT,
       created_at TEXT,
       updated_at TEXT
     );
@@ -154,6 +172,20 @@ function initDb() {
       updated_at TEXT
     );
   `);
+
+  const alterStatements = [
+    "ALTER TABLE sites ADD COLUMN build_status TEXT DEFAULT 'idle'",
+    "ALTER TABLE sites ADD COLUMN build_error TEXT",
+    "ALTER TABLE sites ADD COLUMN last_built_at TEXT",
+  ];
+
+  for (const statement of alterStatements) {
+    try {
+      sqlite.exec(statement);
+    } catch {
+      // Column already exists on upgraded databases.
+    }
+  }
 }
 
 initDb();

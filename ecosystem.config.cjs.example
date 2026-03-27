@@ -1,0 +1,30 @@
+module.exports = {
+  apps: [
+    {
+      name: "create-any-site",
+      cwd: "/opt/create-any-site",
+      script: "npm",
+      args: "start",
+      env: {
+        NODE_ENV: "production",
+        NEXTAUTH_URL: "http://47.88.51.149",
+        PREVIEW_BASE_URL: "http://47.88.51.149/p",
+        PREVIEW_PUBLISH_DIR: "/srv/www/create-any-site/previews",
+        BUILD_INLINE_JOBS: "0",
+      },
+    },
+    {
+      name: "create-any-site-worker",
+      cwd: "/opt/create-any-site",
+      script: "npm",
+      args: "run worker",
+      env: {
+        NODE_ENV: "production",
+        PREVIEW_BASE_URL: "http://47.88.51.149/p",
+        PREVIEW_PUBLISH_DIR: "/srv/www/create-any-site/previews",
+        BUILD_INLINE_JOBS: "0",
+        BUILD_WORKER_POLL_MS: "2000",
+      },
+    },
+  ],
+};

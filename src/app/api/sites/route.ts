@@ -21,7 +21,11 @@ export async function GET() {
       theme: sites.theme,
       layout: sites.layout,
       status: sites.status,
+      buildStatus: sites.buildStatus,
+      buildError: sites.buildError,
+      previewUrl: sites.previewUrl,
       publishedUrl: sites.publishedUrl,
+      lastBuiltAt: sites.lastBuiltAt,
       createdAt: sites.createdAt,
       updatedAt: sites.updatedAt,
     })

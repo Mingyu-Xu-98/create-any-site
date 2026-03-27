@@ -14,6 +14,10 @@ interface SiteItem {
   siteType: string;
   theme: string;
   status: string;
+  buildStatus?: string | null;
+  buildError?: string | null;
+  previewUrl?: string | null;
+  lastBuiltAt?: string | null;
   publishedUrl?: string | null;
   createdAt: string;
   updatedAt: string;
@@ -59,6 +63,14 @@ export default function DashboardPage() {
     draft: "bg-amber-100 text-amber-800",
     published: "bg-emerald-100 text-emerald-800",
     archived: "bg-gray-200 text-gray-700",
+  };
+
+  const buildStatusColors: Record<string, string> = {
+    idle: "bg-gray-100 text-gray-600",
+    queued: "bg-blue-100 text-blue-700",
+    building: "bg-violet-100 text-violet-700",
+    ready: "bg-emerald-100 text-emerald-700",
+    failed: "bg-red-100 text-red-700",
   };
 
   return (
@@ -120,9 +132,14 @@ export default function DashboardPage() {
                   <h3 className="font-medium text-sm group-hover:text-accent transition-colors truncate">
                     {site.name}
                   </h3>
-                  <span className={`text-[10px] px-2 py-0.5 rounded-full ${statusColors[site.status] || statusColors.draft}`}>
-                    {site.status}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full ${buildStatusColors[site.buildStatus || "idle"] || buildStatusColors.idle}`}>
+                      {site.buildStatus || "idle"}
+                    </span>
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full ${statusColors[site.status] || statusColors.draft}`}>
+                      {site.status}
+                    </span>
+                  </div>
                 </div>
                 <div className="mt-4 rounded-2xl border border-gray-200 bg-gray-50 p-4">
                   <div className="flex items-center justify-between text-[10px] text-gray-500 uppercase tracking-[0.16em]">
@@ -140,9 +157,29 @@ export default function DashboardPage() {
                     </div>
                   </div>
                 </div>
+                {site.buildError && (
+                  <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2">
+                    <p className="text-[10px] font-medium text-red-700">{locale === "zh" ? "最近一次构建失败" : "Last build failed"}</p>
+                    <p className="mt-1 text-[10px] text-red-600 line-clamp-2">{site.buildError}</p>
+                  </div>
+                )}
                 <div className="mt-3 pt-3 border-t border-gray-200 flex items-center justify-between">
-                  <span className="text-[10px] text-gray-500">{new Date(site.createdAt).toLocaleDateString()}</span>
+                  <span className="text-[10px] text-gray-500">
+                    {site.lastBuiltAt
+                      ? `${locale === "zh" ? "最近构建" : "Built"} · ${new Date(site.lastBuiltAt).toLocaleDateString()}`
+                      : new Date(site.createdAt).toLocaleDateString()}
+                  </span>
                   <div className="flex items-center gap-2">
+                    {site.previewUrl && (
+                      <a
+                        href={site.previewUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-3 py-1 rounded-lg bg-gray-100 text-gray-600 text-[10px] hover:bg-gray-200 transition-all"
+                      >
+                        {locale === "zh" ? "预览站点" : "Preview"}
+                      </a>
+                    )}
                     {site.publishedUrl && (
                       <a
                         href={site.publishedUrl}
