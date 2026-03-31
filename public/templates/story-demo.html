@@ -3,56 +3,614 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Aya Lin Portfolio</title>
+<title>陈思远 / Siyuan Chen — From Lab to Startup</title>
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500;700&family=Nunito:wght@400;500;600;700&display=swap');
-*{box-sizing:border-box;margin:0;padding:0}
-body{font-family:'Nunito',system-ui,sans-serif;background:#f5efe6;color:#3d3929}
-.page{max-width:1080px;margin:0 auto;padding:24px 26px 70px}
-.nav{display:flex;justify-content:space-between;align-items:center;padding-bottom:20px}
-.brand{font-family:'Noto Serif SC',serif;font-size:24px}
-.nav ul{display:flex;gap:22px;list-style:none;color:#8a7f6e;font-size:13px}
-.hero{display:grid;grid-template-columns:.85fr 1.15fr;gap:24px;align-items:center}
-.photo{height:420px;border-radius:28px;background:linear-gradient(180deg,#d8c9b4,#f7f1e7);position:relative;overflow:hidden;border:1px solid rgba(139,119,90,.18)}
-.photo:before{content:"";position:absolute;inset:auto 20px 30px 20px;height:120px;border-radius:50%;background:rgba(125,155,95,.25);filter:blur(10px)}
-.copy{background:rgba(255,253,247,.72);border:1px solid rgba(139,119,90,.18);border-radius:28px;padding:34px}
-.kicker{font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:#7d9b5f}
-h1{font-family:'Noto Serif SC',serif;font-size:54px;line-height:1.08;margin:12px 0 14px}
-.copy p{color:#6f6557;line-height:1.9;font-size:15px}
-.chips{display:flex;flex-wrap:wrap;gap:10px;margin-top:18px}
-.chips span{padding:8px 14px;border-radius:999px;background:rgba(125,155,95,.12);color:#6b7a5e;font-size:12px}
-.narrative{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:22px}
-.card{background:rgba(255,253,247,.72);border:1px solid rgba(139,119,90,.18);border-radius:24px;padding:22px}
-.card h3{font-family:'Noto Serif SC',serif;font-size:24px;margin-bottom:10px}
-.card p{font-size:14px;color:#6f6557;line-height:1.85}
-.timeline{margin-top:22px;display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
-.step{padding:18px;border-radius:22px;background:rgba(255,253,247,.72);border:1px solid rgba(139,119,90,.18)}
-.step strong{display:block;font-size:12px;color:#7d9b5f;letter-spacing:.14em;text-transform:uppercase;margin-bottom:8px}
-.step span{font-family:'Noto Serif SC',serif;font-size:22px}
-@media(max-width:800px){.hero,.narrative,.timeline{grid-template-columns:1fr}h1{font-size:40px}.photo{height:280px}}
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    --bg: #f0ebe3;
+    --green: #2d5016;
+    --green-light: #4a7a2e;
+    --cream: #faf8f4;
+    --cream-dark: #e8e2d8;
+    --text: #3a3a2e;
+    --text-light: #6b6b5a;
+    --gold: #c9a84c;
+    --radius: 24px;
+  }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: 'Nunito', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.7;
+    overflow-x: hidden;
+  }
+
+  /* ---- Decorative leaf shapes ---- */
+  .leaf-deco {
+    position: absolute;
+    width: 120px;
+    height: 120px;
+    border-radius: 0 60px;
+    opacity: 0.07;
+    background: var(--green);
+    pointer-events: none;
+  }
+  .leaf-deco.r { border-radius: 60px 0; }
+
+  /* ---- Navigation ---- */
+  nav {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    background: rgba(240, 235, 227, 0.92);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--cream-dark);
+    padding: 0 24px;
+  }
+  nav .nav-inner {
+    max-width: 1100px;
+    margin: 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 64px;
+  }
+  nav .logo {
+    font-weight: 800;
+    font-size: 1.2rem;
+    color: var(--green);
+    text-decoration: none;
+  }
+  nav .nav-links { display: flex; gap: 28px; list-style: none; }
+  nav .nav-links a {
+    text-decoration: none;
+    color: var(--text-light);
+    font-weight: 600;
+    font-size: 0.95rem;
+    transition: color 0.2s;
+  }
+  nav .nav-links a:hover { color: var(--green); }
+  .menu-toggle { display: none; background: none; border: none; cursor: pointer; }
+  .menu-toggle span {
+    display: block; width: 24px; height: 2px;
+    background: var(--green); margin: 5px 0; border-radius: 2px;
+    transition: 0.3s;
+  }
+
+  /* ---- Sections shared ---- */
+  section { padding: 100px 24px; position: relative; }
+  .container { max-width: 1100px; margin: 0 auto; }
+  .section-label {
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 3px;
+    color: var(--green-light);
+    font-weight: 700;
+    margin-bottom: 12px;
+  }
+  .section-title {
+    font-size: 2.4rem;
+    font-weight: 800;
+    color: var(--green);
+    margin-bottom: 20px;
+    line-height: 1.2;
+  }
+  .section-desc {
+    font-size: 1.1rem;
+    color: var(--text-light);
+    max-width: 600px;
+    margin-bottom: 48px;
+  }
+
+  /* ---- Hero ---- */
+  #hero {
+    min-height: 92vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    background:
+      radial-gradient(circle at 20% 30%, rgba(45,80,22,0.06) 0%, transparent 50%),
+      radial-gradient(circle at 80% 70%, rgba(201,168,76,0.06) 0%, transparent 50%),
+      url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%232d5016' fill-opacity='0.04'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+    position: relative;
+  }
+  .hero-content { position: relative; z-index: 2; }
+  .hero-avatar {
+    width: 140px; height: 140px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 5px solid var(--cream);
+    box-shadow: 0 8px 32px rgba(45,80,22,0.15);
+    margin-bottom: 28px;
+  }
+  #hero h1 {
+    font-size: 3.4rem;
+    font-weight: 800;
+    color: var(--green);
+    margin-bottom: 16px;
+    line-height: 1.15;
+  }
+  #hero .tagline {
+    font-size: 1.35rem;
+    color: var(--text-light);
+    max-width: 520px;
+    margin: 0 auto 36px;
+    font-weight: 600;
+  }
+  .hero-cta {
+    display: inline-block;
+    padding: 14px 36px;
+    background: var(--green);
+    color: #fff;
+    border-radius: 60px;
+    text-decoration: none;
+    font-weight: 700;
+    font-size: 1rem;
+    transition: transform 0.2s, box-shadow 0.2s;
+    box-shadow: 0 4px 20px rgba(45,80,22,0.25);
+  }
+  .hero-cta:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 28px rgba(45,80,22,0.3);
+  }
+  .scroll-hint {
+    position: absolute;
+    bottom: 32px;
+    left: 50%;
+    transform: translateX(-50%);
+    animation: bounce 2s infinite;
+    color: var(--text-light);
+    font-size: 0.85rem;
+  }
+  @keyframes bounce {
+    0%, 100% { transform: translateX(-50%) translateY(0); }
+    50% { transform: translateX(-50%) translateY(8px); }
+  }
+
+  /* ---- Story / Journey ---- */
+  #story { background: var(--cream); }
+  .story-chapter {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 48px;
+    align-items: center;
+    margin-bottom: 80px;
+  }
+  .story-chapter:nth-child(even) .story-img { order: -1; }
+  .story-img img {
+    width: 100%;
+    border-radius: var(--radius);
+    box-shadow: 0 12px 40px rgba(0,0,0,0.08);
+  }
+  .story-text h3 {
+    font-size: 1.6rem;
+    color: var(--green);
+    margin-bottom: 8px;
+    font-weight: 800;
+  }
+  .story-text .chapter-num {
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: var(--gold);
+    font-weight: 700;
+    margin-bottom: 8px;
+  }
+  .story-text p {
+    color: var(--text-light);
+    margin-bottom: 16px;
+    font-size: 1.05rem;
+  }
+  .story-takeaway {
+    background: var(--bg);
+    padding: 16px 20px;
+    border-radius: 16px;
+    border-left: 4px solid var(--green);
+    font-weight: 600;
+    color: var(--green);
+    font-size: 0.95rem;
+  }
+
+  /* ---- Values ---- */
+  #values { background: var(--bg); }
+  .values-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 28px;
+  }
+  .value-card {
+    background: var(--cream);
+    padding: 40px 32px;
+    border-radius: var(--radius);
+    box-shadow: 0 4px 24px rgba(0,0,0,0.04);
+    text-align: center;
+    transition: transform 0.3s, box-shadow 0.3s;
+  }
+  .value-card:hover {
+    transform: translateY(-6px);
+    box-shadow: 0 12px 36px rgba(0,0,0,0.08);
+  }
+  .value-icon {
+    width: 64px; height: 64px;
+    border-radius: 50%;
+    background: var(--green);
+    color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.8rem;
+    margin: 0 auto 20px;
+  }
+  .value-card h3 {
+    font-size: 1.2rem;
+    color: var(--green);
+    margin-bottom: 10px;
+    font-weight: 800;
+  }
+  .value-card p {
+    color: var(--text-light);
+    font-size: 0.95rem;
+  }
+
+  /* ---- Milestones Timeline ---- */
+  #milestones { background: var(--cream); }
+  .timeline {
+    position: relative;
+    max-width: 700px;
+    margin: 0 auto;
+    padding-left: 40px;
+  }
+  .timeline::before {
+    content: '';
+    position: absolute;
+    left: 15px;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    background: linear-gradient(to bottom, var(--green), var(--gold));
+    border-radius: 2px;
+  }
+  .timeline-item {
+    position: relative;
+    margin-bottom: 48px;
+  }
+  .timeline-item::before {
+    content: '';
+    position: absolute;
+    left: -33px;
+    top: 6px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--green);
+    border: 3px solid var(--cream);
+    box-shadow: 0 0 0 3px var(--green);
+  }
+  .timeline-year {
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: var(--gold);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 4px;
+  }
+  .timeline-item h3 {
+    font-size: 1.15rem;
+    color: var(--green);
+    font-weight: 700;
+    margin-bottom: 6px;
+  }
+  .timeline-item p {
+    color: var(--text-light);
+    font-size: 0.95rem;
+  }
+
+  /* ---- Gallery ---- */
+  #gallery { background: var(--bg); }
+  .gallery-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+  }
+  .gallery-grid img {
+    width: 100%;
+    aspect-ratio: 4 / 3;
+    object-fit: cover;
+    border-radius: var(--radius);
+    box-shadow: 0 4px 20px rgba(0,0,0,0.06);
+    transition: transform 0.3s, box-shadow 0.3s;
+  }
+  .gallery-grid img:hover {
+    transform: scale(1.03);
+    box-shadow: 0 12px 36px rgba(0,0,0,0.12);
+  }
+
+  /* ---- CTA ---- */
+  #contact {
+    background: var(--green);
+    color: #fff;
+    text-align: center;
+  }
+  #contact .section-label { color: var(--gold); }
+  #contact .section-title { color: #fff; }
+  #contact .section-desc { color: rgba(255,255,255,0.8); margin-left: auto; margin-right: auto; }
+  .contact-links {
+    display: flex;
+    gap: 20px;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-top: 16px;
+  }
+  .contact-link {
+    display: inline-block;
+    padding: 14px 32px;
+    border-radius: 60px;
+    text-decoration: none;
+    font-weight: 700;
+    font-size: 1rem;
+    transition: transform 0.2s, box-shadow 0.2s;
+  }
+  .contact-link.primary {
+    background: #fff;
+    color: var(--green);
+    box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+  }
+  .contact-link.secondary {
+    background: transparent;
+    color: #fff;
+    border: 2px solid rgba(255,255,255,0.5);
+  }
+  .contact-link:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 28px rgba(0,0,0,0.2);
+  }
+
+  /* ---- Footer ---- */
+  footer {
+    background: #1a3a0a;
+    color: rgba(255,255,255,0.6);
+    text-align: center;
+    padding: 36px 24px;
+    font-size: 0.9rem;
+  }
+  footer a { color: var(--gold); text-decoration: none; }
+
+  /* ---- Responsive ---- */
+  @media (max-width: 768px) {
+    #hero h1 { font-size: 2.2rem; }
+    #hero .tagline { font-size: 1.1rem; }
+    .section-title { font-size: 1.8rem; }
+    .story-chapter {
+      grid-template-columns: 1fr;
+      gap: 24px;
+    }
+    .story-chapter:nth-child(even) .story-img { order: 0; }
+    .gallery-grid { grid-template-columns: repeat(2, 1fr); }
+    nav .nav-links { display: none; }
+    nav .nav-links.open {
+      display: flex;
+      flex-direction: column;
+      position: absolute;
+      top: 64px;
+      left: 0;
+      right: 0;
+      background: var(--bg);
+      padding: 24px;
+      gap: 16px;
+      border-bottom: 1px solid var(--cream-dark);
+    }
+    .menu-toggle { display: block; }
+    section { padding: 64px 20px; }
+  }
+  @media (max-width: 480px) {
+    .gallery-grid { grid-template-columns: 1fr; }
+    .values-grid { grid-template-columns: 1fr; }
+  }
 </style>
 </head>
 <body>
-<div class="page">
-  <div class="nav"><div class="brand">Aya Lin</div><ul><li>故事</li><li>案例</li><li>过程</li><li>联系</li></ul></div>
-  <section class="hero">
-    <div class="photo"></div>
-    <div class="copy">
-      <div class="kicker">叙事型作品集示例</div>
-      <h1>把品牌、空间与情绪，翻译成可被感知的体验。</h1>
-      <p>这是一个虚构的跨学科设计师个人网站案例。它不是简历式罗列，而是更偏向故事展开，通过项目片段、过程语言和视觉气氛去呈现一个人的方法与审美。</p>
-      <div class="chips"><span>品牌叙事</span><span>空间体验</span><span>视觉系统</span><span>策展型表达</span></div>
+
+<!-- Navigation -->
+<nav>
+  <div class="nav-inner">
+    <a href="#hero" class="logo">思远 Siyuan</a>
+    <button class="menu-toggle" onclick="document.querySelector('.nav-links').classList.toggle('open')" aria-label="Menu">
+      <span></span><span></span><span></span>
+    </button>
+    <ul class="nav-links">
+      <li><a href="#story">Story</a></li>
+      <li><a href="#values">Values</a></li>
+      <li><a href="#milestones">Milestones</a></li>
+      <li><a href="#gallery">Gallery</a></li>
+      <li><a href="#contact">Contact</a></li>
+    </ul>
+  </div>
+</nav>
+
+<!-- Hero -->
+<section id="hero">
+  <div class="leaf-deco" style="top:10%;left:-30px;"></div>
+  <div class="leaf-deco r" style="bottom:15%;right:-20px;width:160px;height:160px;"></div>
+  <div class="hero-content">
+    <img src="https://placehold.co/280x280/2d5016/ffffff?text=SY" alt="Siyuan Chen" class="hero-avatar">
+    <h1>陈思远 / Siyuan Chen</h1>
+    <p class="tagline">From Lab to Startup &mdash; A Journey in AI</p>
+    <a href="#story" class="hero-cta">Read My Story</a>
+  </div>
+  <div class="scroll-hint">&#8595; Scroll to explore</div>
+</section>
+
+<!-- Story / Journey -->
+<section id="story">
+  <div class="container">
+    <p class="section-label">My Journey</p>
+    <h2 class="section-title">Every path tells a story</h2>
+    <p class="section-desc">Four defining chapters shaped who I am today &mdash; from a curious student in a small town to building AI products used by thousands.</p>
+
+    <!-- Chapter 1 -->
+    <div class="story-chapter">
+      <div class="story-text">
+        <p class="chapter-num">Chapter One</p>
+        <h3>The Spark of Curiosity</h3>
+        <p>Growing up in a small town in Anhui province, I spent afternoons disassembling radios and writing simple programs on a second-hand computer. A high school teacher handed me a book on machine learning that changed everything &mdash; suddenly the world felt like a puzzle waiting to be solved.</p>
+        <div class="story-takeaway">Key takeaway: Curiosity is the most powerful engine for growth.</div>
+      </div>
+      <div class="story-img">
+        <img src="https://placehold.co/560x400/d4c9b0/2d5016?text=Childhood" alt="Early years">
+      </div>
     </div>
-  </section>
-  <section class="narrative">
-    <div class="card"><h3>从调研到情绪线索</h3><p>每个项目都从人物、场景和感受开始。网站以故事为主线，而不是先罗列产出物。</p></div>
-    <div class="card"><h3>让作品自己说话</h3><p>案例被拆成“背景、动作、结果、反思”四段，便于浏览时形成记忆点，也更适合对话式沟通。</p></div>
-  </section>
-  <section class="timeline">
-    <div class="step"><strong>Chapter 01</strong><span>观察</span></div>
-    <div class="step"><strong>Chapter 02</strong><span>提炼</span></div>
-    <div class="step"><strong>Chapter 03</strong><span>表达</span></div>
-  </section>
-</div>
+
+    <!-- Chapter 2 -->
+    <div class="story-chapter">
+      <div class="story-text">
+        <p class="chapter-num">Chapter Two</p>
+        <h3>Deep in the Lab</h3>
+        <p>At Tsinghua University, I joined a natural language processing research lab. Late nights debugging models, weekend paper readings, and the thrill of a first publication in ACL taught me the discipline of rigorous thinking. I learned that breakthroughs come from persistence, not inspiration alone.</p>
+        <div class="story-takeaway">Key takeaway: Discipline and rigor turn ideas into real results.</div>
+      </div>
+      <div class="story-img">
+        <img src="https://placehold.co/560x400/b8c9a3/2d5016?text=Research+Lab" alt="Research lab">
+      </div>
+    </div>
+
+    <!-- Chapter 3 -->
+    <div class="story-chapter">
+      <div class="story-text">
+        <p class="chapter-num">Chapter Three</p>
+        <h3>The Leap to Industry</h3>
+        <p>Joining a top AI company in Beijing as a founding engineer was terrifying and exhilarating. We shipped a conversational AI product in 6 months that reached 500K users. I discovered that impact comes from shipping, not from perfecting &mdash; and that leading a small team requires empathy as much as expertise.</p>
+        <div class="story-takeaway">Key takeaway: Ship fast, listen deeply, iterate always.</div>
+      </div>
+      <div class="story-img">
+        <img src="https://placehold.co/560x400/c9b88a/2d5016?text=Startup+Life" alt="Startup life">
+      </div>
+    </div>
+
+    <!-- Chapter 4 -->
+    <div class="story-chapter">
+      <div class="story-text">
+        <p class="chapter-num">Chapter Four</p>
+        <h3>Building My Own Thing</h3>
+        <p>In 2024, I co-founded a company focused on AI-powered educational tools for underserved communities. Today we serve 120+ schools across rural China. The mission is simple: make great education accessible to every child, regardless of geography or income.</p>
+        <div class="story-takeaway">Key takeaway: Technology is only as valuable as the lives it improves.</div>
+      </div>
+      <div class="story-img">
+        <img src="https://placehold.co/560x400/a3b89c/2d5016?text=My+Company" alt="My company">
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Values -->
+<section id="values">
+  <div class="container">
+    <div class="leaf-deco" style="top:-40px;right:10%;width:100px;height:100px;"></div>
+    <p class="section-label">What I Believe</p>
+    <h2 class="section-title">Core Values</h2>
+    <p class="section-desc">The principles that guide every decision I make.</p>
+    <div class="values-grid">
+      <div class="value-card">
+        <div class="value-icon">&#x1F331;</div>
+        <h3>Innovation</h3>
+        <p>Embrace new ideas fearlessly. The best solutions emerge when we challenge assumptions and explore the unknown.</p>
+      </div>
+      <div class="value-card">
+        <div class="value-icon">&#x1F91D;</div>
+        <h3>Integrity</h3>
+        <p>Do the right thing, even when no one is watching. Trust is the foundation of every meaningful relationship.</p>
+      </div>
+      <div class="value-card">
+        <div class="value-icon">&#x1F30D;</div>
+        <h3>Impact</h3>
+        <p>Measure success not by profit alone, but by the positive change we create in real people's lives.</p>
+      </div>
+      <div class="value-card">
+        <div class="value-icon">&#x1F4DA;</div>
+        <h3>Lifelong Learning</h3>
+        <p>Stay humble, stay curious. Every person I meet and every failure I face is a teacher in disguise.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Milestones -->
+<section id="milestones">
+  <div class="container">
+    <p class="section-label">Key Moments</p>
+    <h2 class="section-title">Milestones</h2>
+    <p class="section-desc">The defining moments along the way.</p>
+    <div class="timeline">
+      <div class="timeline-item">
+        <p class="timeline-year">2015</p>
+        <h3>Admitted to Tsinghua University</h3>
+        <p>Scored in the top 0.1% on the Gaokao. Began studying Computer Science and fell in love with AI.</p>
+      </div>
+      <div class="timeline-item">
+        <p class="timeline-year">2018</p>
+        <h3>First Research Publication</h3>
+        <p>Published a paper on attention mechanisms at ACL. Cited 200+ times within two years.</p>
+      </div>
+      <div class="timeline-item">
+        <p class="timeline-year">2019</p>
+        <h3>Joined AI Startup as Founding Engineer</h3>
+        <p>Left academia to build real products. Helped grow the team from 5 to 40 people in one year.</p>
+      </div>
+      <div class="timeline-item">
+        <p class="timeline-year">2021</p>
+        <h3>Product Reached 500K Users</h3>
+        <p>Our conversational AI assistant became one of the top-rated apps in the education category.</p>
+      </div>
+      <div class="timeline-item">
+        <p class="timeline-year">2023</p>
+        <h3>TEDx Talk: "AI for Good"</h3>
+        <p>Spoke about the responsibility of AI builders to prioritize equity and inclusion.</p>
+      </div>
+      <div class="timeline-item">
+        <p class="timeline-year">2024</p>
+        <h3>Co-founded EduBridge AI</h3>
+        <p>Launched my own company to bring AI-powered education tools to 120+ rural schools across China.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Gallery -->
+<section id="gallery">
+  <div class="container">
+    <p class="section-label">Moments</p>
+    <h2 class="section-title">Gallery</h2>
+    <p class="section-desc">Snapshots from the journey so far.</p>
+    <div class="gallery-grid">
+      <img src="https://placehold.co/400x300/c9b88a/2d5016?text=Conference+Talk" alt="Speaking at conference">
+      <img src="https://placehold.co/400x300/b8c9a3/2d5016?text=Team+Retreat" alt="Team retreat">
+      <img src="https://placehold.co/400x300/d4c9b0/2d5016?text=School+Visit" alt="Visiting a rural school">
+      <img src="https://placehold.co/400x300/a3b89c/2d5016?text=Lab+Days" alt="In the research lab">
+      <img src="https://placehold.co/400x300/c9c4a3/2d5016?text=Hackathon+Win" alt="Winning a hackathon">
+      <img src="https://placehold.co/400x300/b0a88a/2d5016?text=Nature+Hike" alt="Hiking in the mountains">
+    </div>
+  </div>
+</section>
+
+<!-- Contact / CTA -->
+<section id="contact">
+  <div class="container">
+    <p class="section-label">Get In Touch</p>
+    <h2 class="section-title">Let's build something together</h2>
+    <p class="section-desc">Whether you share a passion for AI, education, or simply want to connect &mdash; I'd love to hear from you.</p>
+    <div class="contact-links">
+      <a href="mailto:siyuan@example.com" class="contact-link primary">siyuan@example.com</a>
+      <a href="#" class="contact-link secondary">LinkedIn</a>
+      <a href="#" class="contact-link secondary">GitHub</a>
+    </div>
+  </div>
+</section>
+
+<!-- Footer -->
+<footer>
+  <p>&copy; 2026 陈思远 / Siyuan Chen. Crafted with care and curiosity. <a href="#hero">Back to top &uarr;</a></p>
+</footer>
+
 </body>
 </html>

@@ -7,14 +7,19 @@ import { queryDesignIntelligence } from "@/lib/design-intelligence";
 import { isTemplateStyle, generateFromTemplate } from "@/lib/template-generator";
 import type { WorkspaceData, UserSelections } from "@/lib/types";
 import { logger } from "@/lib/logger";
+import { getInstalledNextVersion } from "@/lib/next-version";
+import { runCodeGuardrails } from "@/lib/code-guardrails";
+import { copyUserImagesToSite } from "@/lib/asset-store";
 
 const SITES_DIR = path.join(process.cwd(), "sites-data");
+const RUNTIME_BASE_DIR = (process.env.RUNTIME_BASE_DIR?.trim() || path.join(SITES_DIR, "_runtime_base")).replace(/\/+$/, "");
 const SHARED_MODULES = path.join(SITES_DIR, "_shared_node_modules");
 const PREVIEW_PORT = 3002;
 const REQUIRED_SHARED_PACKAGES = ["next", "react", "react-dom", "qrcode", "dijkstrajs", "pngjs"];
 const PREVIEW_PUBLISH_DIR = process.env.PREVIEW_PUBLISH_DIR?.trim() || "";
 const PREVIEW_BASE_URL = (process.env.PREVIEW_BASE_URL?.trim() || "http://localhost:3002").replace(/\/+$/, "");
 const DRAFTS_SEGMENT = "drafts";
+const USE_SHARED_NODE_MODULES = process.env.USE_SHARED_NODE_MODULES === "1";
 
 let staticServer: http.Server | null = null;
 
@@ -27,6 +32,9 @@ async function ensureSiteDir(siteId: string): Promise<string> {
 async function writeFilesToSiteDir(siteDir: string, files: Record<string, string>) {
   const srcDir = path.join(siteDir, "src");
   await fs.rm(srcDir, { recursive: true, force: true });
+  for (const staleFile of ["package-lock.json", "pnpm-lock.yaml", "yarn.lock"]) {
+    await fs.rm(path.join(siteDir, staleFile), { force: true }).catch(() => {});
+  }
   let count = 0;
   for (const [filePath, content] of Object.entries(files)) {
     const fullPath = path.join(siteDir, filePath);
@@ -39,16 +47,42 @@ async function writeFilesToSiteDir(siteDir: string, files: Record<string, string
 
 async function copyDirectory(sourceDir: string, targetDir: string): Promise<void> {
   await fs.rm(targetDir, { recursive: true, force: true });
-  await fs.mkdir(targetDir, { recursive: true });
-  const entries = await fs.readdir(sourceDir, { withFileTypes: true });
+  await fs.cp(sourceDir, targetDir, { recursive: true, force: true });
+}
+
+async function rewriteExportAssetPaths(dir: string, fromPrefix: string, toPrefix: string): Promise<void> {
+  const normalizedFrom = fromPrefix.replace(/\/+$/, "");
+  const normalizedTo = toPrefix.replace(/\/+$/, "");
+  const exts = new Set([".html", ".js", ".txt"]);
+  const entries = await fs.readdir(dir, { withFileTypes: true });
+
   for (const entry of entries) {
-    const from = path.join(sourceDir, entry.name);
-    const to = path.join(targetDir, entry.name);
+    const fullPath = path.join(dir, entry.name);
     if (entry.isDirectory()) {
-      await copyDirectory(from, to);
-    } else {
-      await fs.copyFile(from, to);
+      await rewriteExportAssetPaths(fullPath, normalizedFrom, normalizedTo);
+      continue;
     }
+
+    if (!exts.has(path.extname(entry.name))) continue;
+
+    let content = await fs.readFile(fullPath, "utf-8");
+    const replacements: Array<[string, string]> = normalizedFrom
+      ? [
+          [`${normalizedFrom}/_next/`, `${normalizedTo}/_next/`],
+          [`${normalizedFrom}/images/`, `${normalizedTo}/images/`],
+          [`${normalizedFrom}/favicon.ico`, `${normalizedTo}/favicon.ico`],
+        ]
+      : [
+          ["/_next/", `${normalizedTo}/_next/`],
+          ["/images/", `${normalizedTo}/images/`],
+          ["/favicon.ico", `${normalizedTo}/favicon.ico`],
+        ];
+
+    for (const [from, to] of replacements) {
+      content = content.split(from).join(to);
+    }
+
+    await fs.writeFile(fullPath, content, "utf-8");
   }
 }
 
@@ -68,18 +102,33 @@ export function getPublishedPreviewUrl(siteId: string, baseUrl = PREVIEW_BASE_UR
   return `${baseUrl}/${siteId}`;
 }
 
+export function getLocalPreviewUrl(siteId: string, baseUrl = PREVIEW_BASE_URL): string {
+  return `${baseUrl}/${siteId}`;
+}
+
+export function hasPublishedPreviewDirectory(): boolean {
+  return Boolean(PREVIEW_PUBLISH_DIR);
+}
+
 export async function syncDraftPreview(siteId: string, siteDir: string): Promise<void> {
   if (!PREVIEW_PUBLISH_DIR) return;
-  await copyDirectory(path.join(siteDir, "out"), getDraftPublishDir(siteId));
+  const targetDir = getDraftPublishDir(siteId);
+  await copyDirectory(path.join(siteDir, "out"), targetDir);
+  const draftPathname = new URL(getDraftPreviewUrl(siteId)).pathname;
+  await rewriteExportAssetPaths(targetDir, "", draftPathname);
 }
 
 export async function publishDraftPreview(siteId: string): Promise<string> {
   if (!PREVIEW_PUBLISH_DIR) {
-    throw new Error("PREVIEW_PUBLISH_DIR is not configured");
+    return getLocalPreviewUrl(siteId);
   }
   const draftDir = getDraftPublishDir(siteId);
   await fs.access(draftDir);
-  await copyDirectory(draftDir, getPublishedPublishDir(siteId));
+  const publishedDir = getPublishedPublishDir(siteId);
+  await copyDirectory(draftDir, publishedDir);
+  const draftPathname = new URL(getDraftPreviewUrl(siteId)).pathname;
+  const publishedPathname = new URL(getPublishedPreviewUrl(siteId)).pathname;
+  await rewriteExportAssetPaths(publishedDir, draftPathname, publishedPathname);
   return getPublishedPreviewUrl(siteId);
 }
 
@@ -88,8 +137,150 @@ export async function unpublishPreview(siteId: string): Promise<void> {
   await fs.rm(getPublishedPublishDir(siteId), { recursive: true, force: true });
 }
 
+function getRuntimeBasePackageJson(): string {
+  return JSON.stringify({
+    name: "site-runtime-base",
+    version: "1.0.0",
+    type: "module",
+    scripts: { dev: "next dev", build: "next build", start: "next start" },
+    dependencies: {
+      "@tailwindcss/postcss": "^4.2.1",
+      "@types/node": "^25.4.0",
+      "@types/qrcode": "^1.5.5",
+      "@types/react": "^19.2.14",
+      dijkstrajs: "^1.0.3",
+      next: getInstalledNextVersion(),
+      pngjs: "^7.0.0",
+      postcss: "^8.5.8",
+      qrcode: "^1.5.4",
+      react: "^19.2.4",
+      "react-dom": "^19.2.4",
+      tailwindcss: "^4.2.1",
+      typescript: "^5.9.3",
+    },
+  }, null, 2);
+}
+
+async function installDependencies(cwd: string): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    exec("npm install --prefer-offline --package-lock=false", { cwd, timeout: 120_000 }, (err) => {
+      if (err) reject(err);
+      else resolve();
+    });
+  });
+}
+
+function haveSameDependencies(sitePkgRaw: string, basePkgRaw: string): boolean {
+  try {
+    const sitePkg = JSON.parse(sitePkgRaw) as { dependencies?: Record<string, string> };
+    const basePkg = JSON.parse(basePkgRaw) as { dependencies?: Record<string, string> };
+    return JSON.stringify(sitePkg.dependencies || {}) === JSON.stringify(basePkg.dependencies || {});
+  } catch {
+    return false;
+  }
+}
+
+async function ensureRuntimeBase(): Promise<string> {
+  const basePackageJson = getRuntimeBasePackageJson();
+  const packageJsonPath = path.join(RUNTIME_BASE_DIR, "package.json");
+  const nodeModulesPath = path.join(RUNTIME_BASE_DIR, "node_modules");
+
+  await fs.mkdir(RUNTIME_BASE_DIR, { recursive: true });
+
+  let shouldRebuild = false;
+  try {
+    const existingPackageJson = await fs.readFile(packageJsonPath, "utf-8");
+    if (existingPackageJson !== basePackageJson) shouldRebuild = true;
+  } catch {
+    shouldRebuild = true;
+  }
+
+  try {
+    const raw = await fs.readFile(path.join(nodeModulesPath, "next", "package.json"), "utf-8");
+    const nextVersion = JSON.parse(raw)?.version || "";
+    if (nextVersion !== getInstalledNextVersion()) shouldRebuild = true;
+  } catch {
+    shouldRebuild = true;
+  }
+
+  for (const pkg of REQUIRED_SHARED_PACKAGES) {
+    try {
+      await fs.access(path.join(nodeModulesPath, pkg));
+    } catch {
+      shouldRebuild = true;
+      break;
+    }
+  }
+
+  if (!shouldRebuild) return basePackageJson;
+
+  logger.info("generate", `Refreshing runtime-base at ${RUNTIME_BASE_DIR}`);
+  await fs.writeFile(packageJsonPath, basePackageJson, "utf-8");
+  await fs.rm(nodeModulesPath, { recursive: true, force: true });
+  for (const staleFile of ["package-lock.json", "pnpm-lock.yaml", "yarn.lock"]) {
+    await fs.rm(path.join(RUNTIME_BASE_DIR, staleFile), { force: true }).catch(() => {});
+  }
+  await installDependencies(RUNTIME_BASE_DIR);
+  return basePackageJson;
+}
+
 async function ensureNodeModules(siteDir: string) {
   const nmPath = path.join(siteDir, "node_modules");
+  if (!USE_SHARED_NODE_MODULES) {
+    const runtimeBasePackageJson = await ensureRuntimeBase();
+    let needsInstall = false;
+    let sitePackageJson = "";
+    try {
+      const stat = await fs.lstat(nmPath);
+      if (stat.isSymbolicLink()) {
+        await fs.rm(nmPath, { recursive: true, force: true });
+        needsInstall = true;
+      }
+    } catch {
+      needsInstall = true;
+    }
+
+    try {
+      sitePackageJson = await fs.readFile(path.join(siteDir, "package.json"), "utf-8");
+    } catch {
+      needsInstall = true;
+    }
+
+    const localRequiredPackages = ["next", "react", "react-dom", "qrcode", "dijkstrajs", "pngjs"];
+    if (!needsInstall) {
+      for (const pkg of localRequiredPackages) {
+        try {
+          await fs.access(path.join(nmPath, pkg));
+        } catch {
+          needsInstall = true;
+          break;
+        }
+      }
+    }
+
+    try {
+      const raw = await fs.readFile(path.join(nmPath, "next", "package.json"), "utf-8");
+      const localNextVersion = JSON.parse(raw)?.version || "";
+      if (localNextVersion !== getInstalledNextVersion()) {
+        needsInstall = true;
+      }
+    } catch {
+      needsInstall = true;
+    }
+
+    if (needsInstall) {
+      await fs.rm(nmPath, { recursive: true, force: true }).catch(() => {});
+      logger.info("generate", "Hydrating site-local node_modules from runtime-base...");
+      await fs.cp(path.join(RUNTIME_BASE_DIR, "node_modules"), nmPath, { recursive: true, force: true });
+      if (!haveSameDependencies(sitePackageJson, runtimeBasePackageJson)) {
+        logger.info("generate", "Site dependencies differ from runtime-base, running npm install...");
+        await installDependencies(siteDir);
+      }
+    }
+    return;
+  }
+
+  const installedNextVersion = getInstalledNextVersion();
   let hasNodeModulesLinkOrDir = false;
   try {
     const stat = await fs.lstat(nmPath);
@@ -99,12 +290,7 @@ async function ensureNodeModules(siteDir: string) {
   } catch {}
 
   async function installIntoSiteDir() {
-    await new Promise<void>((resolve, reject) => {
-      exec("npm install", { cwd: siteDir, timeout: 120_000 }, (err) => {
-        if (err) reject(err);
-        else resolve();
-      });
-    });
+    await installDependencies(siteDir);
   }
 
   try {
@@ -114,6 +300,23 @@ async function ensureNodeModules(siteDir: string) {
     await fs.mkdir(path.dirname(SHARED_MODULES), { recursive: true });
     await installIntoSiteDir();
     await fs.rename(path.join(siteDir, "node_modules"), SHARED_MODULES);
+  }
+
+  let sharedNextVersion = "";
+  try {
+    const raw = await fs.readFile(path.join(SHARED_MODULES, "next", "package.json"), "utf-8");
+    sharedNextVersion = JSON.parse(raw)?.version || "";
+  } catch {}
+
+  if (sharedNextVersion && sharedNextVersion !== installedNextVersion) {
+    logger.info("generate", `Rebuilding shared node_modules for Next ${installedNextVersion} (was ${sharedNextVersion})`);
+    try {
+      await fs.rm(nmPath, { recursive: true, force: true });
+    } catch {}
+    await fs.rm(SHARED_MODULES, { recursive: true, force: true });
+    await installIntoSiteDir();
+    await fs.rename(path.join(siteDir, "node_modules"), SHARED_MODULES);
+    hasNodeModulesLinkOrDir = false;
   }
 
   if (!hasNodeModulesLinkOrDir) {
@@ -141,7 +344,10 @@ async function ensureNodeModules(siteDir: string) {
 }
 
 async function staticBuild(siteDir: string): Promise<void> {
-  const configContent = `const nextConfig = { output: "export", images: { unoptimized: true } };
+  const configContent = `const nextConfig = {
+  output: "export",
+  images: { unoptimized: true },
+};
 export default nextConfig;`;
 
   for (const old of ["next.config.js", "next.config.ts", "next.config.cjs"]) {
@@ -151,7 +357,7 @@ export default nextConfig;`;
   }
   await fs.writeFile(path.join(siteDir, "next.config.mjs"), configContent, "utf-8");
 
-  const nextBin = path.join(siteDir, "node_modules", ".bin", "next");
+  const nextBin = path.join(siteDir, "node_modules", "next", "dist", "bin", "next");
   const buildEnv = { ...process.env, NODE_ENV: "production" } as NodeJS.ProcessEnv;
   delete buildEnv.TURBOPACK;
   delete buildEnv.NEXT_DISABLE_TURBOPACK;
@@ -220,12 +426,44 @@ async function assertPreviewArtifacts(siteDir: string, siteId: string): Promise<
     throw new Error(`Preview output directory missing for site ${siteId}`);
   }
 
+  let html: string;
   try {
-    const html = await fs.readFile(indexFile, "utf-8");
+    html = await fs.readFile(indexFile, "utf-8");
     if (!html.trim()) throw new Error(`Preview index is empty for site ${siteId}`);
   } catch (err) {
     if (err instanceof Error && /Preview index is empty/.test(err.message)) throw err;
     throw new Error(`Preview index.html missing for site ${siteId}`);
+  }
+
+  // Post-build quality checks (non-blocking — log warnings but don't fail the build)
+  const warnings: string[] = [];
+
+  // Check for broken script references
+  const scriptRefs = html.match(/src="([^"]*\.js)"/g) || [];
+  for (const ref of scriptRefs) {
+    const src = ref.match(/src="([^"]+)"/)?.[1];
+    if (src && src.startsWith("/") && !src.startsWith("http")) {
+      const localPath = src.startsWith(`/${siteId}`) ? src.replace(`/${siteId}`, "") : src;
+      try {
+        await fs.access(path.join(outDir, localPath));
+      } catch {
+        warnings.push(`Broken script ref: ${src}`);
+      }
+    }
+  }
+
+  // Check for empty body
+  if (html.includes("<body") && !html.includes("<div")) {
+    warnings.push("HTML body appears empty (no div elements)");
+  }
+
+  // Check for hydration error markers (Next.js specific)
+  if (html.includes("__next_error__") || html.includes("Application error")) {
+    warnings.push("HTML contains error markers — possible build-time rendering issue");
+  }
+
+  if (warnings.length > 0) {
+    logger.warn("generate", `[${siteId}] Post-build warnings: ${warnings.join("; ")}`);
   }
 }
 
@@ -332,9 +570,10 @@ async function ensureStaticServer(): Promise<void> {
 
 export interface RunSiteBuildInput {
   siteId: string;
+  userId?: string;
   data: WorkspaceData;
   selections: UserSelections;
-  spec?: { sections?: Array<{ id?: string; type?: string; enabled?: boolean }> } | null;
+  spec?: import("./site-spec").SiteSpec | null;
   previewBaseUrl: string;
   requestId: string;
 }
@@ -361,7 +600,7 @@ export async function runSiteBuild(input: RunSiteBuildInput): Promise<RunSiteBui
   } else {
     const designIntel = await queryDesignIntelligence(
       selections.siteType || "portfolio",
-      selections.theme || "minimalist",
+      selections.theme || "cyberpunk",
       selections.customTheme || undefined,
     );
     files = generateFileMap(data, selections, designIntel, spec || undefined);
@@ -376,10 +615,23 @@ export async function runSiteBuild(input: RunSiteBuildInput): Promise<RunSiteBui
     } catch {}
   }
 
+  // Auto-fix common issues in generated code before writing to disk
+  files = runCodeGuardrails(files, siteId, previewBaseUrl, logger);
+
   const siteDir = await ensureSiteDir(siteId);
   await writeFilesToSiteDir(siteDir, files);
+
+  // Copy user's uploaded images into the site's public/images/
+  if (input.userId) {
+    const imgCount = await copyUserImagesToSite(input.userId, siteDir);
+    if (imgCount > 0) logger.info("generate", `[${requestId}] Copied ${imgCount} user images to site`);
+  }
+
   await ensureNodeModules(siteDir);
   await staticBuild(siteDir);
+  if (!PREVIEW_PUBLISH_DIR) {
+    await rewriteExportAssetPaths(path.join(siteDir, "out"), "", `/${siteId}`);
+  }
   await assertPreviewArtifacts(siteDir, siteId);
 
   if (PREVIEW_PUBLISH_DIR) {

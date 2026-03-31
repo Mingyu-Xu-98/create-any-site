@@ -6,17 +6,27 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Navbar from "@/components/Navbar";
 import { useLocale } from "@/components/LocaleProvider";
 import type { KnowledgeItem, Source, SourceType, KnowledgeCategory } from "@/lib/knowledge";
-import type { UserSelections } from "@/lib/types";
+import type { UserSelections, WorkspaceData } from "@/lib/types";
 import { CATEGORY_META, SOURCE_TYPE_META } from "@/lib/knowledge";
 import { getAutoLayout } from "@/lib/questions";
 import { getImageTasks } from "@/lib/image-prompts";
+import dynamic from "next/dynamic";
+const KnowledgeGraph = dynamic(() => import("@/components/KnowledgeGraph"), { ssr: false });
 import { buildWorkspaceDataFromKnowledge, buildWorkspaceDataFromSpec, deriveSelectionsFromSpec, type SiteSpec } from "@/lib/site-spec";
 import { TEMPLATE_CASES } from "@/lib/template-showcase";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
+const THEME_POOL = ["cyberpunk", "minimalist", "ghibli", "glassmorphism", "retro", "brutalist", "cinematic", "bold-creative", "editorial", "nature", "gradient-mesh", "neo-tokyo"] as const;
+function pickRandomTheme(): typeof THEME_POOL[number] { return THEME_POOL[Math.floor(Math.random() * THEME_POOL.length)]; }
+
 type View = "build" | "sources" | "knowledge";
-interface ChatMessage { role: "user" | "assistant"; content: string }
+interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+  thinking?: string[];
+  kind?: "message" | "prd";
+}
 interface OptionCard { id: string; icon: string; label: string; desc: string }
 interface PRDData { version?: number; siteType?: string; targetAudience?: string; coreGoal?: string; theme?: string; layout?: string; planner?: string; markdown?: string; [key: string]: unknown }
 interface ConvSummary { id: string; siteId: string | null; title: string | null; updatedAt: string | null }
@@ -40,6 +50,20 @@ async function readJsonResponse<T>(response: Response): Promise<T> {
     const snippet = text.replace(/\s+/g, " ").trim().slice(0, 220) || "(invalid json)";
     throw new Error(`Invalid JSON response: ${snippet}`);
   }
+}
+
+function textIncludes(value: string, patterns: RegExp[]): boolean {
+  return patterns.some((pattern) => pattern.test(value));
+}
+
+function isPrdMarkdown(content: string): boolean {
+  return /^\s*#\s+(Website PRD|网站 PRD|Auto-generated PRD)/i.test(content) || /##\s+(Problem Statement|Solution|Target Audience|品牌|设计系统)/i.test(content);
+}
+
+function summarizePrd(content: string, locale: string): string {
+  const headings = Array.from(content.matchAll(/^##\s+(.+)$/gm)).map((match) => match[1]).slice(0, 3);
+  if (headings.length > 0) return headings.join(" · ");
+  return locale === "zh" ? "查看本轮生成的需求设计文档" : "Open the generated requirements document";
 }
 
 function CreatePageInner() {
@@ -109,6 +133,7 @@ function CreatePageInner() {
   const [items, setItems] = useState<KnowledgeItem[]>([]);
   const [itemsLoaded, setItemsLoaded] = useState(false);
   const [knowledgeSearch, setKnowledgeSearch] = useState("");
+  const [knowledgeViewMode, setKnowledgeViewMode] = useState<"list" | "graph">("list");
 
   // Knowledge Groups
   interface KGGroup { id: string; name: string; description: string | null; tags: string[]; sourceFile: string | null; sourceType: string | null; indexMd: string | null; itemCount: number; selectedCount: number; categoryCounts: Record<string, number> }
@@ -116,6 +141,59 @@ function CreatePageInner() {
   const [expandedGroupId, setExpandedGroupId] = useState<string | null>(null);
   const [groupItems, setGroupItems] = useState<KnowledgeItem[]>([]);
   const [loadedSkillIds, setLoadedSkillIds] = useState<string[]>([]);
+
+  const generateImagesForSite = useCallback(async (args: {
+    siteId: string;
+    theme: string;
+    data: WorkspaceData;
+  }) => {
+    const theme = args.theme as UserSelections["theme"];
+    const projects = Array.isArray(args.data.projects)
+      ? args.data.projects.map((project) => {
+          const record = project as { title?: string; tags?: unknown };
+          return {
+            title: typeof record.title === "string" ? record.title : "Project",
+            tags: Array.isArray(record.tags) ? record.tags.filter((item): item is string => typeof item === "string") : [],
+          };
+        })
+      : [];
+
+    const userName = typeof args.data.name === "string" ? args.data.name : "Creator";
+    const tasks = getImageTasks(theme || pickRandomTheme(), userName, projects);
+    if (tasks.length === 0) {
+      return { attempted: 0, succeeded: 0, failed: 0, errors: [] as string[] };
+    }
+
+    const results = await Promise.all(tasks.map(async (task) => {
+      const response = await fetch("/api/generate-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: task.prompt,
+          filename: task.filename,
+          style: theme,
+          siteId: args.siteId,
+        }),
+      });
+      if (!response.ok) {
+        const body = await readJsonResponse<{ error?: string }>(response).catch(() => ({ error: `HTTP ${response.status}` }));
+        throw new Error(body.error || `Failed to generate ${task.filename}`);
+      }
+      return task.filename;
+    }).map(promise => promise.then(
+      (filename) => ({ ok: true as const, filename }),
+      (error: unknown) => ({ ok: false as const, error: error instanceof Error ? error.message : "Unknown image generation error" }),
+    )));
+
+    const succeeded = results.filter((item) => item.ok).length;
+    const errors = results.filter((item) => !item.ok).map((item) => item.error);
+    return {
+      attempted: tasks.length,
+      succeeded,
+      failed: tasks.length - succeeded,
+      errors,
+    };
+  }, []);
 
   useEffect(() => { if (authStatus === "unauthenticated") router.push("/login"); }, [authStatus, router]);
 
@@ -285,7 +363,7 @@ function CreatePageInner() {
           body: JSON.stringify({
             name: config.siteType === "blog" ? "My Blog" : "My Site",
             siteType: config.siteType || "portfolio",
-            theme: config.theme || "minimalist",
+            theme: config.theme || pickRandomTheme(),
             layout: config.layout || "card-grid",
             previewUrl: url,
             fileMap,
@@ -337,8 +415,8 @@ function CreatePageInner() {
           knowledge: items.filter(i => i.selected),
           intent: {
             siteType: intent.siteType || prdData?.siteType || "portfolio",
-            theme: intent.theme || prdData?.theme || "minimalist",
-            layout: intent.layout || prdData?.layout || getAutoLayout((intent.theme as string) || prdData?.theme || "minimalist", (intent.siteType as string) || prdData?.siteType || "portfolio"),
+            theme: intent.theme || prdData?.theme || pickRandomTheme(),
+            layout: intent.layout || prdData?.layout || getAutoLayout((intent.theme as string) || prdData?.theme || pickRandomTheme(), (intent.siteType as string) || prdData?.siteType || "portfolio"),
             customTheme: intent.customTheme || "",
             conversationSummary: intent.conversationSummary || prdData?.markdown || chatMessages.slice(-6).map(m => `${m.role}: ${m.content}`).join("\n"),
             prd: prdData?.markdown || "",
@@ -437,7 +515,7 @@ function CreatePageInner() {
       }
 
       setPendingItems([]); setPendingSourceId(null); setPendingSourceName(""); setPendingSourceType("");
-      await loadKnowledge(); await loadGroups(); setView("knowledge");
+      await loadKnowledge(); await loadGroups(); router.push("/knowledge");
     } catch (e) { setSaveError(e instanceof Error ? e.message : "Failed"); }
   };
 
@@ -552,9 +630,13 @@ function CreatePageInner() {
       if (!r.ok) throw new Error(d.error || `HTTP ${r.status} ${r.statusText}`);
 
       // Extract thinking steps from response
-      const thinkingMatch = d.content?.match(/```thinking\s*([\s\S]*?)```/);
-      if (thinkingMatch) {
-        setThinkingSteps(thinkingMatch[1].trim().split("\n").filter(Boolean));
+      const extractedThinking = (d.content?.match(/```thinking\s*([\s\S]*?)```/)?.[1] || "")
+        .trim()
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean);
+      if (extractedThinking.length > 0) {
+        setThinkingSteps(extractedThinking);
       }
 
       // Clean display content (remove action/thinking/json-action blocks)
@@ -571,7 +653,12 @@ function CreatePageInner() {
       // Only add message if there's actual content (not just action blocks)
       let updated = newMsgs;
       if (cleanContent) {
-        updated = [...newMsgs, { role: "assistant" as const, content: cleanContent }];
+        updated = [...newMsgs, {
+          role: "assistant" as const,
+          content: cleanContent,
+          thinking: extractedThinking.length > 0 ? extractedThinking : undefined,
+          kind: d.action?.type === "prd" || isPrdMarkdown(cleanContent) ? "prd" : "message",
+        }];
         setChatMessages(updated);
         await saveConv(updated);
       }
@@ -588,7 +675,7 @@ function CreatePageInner() {
         const prd: PRDData = {
           version: Number(d.action.version || 1),
           siteType: d.action.siteType || "portfolio",
-          theme: d.action.theme || "minimalist",
+          theme: d.action.theme || pickRandomTheme(),
           ...(d.action.layout ? { layout: d.action.layout } : {}),
           ...(d.action.planner ? { planner: d.action.planner } : {}),
           // The markdown is the cleaned response text (after removing action block)
@@ -621,7 +708,7 @@ function CreatePageInner() {
       } else if (d.action?.type === "generate") {
         if (!prdData) {
           // AI skipped PRD — create minimal PRD and auto-trigger build
-          const autoPrd: PRDData = { version: 1, siteType: d.action.siteType || "portfolio", theme: d.action.theme || "minimalist", markdown: `# Auto-generated PRD\n\nSite: ${d.action.siteType || "portfolio"}\nTheme: ${d.action.theme || "minimalist"}\nLayout: ${d.action.layout || "auto"}\n\n${cleanContent}`, createdAt: new Date().toISOString() };
+          const autoPrd: PRDData = { version: 1, siteType: d.action.siteType || "portfolio", theme: d.action.theme || pickRandomTheme(), markdown: `# Auto-generated PRD\n\nSite: ${d.action.siteType || "portfolio"}\nTheme: ${d.action.theme || pickRandomTheme()}\nLayout: ${d.action.layout || "auto"}\n\n${cleanContent}`, createdAt: new Date().toISOString() };
           setPrdData(autoPrd);
           setShowPreview(true); setPreviewTab("preview");
           // Auto-trigger build since user intent is clear
@@ -644,16 +731,19 @@ function CreatePageInner() {
     setThinkingSteps(Array.isArray(config.executionSteps) ? (config.executionSteps as string[]) : [zh ? "📋 准备构建参数..." : "📋 Preparing build config..."]);
     try {
       const sel = items.filter(i => i.selected);
-      const theme = (config.theme as string) || "minimalist";
+      const theme = (config.theme as string) || pickRandomTheme();
       const skillIds = Array.isArray(config.skillIds) ? config.skillIds : [];
+      // If agent provided a compositionPlan, pass it through to activate the component assembler
+      const agentPlan = config.compositionPlan as UserSelections["compositionPlan"] | undefined;
       const baseSelections: UserSelections = {
         siteType: ((config.siteType as UserSelections["siteType"]) || "portfolio"),
-        theme: ((theme as UserSelections["theme"]) || "minimalist"),
+        theme: ((theme as UserSelections["theme"]) || pickRandomTheme()),
         layout: ((config.layout as UserSelections["layout"]) || getAutoLayout(theme, (config.siteType as string) || "portfolio")),
         customSiteType: "",
         customTheme: (config.customTheme as string) || "",
         customLayout: "",
         features: { chatbot: true, i18n: true, animations: true, share: true },
+        compositionPlan: agentPlan,
       };
 
       setThinkingSteps(p => [...p, zh ? "🧠 编译 Site Spec..." : "🧠 Compiling site spec..."]);
@@ -728,13 +818,29 @@ function CreatePageInner() {
         if (job.status === "ready") {
           const url = job.previewUrl;
           if (!url) throw new Error("Build completed without preview URL");
-          setThinkingSteps([zh ? "✅ 构建完成，正在载入预览..." : "✅ Build completed, loading preview..."]);
+          setThinkingSteps([zh ? "✅ 构建完成，正在生成配图并载入预览..." : "✅ Build completed, generating images and loading preview..."]);
+          let imageSummary: { attempted: number; succeeded: number; failed: number; errors: string[] } | null = null;
+          if (genResult.siteId) {
+            imageSummary = await generateImagesForSite({ siteId: genResult.siteId, theme, data });
+          }
           setPreviewUrl(url);
           setGenStatus("ready");
           setShowPreview(true);
           setPreviewTab("preview");
           setPreviewKey(k => k + 1);
           await saveConv(chatMessages, url);
+          if (imageSummary && imageSummary.attempted > 0) {
+            setChatMessages((prev) => [...prev, {
+              role: "assistant",
+              content: zh
+                ? imageSummary.failed > 0
+                  ? `⚠️ 配图生成完成：成功 ${imageSummary.succeeded} 张，失败 ${imageSummary.failed} 张。\n\n${imageSummary.errors.join("\n")}`
+                  : `✅ 配图生成完成：共生成 ${imageSummary.succeeded} 张图片。`
+                : imageSummary.failed > 0
+                  ? `⚠️ Image generation finished: ${imageSummary.succeeded} succeeded, ${imageSummary.failed} failed.\n\n${imageSummary.errors.join("\n")}`
+                  : `✅ Image generation finished: ${imageSummary.succeeded} images generated.`,
+            }]);
+          }
           finished = true;
           break;
         }
@@ -775,7 +881,7 @@ function CreatePageInner() {
 
       const spec = await compileSiteSpec({
         siteType: String(prdData?.siteType || "portfolio"),
-        theme: String(prdData?.theme || "minimalist"),
+        theme: String(prdData?.theme || pickRandomTheme()),
         layout: String(prdData?.layout || "card-grid"),
         conversationSummary: `${nextPrd?.markdown || prdData?.markdown || ""}\n\n${action.description || ""}\n${action.specIntent || ""}\n${chatMessages.slice(-4).map(m => `${m.role}: ${m.content}`).join("\n")}`.trim(),
         techStackHints: Array.isArray(action.techStackHints) ? action.techStackHints : [],
@@ -835,8 +941,18 @@ function CreatePageInner() {
 
   const handlePublish = useCallback(async () => {
     if (!siteIdRef.current) return;
+    const defaultName = prdData?.theme ? `${prdData.theme} site` : "My Site";
+    const name = prompt(locale === "zh" ? "请给这个网站起个名字（方便在 Dashboard 中区分）：" : "Name this site (for your Dashboard):", defaultName);
+    if (name === null) return; // user cancelled
+    if (name.trim()) {
+      await fetch(`/api/sites/${siteIdRef.current}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: name.trim() }),
+      });
+    }
     await updateSitePublishState("publish");
-  }, [updateSitePublishState]);
+  }, [updateSitePublishState, prdData, locale]);
 
   const handleUnpublish = useCallback(async () => {
     if (!siteIdRef.current) return;
@@ -845,7 +961,7 @@ function CreatePageInner() {
 
   const quickGenerate = () => handleGenerate({
     siteType: selectedTemplate?.category || "portfolio",
-    theme: selectedTemplate?.theme || "minimalist",
+    theme: selectedTemplate?.theme || pickRandomTheme(),
     layout: selectedTemplate?.layout || undefined,
     prd: prdData || undefined,
   });
@@ -897,12 +1013,12 @@ function CreatePageInner() {
   const guidanceActions: GuidanceAction[] = [
     {
       label: locale === "zh" ? "上传资料" : "Upload Materials",
-      onClick: () => setView("sources"),
+      onClick: () => router.push("/knowledge"),
       tone: "accent",
     },
     {
       label: locale === "zh" ? "管理知识库" : "Manage Knowledge",
-      onClick: () => setView("knowledge"),
+      onClick: () => router.push("/knowledge"),
       tone: "muted",
     },
     {
@@ -913,49 +1029,86 @@ function CreatePageInner() {
       tone: "muted",
     },
   ];
-  const uploadChips = locale === "zh"
-    ? ["上传简历", "上传项目文档", "粘贴品牌介绍", "导入博客文章"]
-    : ["Upload resume", "Upload project doc", "Paste brand intro", "Import blog posts"];
-  const nextStepCards: NextStepCard[] = previewUrl && genStatus === "ready"
-    ? (hasSelectedKnowledge
-        ? [
-            { label: locale === "zh" ? "把我的资料映射到首页" : "Map my sources to the homepage", prompt: locale === "zh" ? "请优先用我的资料替换首页的标题、简介和主要 CTA" : "Use my uploaded materials to replace the homepage headline, intro, and main CTA first" },
-            { label: locale === "zh" ? "强化项目案例展示" : "Strengthen project case studies", prompt: locale === "zh" ? "请把项目案例部分改得更有说服力，突出结果和过程" : "Make the case study section more convincing and highlight both outcomes and process" },
-            { label: locale === "zh" ? "优化品牌故事" : "Refine the brand story", prompt: locale === "zh" ? "请根据当前内容优化品牌故事和关于部分的叙事" : "Refine the brand story and about section based on the current content" },
-            { label: locale === "zh" ? "只调整视觉，不改结构" : "Refine visuals only", prompt: locale === "zh" ? "保留当前结构，只优化视觉层次、配色和动效" : "Keep the current structure and only improve visual hierarchy, color, and motion" },
-          ]
-        : [
-            { label: locale === "zh" ? "上传资料替换示例内容" : "Upload materials to replace sample content", onClick: () => setView("sources") },
-            { label: locale === "zh" ? "增强首页视觉冲击" : "Increase hero impact", prompt: locale === "zh" ? "增强首页的视觉冲击力和第一屏表现" : "Increase the visual impact of the hero and first screen" },
-            { label: locale === "zh" ? "优化 CTA 和联系区" : "Improve CTA and contact", prompt: locale === "zh" ? "优化当前网站的 CTA 和联系区，让转化更明确" : "Improve the CTA and contact section to make conversion clearer" },
-            { label: locale === "zh" ? "补充案例与项目展示" : "Add stronger showcase sections", prompt: locale === "zh" ? "补充更完整的案例或项目展示模块" : "Add stronger case study or project showcase sections" },
-          ])
-    : (selectedTemplate
-        ? [
-            { label: locale === "zh" ? "用我的信息替换模板内容" : "Replace template content with my info", prompt: locale === "zh" ? "请根据我刚才提供的信息替换模板里的示例内容" : "Replace the sample template content with the information I just provided" },
-            { label: locale === "zh" ? "保留结构，只改语气" : "Keep structure, change tone", prompt: locale === "zh" ? "保留当前模板结构，只把语气改成更符合我的品牌风格" : "Keep the current template structure and only adapt the tone to my brand" },
-            { label: locale === "zh" ? "上传资料后再生成" : "Upload materials before generating", onClick: () => setView("sources") },
-            { label: locale === "zh" ? "直接生成首版预览" : "Generate first preview now", onClick: () => quickGenerate() },
-          ]
-        : (hasSelectedKnowledge
-            ? [
-                { label: locale === "zh" ? "根据资料推荐网站定位" : "Recommend a site angle from my materials", prompt: locale === "zh" ? "根据我现在的资料推荐一个最适合的网站定位和结构" : "Recommend the best site positioning and structure based on my current materials" },
-                { label: locale === "zh" ? "直接生成首版预览" : "Generate first preview now", onClick: () => quickGenerate() },
-                { label: locale === "zh" ? "总结当前资料还缺什么" : "Summarize what is still missing", prompt: locale === "zh" ? "总结一下当前资料还缺哪些信息会影响网站效果" : "Summarize which missing information is still limiting the quality of the site" },
-                { label: locale === "zh" ? "继续上传资料" : "Upload more materials", onClick: () => setView("sources") },
-              ]
-            : [
-                { label: locale === "zh" ? "先上传资料" : "Upload materials first", onClick: () => setView("sources") },
-                { label: locale === "zh" ? "推荐适合我的网站结构" : "Recommend a site structure", prompt: locale === "zh" ? "根据我接下来的需求，推荐一个适合我的网站结构" : "Recommend a site structure based on what I need" },
-                { label: locale === "zh" ? "先生成一个草稿" : "Generate a quick draft", prompt: locale === "zh" ? "先根据我的简单描述生成一个可预览的草稿" : "Generate a quick preview draft from a simple description first" },
-                { label: locale === "zh" ? "我想做个人网站" : "I want a personal site", prompt: locale === "zh" ? "我想做一个个人网站，请先给我一个快速草稿" : "I want a personal site. Start with a quick draft first" },
-              ]));
+  const siteTypeHint = String(prdData?.siteType || selectedTemplate?.category || "").toLowerCase();
+  const themeHint = String(prdData?.theme || selectedTemplate?.theme || "").toLowerCase();
+  const latestUserMessage = [...chatMessages].reverse().find((item) => item.role === "user")?.content || "";
+  const latestAssistantMessage = [...chatMessages].reverse().find((item) => item.role === "assistant")?.content || "";
+  const recentConversation = `${latestUserMessage}\n${latestAssistantMessage}`.toLowerCase();
+  const wantsVisualPolish = textIncludes(recentConversation, [/视觉|动效|配色|风格|hero|动画|aesthetic/i]);
+  const wantsStorytelling = textIncludes(recentConversation, [/品牌|故事|叙事|about|story/i]);
+  const wantsConversion = textIncludes(recentConversation, [/cta|联系|转化|销售|咨询|预约|lead/i]);
+  const wantsShowcase = textIncludes(recentConversation, [/项目|案例|作品|project|case study|portfolio/i]);
+  const isBrandSite = /brand|landing|saas/.test(siteTypeHint);
+  const isPortfolioSite = /portfolio|resume|personal/.test(siteTypeHint);
 
-  // ─── NAV items ───
+  const nextStepCards: NextStepCard[] = (() => {
+    const cards: NextStepCard[] = [];
+    const push = (card: NextStepCard) => {
+      if (!cards.some((item) => item.label === card.label)) cards.push(card);
+    };
+
+    if (previewUrl && genStatus === "ready") {
+      if (!hasSelectedKnowledge) {
+        push({ label: locale === "zh" ? "上传资料替换示例内容" : "Upload materials to replace sample content", onClick: () => router.push("/knowledge") });
+      } else {
+        push({ label: locale === "zh" ? "把我的资料映射到首页" : "Map my sources to the homepage", prompt: locale === "zh" ? "请优先用我的资料替换首页的标题、简介和主要 CTA" : "Use my uploaded materials to replace the homepage headline, intro, and main CTA first" });
+      }
+
+      if (siteStatus === "published") {
+        push({ label: locale === "zh" ? "把当前草稿更新到已发布版本" : "Update the published version", prompt: locale === "zh" ? "请检查当前草稿是否已经适合更新发布，并优先修正影响上线的内容" : "Review the current draft for publication and prioritize fixes that affect the live version" });
+      }
+
+      if (wantsVisualPolish || /retro|cinematic|cyberpunk|neo-tokyo|ghibli|glass/.test(themeHint)) {
+        push({ label: locale === "zh" ? "继续强化视觉表现" : "Push the visual direction further", prompt: locale === "zh" ? "保留当前结构，继续强化视觉层次、风格细节和动效表现" : "Keep the current structure and push the visual hierarchy, theme details, and motion further" });
+      } else {
+        push({ label: locale === "zh" ? "只调整视觉，不改结构" : "Refine visuals only", prompt: locale === "zh" ? "保留当前结构，只优化视觉层次、配色和动效" : "Keep the current structure and only improve visual hierarchy, color, and motion" });
+      }
+
+      if (wantsStorytelling || isBrandSite) {
+        push({ label: locale === "zh" ? "优化品牌故事" : "Refine the brand story", prompt: locale === "zh" ? "请根据当前内容优化品牌故事、关于部分和叙事节奏" : "Refine the brand story, about section, and storytelling flow based on the current content" });
+      }
+
+      if (wantsShowcase || isPortfolioSite) {
+        push({ label: locale === "zh" ? "强化项目案例展示" : "Strengthen project case studies", prompt: locale === "zh" ? "请把项目案例部分改得更有说服力，突出结果、过程和角色分工" : "Make the case study section more convincing and highlight outcomes, process, and role clearly" });
+      }
+
+      if (wantsConversion || isBrandSite) {
+        push({ label: locale === "zh" ? "优化 CTA 和联系区" : "Improve CTA and contact", prompt: locale === "zh" ? "优化当前网站的 CTA 和联系区，让转化路径更明确" : "Improve the CTA and contact section to make the conversion path clearer" });
+      }
+
+      if (cards.length < 4) {
+        push({ label: locale === "zh" ? "补充案例与项目展示" : "Add stronger showcase sections", prompt: locale === "zh" ? "补充更完整的案例、项目或证明实力的模块" : "Add stronger case study, project, or proof sections" });
+      }
+
+      return cards.slice(0, 4);
+    }
+
+    if (selectedTemplate) {
+      push({ label: locale === "zh" ? "用我的信息替换模板内容" : "Replace template content with my info", prompt: locale === "zh" ? "请根据我刚才提供的信息替换模板里的示例内容" : "Replace the sample template content with the information I just provided" });
+      push({ label: locale === "zh" ? "保留结构，只改语气" : "Keep structure, change tone", prompt: locale === "zh" ? "保留当前模板结构，只把语气改成更符合我的品牌风格" : "Keep the current template structure and only adapt the tone to my brand" });
+      if (!hasSelectedKnowledge) push({ label: locale === "zh" ? "上传资料后再生成" : "Upload materials before generating", onClick: () => router.push("/knowledge") });
+      push({ label: locale === "zh" ? "直接生成首版预览" : "Generate first preview now", onClick: () => quickGenerate() });
+      return cards.slice(0, 4);
+    }
+
+    if (hasSelectedKnowledge) {
+      push({ label: locale === "zh" ? "根据资料推荐网站定位" : "Recommend a site angle from my materials", prompt: locale === "zh" ? "根据我现在的资料推荐一个最适合的网站定位和结构" : "Recommend the best site positioning and structure based on my current materials" });
+      push({ label: locale === "zh" ? "直接生成首版预览" : "Generate first preview now", onClick: () => quickGenerate() });
+      push({ label: locale === "zh" ? "总结当前资料还缺什么" : "Summarize what is still missing", prompt: locale === "zh" ? "总结一下当前资料还缺哪些信息会影响网站效果" : "Summarize which missing information is still limiting the quality of the site" });
+      push({ label: locale === "zh" ? "继续上传资料" : "Upload more materials", onClick: () => router.push("/knowledge") });
+      return cards.slice(0, 4);
+    }
+
+    push({ label: locale === "zh" ? "先上传资料" : "Upload materials first", onClick: () => router.push("/knowledge") });
+    push({ label: locale === "zh" ? "推荐适合我的网站结构" : "Recommend a site structure", prompt: locale === "zh" ? "根据我接下来的需求，推荐一个适合我的网站结构" : "Recommend a site structure based on what I need" });
+    push({ label: locale === "zh" ? "先生成一个草稿" : "Generate a quick draft", prompt: locale === "zh" ? "先根据我的简单描述生成一个可预览的草稿" : "Generate a quick preview draft from a simple description first" });
+    push({ label: locale === "zh" ? "我想做个人网站" : "I want a personal site", prompt: locale === "zh" ? "我想做一个个人网站，请先给我一个快速草稿" : "I want a personal site. Start with a quick draft first" });
+    return cards.slice(0, 4);
+  })();
+
+  // ─── NAV items (simplified: only build tab, sources/knowledge moved to /knowledge page) ───
   const NAV = [
     { id: "build" as View, icon: "M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z", label: locale === "zh" ? "构建" : "Build" },
-    { id: "sources" as View, icon: "M12 4v16m8-8H4", label: locale === "zh" ? "数据源" : "Sources" },
-    { id: "knowledge" as View, icon: "M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253", label: locale === "zh" ? "知识库" : "Knowledge", badge: items.length || undefined },
   ];
 
   return (
@@ -963,53 +1116,58 @@ function CreatePageInner() {
       <Navbar />
       <div className="flex-1 flex pt-14 overflow-hidden" ref={containerRef}>
 
-        {/* ====== SIDEBAR ====== */}
-        <div className={`shrink-0 border-r border-gray-200/60 flex flex-col bg-white transition-all duration-200 ${sidebarExpanded ? "w-56" : "w-14"}`}>
-          <div className={`flex items-center ${sidebarExpanded ? "px-3 py-2 justify-between" : "flex-col items-center py-3 gap-1"}`}>
-            <button onClick={() => setSidebarExpanded(!sidebarExpanded)} className="w-10 h-10 rounded-xl flex items-center justify-center text-gray-500 hover:bg-gray-100 hover:text-gray-500 transition-all">
-              <svg className={`w-4 h-4 transition-transform ${sidebarExpanded ? "rotate-180" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+        {/* ====== SIDEBAR — Claude-style minimal ====== */}
+        <div className={`shrink-0 border-r border-gray-200/40 flex flex-col bg-[#f9fafb] transition-all duration-200 ${sidebarExpanded ? "w-60" : "w-12"}`}>
+          {/* Top: toggle + new conversation */}
+          <div className={`flex items-center h-12 ${sidebarExpanded ? "px-3 justify-between" : "justify-center"}`}>
+            <button onClick={() => setSidebarExpanded(!sidebarExpanded)} className="w-8 h-8 rounded-md flex items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-gray-200/50 transition-all">
+              <svg className={`w-3.5 h-3.5 transition-transform ${sidebarExpanded ? "" : "rotate-180"}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 19l-7-7 7-7m8 14l-7-7 7-7" /></svg>
             </button>
-            {sidebarExpanded && <button onClick={newConversation} className="px-2 py-1 rounded-lg bg-accent/10 text-accent text-[10px] hover:bg-accent/30">{locale === "zh" ? "+ 新对话" : "+ New"}</button>}
+            {sidebarExpanded && (
+              <button onClick={newConversation} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-200/50 transition-all text-[12px]">
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+                {locale === "zh" ? "新对话" : "New"}
+              </button>
+            )}
           </div>
 
-          {/* Nav icons (collapsed) */}
-          {!sidebarExpanded && <div className="flex flex-col items-center gap-1">{NAV.map(n => (
-            <button key={n.id} onClick={() => setView(n.id)} className={`relative w-10 h-10 rounded-xl flex items-center justify-center transition-all ${view === n.id ? "bg-accent/10 text-accent" : "text-gray-500 hover:bg-gray-100"}`} title={n.label}>
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d={n.icon} /></svg>
-              {n.badge && <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-accent text-white text-[8px] flex items-center justify-center">{n.badge}</span>}
-            </button>
-          ))}</div>}
-
-          {/* Expanded sidebar */}
-          {sidebarExpanded && <div className="flex-1 flex flex-col overflow-hidden">
-            <div className="px-2 py-1 space-y-0.5">{NAV.map(n => (
-              <button key={n.id} onClick={() => setView(n.id)} className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-[11px] transition-all ${view === n.id ? "bg-accent/15 text-accent" : "text-gray-400 hover:bg-gray-100"}`}>
-                <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d={n.icon} /></svg>
-                {n.label}{n.badge && <span className="ml-auto text-[9px] px-1.5 rounded bg-gray-200/50">{n.badge}</span>}
+          {/* Collapsed: just a chat icon */}
+          {!sidebarExpanded && (
+            <div className="flex flex-col items-center pt-2 gap-2">
+              <button onClick={() => setSidebarExpanded(true)} className="w-8 h-8 rounded-md flex items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-gray-200/50" title={locale === "zh" ? "对话记录" : "History"}>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
               </button>
-            ))}</div>
-            <div className="px-3 pt-3"><p className="text-[9px] text-gray-500 uppercase tracking-wider mb-2">{locale === "zh" ? "对话记录" : "History"}</p></div>
-            <div className="flex-1 overflow-y-auto px-2 space-y-0.5">
-              {convList.map(c => (
-                <div key={c.id} className={`group flex items-center gap-1 rounded-lg transition-all ${conversationId === c.id ? "bg-gray-100" : "hover:bg-gray-50"}`}>
-                  <button onClick={() => { lastRestoredKey.current = ""; setView("build"); router.push(`/create?convId=${c.id}`); }} className={`flex-1 text-left px-3 py-2 rounded-lg transition-all ${conversationId === c.id ? "text-gray-700" : "text-gray-500"}`}>
-                    <p className="text-[10px] truncate">{c.title || "Untitled"}</p>
-                    <p className="text-[8px] text-gray-500 mt-0.5">{c.updatedAt ? new Date(c.updatedAt).toLocaleDateString() : ""}{c.siteId ? " · 🌐" : ""}</p>
-                  </button>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); void deleteConversation(c.id); }}
-                    className="mr-1 w-7 h-7 shrink-0 rounded-md text-gray-400 hover:text-red-500 hover:bg-red-50 opacity-0 group-hover:opacity-100 transition-all"
-                    aria-label={locale === "zh" ? "删除对话" : "Delete conversation"}
-                  >
-                    <svg className="w-3.5 h-3.5 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M6 7h12M9 7V5h6v2m-7 4v6m4-6v6m4-6v6M8 7l1 12h6l1-12" />
-                    </svg>
-                  </button>
-                </div>
-              ))}
-              {convList.length === 0 && <p className="text-[9px] text-gray-400 text-center py-4">{locale === "zh" ? "暂无记录" : "No history"}</p>}
             </div>
-          </div>}
+          )}
+
+          {/* Expanded: conversation list */}
+          {sidebarExpanded && (
+            <div className="flex-1 flex flex-col overflow-hidden">
+              <div className="flex-1 overflow-y-auto px-2 pt-1">
+                {convList.map(c => (
+                  <div
+                    key={c.id}
+                    onClick={() => { lastRestoredKey.current = ""; setView("build"); router.push(`/create?convId=${c.id}`); }}
+                    className={`group w-full text-left px-3 py-2.5 rounded-lg mb-0.5 transition-all overflow-hidden cursor-pointer ${conversationId === c.id ? "bg-gray-200/60" : "hover:bg-gray-200/30"}`}
+                  >
+                    <div className="flex items-center justify-between gap-1">
+                      <p className={`text-[13px] truncate ${conversationId === c.id ? "text-gray-900" : "text-gray-600"}`}>{c.title || "Untitled"}</p>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); void deleteConversation(c.id); }}
+                        className="shrink-0 w-6 h-6 rounded flex items-center justify-center text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"
+                      >
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                      </button>
+                    </div>
+                    <p className="text-[11px] text-gray-400 mt-0.5 truncate">{c.updatedAt ? new Date(c.updatedAt).toLocaleDateString() : ""}{c.siteId ? " · 🌐" : ""}</p>
+                  </div>
+                ))}
+                {convList.length === 0 && (
+                  <p className="text-[11px] text-gray-400 text-center py-8">{locale === "zh" ? "暂无对话记录" : "No conversations yet"}</p>
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Global file input (always in DOM) */}
@@ -1019,13 +1177,12 @@ function CreatePageInner() {
         {view === "build" && <>
           {/* Chat */}
           <div className="flex flex-col overflow-hidden" style={{ width: showPreview ? `${splitPct}%` : "100%" }}>
-            {/* Header */}
-            <div className="shrink-0 px-4 py-2.5 border-b border-gray-200/60 flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2 min-w-0">
-                <h2 className="text-sm font-medium shrink-0">{locale === "zh" ? "构建" : "Build"}</h2>
+            {/* Header — minimal, Claude-style */}
+            <div className="shrink-0 h-12 px-4 border-b border-gray-100 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0">
                 {selectedTemplate && (
-                  <span className="shrink-0 rounded-full bg-accent/10 px-2.5 py-1 text-[10px] text-accent">
-                    {locale === "zh" ? `模板：${selectedTemplate.nameCn}` : `Template: ${selectedTemplate.name}`}
+                  <span className="text-[11px] text-gray-400 truncate">
+                    {locale === "zh" ? selectedTemplate.nameCn : selectedTemplate.name}
                   </span>
                 )}
                 {/* Knowledge selector button */}
@@ -1064,116 +1221,103 @@ function CreatePageInner() {
                   )}
                 </div>
               </div>
-              <div className="flex gap-1.5 shrink-0">
-                {genStatus === "idle" && items.length > 0 && <button onClick={quickGenerate} className="px-3 py-1.5 rounded-lg bg-accent/10 text-[10px] text-accent hover:bg-accent/30">{locale === "zh" ? "⚡ 快速生成" : "⚡ Quick Gen"}</button>}
-                <button onClick={() => setShowPreview(!showPreview)} className={`px-2.5 py-1.5 rounded-lg text-[10px] transition-all ${showPreview ? "bg-gray-100 text-gray-400" : "bg-accent/10 text-accent"}`}>
-                  {showPreview ? (locale === "zh" ? "隐藏预览" : "Hide") : (locale === "zh" ? "显示预览" : "Show")}
-                </button>
-              </div>
+              {/* Preview toggle — only show when a site has been generated */}
+              {previewUrl && (
+                <div className="flex gap-1.5 shrink-0">
+                  <button onClick={() => setShowPreview(!showPreview)} className={`px-2.5 py-1.5 rounded-lg text-[10px] transition-all ${showPreview ? "bg-gray-100 text-gray-400" : "bg-accent/10 text-accent"}`}>
+                    {showPreview ? (locale === "zh" ? "隐藏预览" : "Hide") : (locale === "zh" ? "显示预览" : "Show")}
+                  </button>
+                </div>
+              )}
             </div>
 
-            <div className="shrink-0 px-4 py-3 border-b border-gray-200/60 bg-white/70">
-              <div className="flex items-center gap-3">
-                {[
-                  { step: 1, label: locale === "zh" ? "选择资料" : "Select Context" },
-                  { step: 2, label: locale === "zh" ? "快速问答" : "Quick Brief" },
-                  { step: 3, label: locale === "zh" ? "生成预览" : "Preview Build" },
-                ].map((item, index) => (
-                  <div key={item.step} className="flex items-center gap-3 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className={`w-6 h-6 rounded-full text-[10px] font-semibold flex items-center justify-center ${currentStep >= item.step ? "bg-accent text-white" : "bg-gray-100 text-gray-400"}`}>
-                        {item.step}
-                      </span>
-                      <span className={`text-[11px] ${currentStep >= item.step ? "text-gray-700" : "text-gray-400"}`}>{item.label}</span>
-                    </div>
-                    {index < 2 && <div className={`h-px flex-1 ${currentStep > item.step ? "bg-accent/40" : "bg-gray-200"}`} />}
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {showGuidanceBanner && <div className="shrink-0 px-4 py-3 border-b border-gray-200/60 bg-gradient-to-r from-accent/6 via-white to-sky-50/60">
-              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                <div className="min-w-0">
-                  <p className="text-[10px] uppercase tracking-[0.18em] text-accent">{guidanceTitle}</p>
-                  <p className="mt-1 text-xs text-gray-700 leading-relaxed">{guidanceDescription}</p>
-                  <p className="mt-1 text-[10px] text-gray-500">
-                    {hasKnowledge
-                      ? (locale === "zh" ? `已整理 ${items.length} 条资料，其中 ${selectedCount} 条会参与当前构建。` : `${items.length} source items are organized, and ${selectedCount} are selected for this build.`)
-                      : (locale === "zh" ? "现在不需要先整理知识库，直接上传文件或继续对话都可以。" : "You do not need to organize the knowledge base first. Upload files or keep chatting.")}
-                  </p>
-                </div>
-                <div className="flex flex-wrap gap-2 shrink-0">
-                  {guidanceActions.map((action) => (
-                    <button
-                      key={action.label}
-                      onClick={action.onClick}
-                      className={action.tone === "accent"
-                        ? "px-3 py-2 rounded-xl bg-accent text-white text-[11px] font-medium hover:bg-accent/90 transition-all"
-                        : "px-3 py-2 rounded-xl bg-white border border-gray-200 text-[11px] text-gray-600 hover:bg-gray-50 transition-all"}
-                    >
-                      {action.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>}
+            {/* Guidance banner removed — onboarding is now in the welcome screen below */}
 
             {/* Messages */}
-            <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3" onClick={() => setShowKnowledgeSelector(false)}>
+            {/* Messages — spacious, Claude-style */}
+            <div className="flex-1 overflow-y-auto px-5 py-6 space-y-6" onClick={() => setShowKnowledgeSelector(false)}>
               {chatMessages.length === 0 && (
-                <div className="flex flex-col items-center justify-center h-full text-center">
-                  <div className="w-14 h-14 rounded-2xl bg-gray-50 border border-gray-200/60 flex items-center justify-center mb-4">
-                    <svg className="w-6 h-6 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
+                <div className="flex flex-col items-center justify-center h-full max-w-md mx-auto px-6">
+                  <div className="w-10 h-10 rounded-full bg-accent/8 flex items-center justify-center mb-5">
+                    <svg className="w-5 h-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
                   </div>
-                  <p className="text-sm text-gray-400 mb-1">
+                  <p className="text-base text-gray-800 font-medium mb-1">
                     {selectedTemplate
-                      ? (locale === "zh" ? "这个模板已经载入，继续补充你的真实内容即可" : "This template is loaded, now add your real content")
-                      : (locale === "zh" ? "描述你想创建的网站" : "Describe the site you want")}
+                      ? (locale === "zh" ? "模板已载入" : "Template loaded")
+                      : (locale === "zh" ? "创建你的网站" : "Create your website")}
                   </p>
 
-                  {/* New user guidance: show step hints when no knowledge */}
-                  {items.length === 0 ? (
-                    <div className="mb-6 max-w-sm">
-                      <p className="text-[10px] text-gray-500 mb-4">{locale === "zh" ? "你可以直接描述需求，或先添加数据源让 AI 更了解你" : "Describe what you need, or add sources first for better results"}</p>
-                      {/* Step hints */}
-                      <div className="flex items-center gap-3 mb-4 px-3">
-                        <div className="flex items-center gap-1.5 text-[9px]">
-                          <span className="w-5 h-5 rounded-full bg-accent/10 text-accent flex items-center justify-center font-bold">1</span>
-                          <span className="text-gray-500">{locale === "zh" ? "添加数据源" : "Add sources"}</span>
-                        </div>
-                        <svg className="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
-                        <div className="flex items-center gap-1.5 text-[9px]">
-                          <span className="w-5 h-5 rounded-full bg-gray-100 text-gray-500 flex items-center justify-center font-bold">2</span>
-                          <span className="text-gray-500">{locale === "zh" ? "整理知识库" : "Organize KB"}</span>
-                        </div>
-                        <svg className="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
-                        <div className="flex items-center gap-1.5 text-[9px]">
-                          <span className="w-5 h-5 rounded-full bg-gray-100 text-gray-500 flex items-center justify-center font-bold">3</span>
-                          <span className="text-gray-500">{locale === "zh" ? "对话构建" : "Build via chat"}</span>
-                        </div>
-                      </div>
-                      <button onClick={() => setView("sources")} className="px-4 py-2 rounded-lg bg-gray-100 border border-gray-200 text-[10px] text-gray-400 hover:text-accent hover:border-accent/20 transition-all">
-                        {locale === "zh" ? "📎 先去添加数据源（推荐）" : "📎 Add data sources first (recommended)"}
+                  {/* Two action buttons: upload materials or start chatting directly */}
+                  {!selectedTemplate && (
+                    <div className="mb-6 flex items-center gap-3">
+                      <button onClick={() => router.push("/knowledge")} className="flex items-center gap-2 px-5 py-2.5 rounded-xl border border-gray-200 bg-white text-sm text-gray-600 hover:border-accent/30 hover:text-accent transition-all shadow-sm">
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
+                        {locale === "zh" ? "上传资料" : "Upload materials"}
+                      </button>
+                      <button onClick={() => { setChatInput(locale === "zh" ? "帮我做一个网站" : "Build me a website"); }} className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-accent text-white text-sm font-medium hover:bg-accent/90 transition-all shadow-sm shadow-accent/20">
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
+                        {locale === "zh" ? "直接对话" : "Start chatting"}
                       </button>
                     </div>
-                  ) : (
-                    <p className="text-[10px] text-gray-500 mb-6 max-w-sm">
-                      {selectedTemplate
-                        ? (locale === "zh" ? `当前模板为 ${selectedTemplate.nameCn}，已预填默认 PRD 和参考结构，你可以继续补充知识或直接修改内容。` : `The ${selectedTemplate.name} template is loaded with a starter PRD and structure. Add more context or start modifying it.`)
-                        : (locale === "zh" ? `已加载 ${selectedCount} 条知识，AI 将结合知识库内容帮你构建` : `${selectedCount} knowledge items loaded, AI will use them to build`)}
+                  )}
+                  {selectedTemplate && (
+                    <p className="text-xs text-gray-500 mb-6 max-w-sm">
+                      {locale === "zh" ? `当前模板为 ${selectedTemplate.nameCn}，补充你的内容或直接修改。` : `${selectedTemplate.name} template loaded. Add your content or start editing.`}
                     </p>
                   )}
+                  {selectedCount > 0 && !selectedTemplate && (
+                    <p className="text-xs text-gray-400 mb-4">{locale === "zh" ? `已关联 ${selectedCount} 条知识` : `${selectedCount} knowledge items linked`}</p>
+                  )}
 
-                  <div className="space-y-1.5 w-full max-w-xs">
-                    <p className="text-[9px] text-gray-500 mb-1">{locale === "zh" ? "快速开始：" : "Quick start:"}</p>
-                    {((selectedTemplate
-                      ? [locale === "zh" ? selectedTemplate.starterPromptCn : selectedTemplate.starterPrompt, locale === "zh" ? "把首页标题和核心卖点改成我的版本" : "Rewrite the hero and value proposition around me", locale === "zh" ? "根据我的资料替换当前案例内容" : "Replace the current mock content with my real data", locale === "zh" ? "保留这个结构，但改成更适合我的品牌语气" : "Keep the structure but adapt the tone to my brand"]
-                      : (locale === "zh"
-                        ? ["帮我搭建一个个人作品集网站", "我想做一个极简风格的博客", "根据知识库内容推荐网站类型", "创建一个科技感品牌官网"]
-                        : ["Build me a personal portfolio", "Create a minimalist blog", "Recommend a site type for my content", "Build a tech-style brand website"]))
-                    ).map(p => (
-                      <button key={p} onClick={() => sendChat(p)} className="w-full px-3 py-2 rounded-lg bg-gray-50 border border-gray-200/60 text-[11px] text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-all text-left">{p}</button>
+                  <div className="space-y-2 w-full">
+                    {((): string[] => {
+                      if (selectedTemplate) {
+                        return [
+                          locale === "zh" ? selectedTemplate.starterPromptCn : selectedTemplate.starterPrompt,
+                          locale === "zh" ? "把首页标题和核心卖点改成我的版本" : "Rewrite the hero and value proposition around me",
+                          locale === "zh" ? "根据我的资料替换当前案例内容" : "Replace the current mock content with my real data",
+                          locale === "zh" ? "保留这个结构，但改成更适合我的品牌语气" : "Keep the structure but adapt the tone to my brand",
+                        ].filter(Boolean) as string[];
+                      }
+                      // Dynamic suggestions based on loaded knowledge
+                      const suggestions: string[] = [];
+                      const selItems = items.filter((k: KnowledgeItem) => k.selected);
+                      const hasExperience = selItems.some((k: KnowledgeItem) => k.category === "experience");
+                      const hasSkills = selItems.some((k: KnowledgeItem) => k.category === "skills");
+                      const hasFactual = selItems.some((k: KnowledgeItem) => k.category === "factual");
+                      const hasMedia = selItems.some((k: KnowledgeItem) => k.category === "media");
+
+                      if (hasExperience) {
+                        suggestions.push(locale === "zh" ? "根据我的经历生成一个个人作品集网站" : "Build a portfolio site from my experience");
+                      }
+                      if (hasSkills) {
+                        suggestions.push(locale === "zh" ? "重点展示我的技能，用更有视觉冲击力的布局" : "Highlight my skills with a visually striking layout");
+                      }
+                      if (hasFactual) {
+                        suggestions.push(locale === "zh" ? "做一个能体现我个人风格的品牌页面" : "Create a personal brand page that reflects my style");
+                      }
+                      if (hasMedia) {
+                        suggestions.push(locale === "zh" ? "多展示我的作品和媒体资源" : "Feature my work and media content prominently");
+                      }
+                      if (selItems.length > 0 && suggestions.length < 3) {
+                        suggestions.push(locale === "zh" ? "根据我的资料推荐最合适的网站类型和风格" : "Recommend the best site type and style for my content");
+                      }
+                      // Generic fallbacks
+                      if (suggestions.length === 0) {
+                        suggestions.push(
+                          locale === "zh" ? "帮我搭建一个个人作品集网站" : "Build me a personal portfolio",
+                          locale === "zh" ? "创建一个有设计感的品牌官网" : "Create a stylish brand website",
+                        );
+                      }
+                      if (suggestions.length < 4) {
+                        suggestions.push(locale === "zh" ? "我想要加入动画效果和交互设计" : "I want animations and interactive design");
+                      }
+                      if (suggestions.length < 4) {
+                        suggestions.push(locale === "zh" ? "做一个暗色系科技风格的网站" : "Build a dark-themed tech-style site");
+                      }
+                      return suggestions.slice(0, 4);
+                    })().map(p => (
+                      <button key={p} onClick={() => sendChat(p)} className="w-full px-4 py-3 rounded-xl border border-gray-200 text-[13px] text-gray-500 hover:text-gray-800 hover:border-gray-300 hover:bg-gray-50/50 transition-all text-left">{p}</button>
                     ))}
                   </div>
                 </div>
@@ -1182,21 +1326,58 @@ function CreatePageInner() {
                 // Check if user message is an option selection: [question] emoji label
                 const optionMatch = msg.role === "user" && msg.content.match(/^\[(.+?)\]\s*(\S+)\s+(.+)$/);
                 return (
-                  <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+                  <div key={i} className={`flex gap-3 ${msg.role === "user" ? "flex-row-reverse" : ""}`}>
+                    {/* Avatar */}
+                    <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 mt-1 ${msg.role === "assistant" ? "bg-accent/10" : "bg-gray-100"}`}>
+                      {msg.role === "assistant" ? (
+                        <svg className="w-3 h-3 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                      ) : (
+                        <svg className="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
+                      )}
+                    </div>
                     {optionMatch ? (
-                      // Render as styled option card
-                      <div className="max-w-[70%] rounded-xl overflow-hidden">
-                        <div className="px-3 py-1 bg-accent/10 text-[10px] text-accent">{optionMatch[1]}</div>
-                        <div className="px-3.5 py-2.5 bg-accent text-white flex items-center gap-2">
-                          <span className="text-base">{optionMatch[2]}</span>
-                          <span className="text-[12px] font-medium">{optionMatch[3]}</span>
+                      <div className="rounded-lg overflow-hidden border border-gray-200">
+                        <div className="px-3 py-1 bg-gray-50 text-[10px] text-gray-500">{optionMatch[1]}</div>
+                        <div className="px-3 py-2 flex items-center gap-2">
+                          <span className="text-sm">{optionMatch[2]}</span>
+                          <span className="text-[13px] text-gray-700">{optionMatch[3]}</span>
                         </div>
                       </div>
                     ) : (
-                      <div className={`max-w-[85%] px-3.5 py-2.5 rounded-xl text-[12px] leading-relaxed ${msg.role === "user" ? "bg-accent text-white" : "bg-gray-100 text-gray-600"}`}>
+                      <div className={`flex-1 min-w-0 text-[13px] leading-[1.7] ${msg.role === "user" ? "text-gray-600" : "text-gray-800"}`}>
                         {msg.role === "assistant" ? (
-                          <div className="prose prose-sm prose-gray max-w-none prose-p:my-1 prose-headings:my-2 prose-li:my-0.5 prose-ul:my-1 prose-ol:my-1 prose-code:text-accent prose-code:bg-accent/5 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:before:content-none prose-code:after:content-none prose-pre:bg-gray-800 prose-pre:text-gray-100 prose-pre:rounded-lg prose-pre:my-2 text-[12px]">
-                            <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+                          <div className="space-y-2">
+                            {Array.isArray(msg.thinking) && msg.thinking.length > 0 && (
+                              <details className="rounded-xl border border-gray-200 bg-white/70">
+                                <summary className="cursor-pointer list-none px-3 py-2 text-[11px] font-medium text-gray-600 flex items-center justify-between">
+                                  <span>{locale === "zh" ? "查看思考过程" : "View Thinking"}</span>
+                                  <span className="text-[10px] text-gray-400">{msg.thinking.length} {locale === "zh" ? "条" : "steps"}</span>
+                                </summary>
+                                <div className="border-t border-gray-200 px-3 py-2 space-y-1">
+                                  {msg.thinking.map((step, stepIndex) => (
+                                    <p key={stepIndex} className="text-[10px] text-gray-500 font-mono">{step}</p>
+                                  ))}
+                                </div>
+                              </details>
+                            )}
+                            {msg.kind === "prd" || isPrdMarkdown(msg.content) ? (
+                              <details className="rounded-xl border border-accent/20 bg-white overflow-hidden">
+                                <summary className="cursor-pointer list-none px-3 py-2.5 flex items-center justify-between gap-3">
+                                  <div>
+                                    <p className="text-[11px] font-medium text-gray-700">{locale === "zh" ? "PRD 文档" : "PRD Document"}</p>
+                                    <p className="text-[10px] text-gray-500 mt-0.5">{summarizePrd(msg.content, locale)}</p>
+                                  </div>
+                                  <span className="shrink-0 text-[10px] text-accent">{locale === "zh" ? "点击查看" : "Open"}</span>
+                                </summary>
+                                <div className="border-t border-accent/10 px-3 py-3 prose prose-sm prose-gray max-w-none prose-p:my-1 prose-headings:my-2 prose-li:my-0.5 prose-ul:my-1 prose-ol:my-1 prose-code:text-accent prose-code:bg-accent/5 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:before:content-none prose-code:after:content-none prose-pre:bg-gray-800 prose-pre:text-gray-100 prose-pre:rounded-lg prose-pre:my-2 text-[12px]">
+                                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+                                </div>
+                              </details>
+                            ) : (
+                              <div className="prose prose-sm prose-gray max-w-none prose-p:my-1 prose-headings:my-2 prose-li:my-0.5 prose-ul:my-1 prose-ol:my-1 prose-code:text-accent prose-code:bg-accent/5 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:before:content-none prose-code:after:content-none prose-pre:bg-gray-800 prose-pre:text-gray-100 prose-pre:rounded-lg prose-pre:my-2 text-[12px]">
+                                <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+                              </div>
+                            )}
                           </div>
                         ) : (
                           <div className="whitespace-pre-wrap">{msg.content}</div>
@@ -1307,25 +1488,8 @@ function CreatePageInner() {
             </div>
 
             {/* Input */}
-            <div className="shrink-0 px-5 py-3 border-t border-gray-200/60 space-y-2">
-              <div className="flex flex-wrap gap-1.5">
-                {uploadChips.map((chip) => (
-                  <button
-                    key={chip}
-                    onClick={() => setView("sources")}
-                    className="px-2.5 py-1 rounded-lg bg-white border border-gray-200 text-[10px] text-gray-500 hover:text-accent hover:border-accent/30 hover:bg-accent/5 transition-all"
-                  >
-                    {chip}
-                  </button>
-                ))}
-                <button
-                  onClick={() => setShowKnowledgeSelector((prev) => !prev)}
-                  className="px-2.5 py-1 rounded-lg bg-gray-50 border border-gray-200 text-[10px] text-gray-500 hover:text-gray-700 hover:bg-gray-100 transition-all"
-                >
-                  {locale === "zh" ? "选择用于构建的资料" : "Choose build materials"}
-                </button>
-              </div>
-              {!chatLoading && (
+            <div className="shrink-0 px-5 py-4 border-t border-gray-100 space-y-3">
+              {!chatLoading && previewUrl && nextStepCards.length > 0 && (
                 <div className="grid grid-cols-2 gap-2">
                   {nextStepCards.map((card) => (
                     <button
@@ -1346,10 +1510,27 @@ function CreatePageInner() {
                   ))}
                 </div>
               )}
-              <div className="flex gap-2">
-                <input type="text" value={chatInput} onChange={e => setChatInput(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat(); } }} disabled={chatLoading || genStatus === "generating"} placeholder={genStatus === "generating" ? (locale === "zh" ? "正在生成中，请稍候..." : "Generating, please wait...") : previewUrl ? (locale === "zh" ? "描述要修改的内容..." : "Describe changes...") : (locale === "zh" ? "描述你的需求..." : "Describe what you want...")} className="flex-1 px-4 py-2.5 rounded-xl bg-gray-100 border border-gray-200 text-xs text-gray-900 placeholder:text-gray-500 focus:outline-none focus:border-accent/50 disabled:opacity-50" />
-                <button onClick={() => sendChat()} disabled={!chatInput.trim() || chatLoading || genStatus === "generating"} className="px-4 py-2.5 rounded-xl bg-accent text-white hover:bg-accent/90 disabled:opacity-30">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
+              {/* Input — Claude-style clean bottom bar */}
+              <div className="relative">
+                <input
+                  type="text"
+                  value={chatInput}
+                  onChange={e => setChatInput(e.target.value)}
+                  onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat(); } }}
+                  disabled={chatLoading || genStatus === "generating"}
+                  placeholder={genStatus === "generating"
+                    ? (locale === "zh" ? "正在生成中..." : "Generating...")
+                    : previewUrl
+                      ? (locale === "zh" ? "描述你想修改的内容..." : "Describe your changes...")
+                      : (locale === "zh" ? "描述你想创建的网站..." : "Describe the site you want...")}
+                  className="w-full pl-4 pr-12 py-3.5 rounded-xl border border-gray-200 bg-white text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:border-gray-300 focus:ring-1 focus:ring-gray-200 disabled:opacity-40 transition-all"
+                />
+                <button
+                  onClick={() => sendChat()}
+                  disabled={!chatInput.trim() || chatLoading || genStatus === "generating"}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-lg bg-accent text-white flex items-center justify-center hover:bg-accent/90 disabled:opacity-20 transition-all"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M12 5l7 7-7 7" /></svg>
                 </button>
               </div>
             </div>
@@ -1360,22 +1541,73 @@ function CreatePageInner() {
             <div onMouseDown={() => { dragging.current = true; document.body.style.cursor = "col-resize"; document.body.style.userSelect = "none"; }} className="w-1 shrink-0 bg-gray-100 hover:bg-accent/30 cursor-col-resize transition-colors" />
             <div className="flex flex-col bg-gray-50 overflow-hidden" style={{ width: `${100 - splitPct}%` }}>
 
-              {/* Tab bar */}
-              <div className="shrink-0 flex items-center border-b border-gray-200/60">
-                <button onClick={() => setPreviewTab("preview")} className={`flex-1 py-2 text-[11px] font-medium text-center border-b-2 transition-all ${previewTab === "preview" ? "border-accent text-accent" : "border-transparent text-gray-400 hover:text-gray-500"}`}>
-                  {locale === "zh" ? "网页预览" : "Preview"}
-                </button>
-                <button onClick={() => setPreviewTab("prd")} className={`flex-1 py-2 text-[11px] font-medium text-center border-b-2 transition-all ${previewTab === "prd" ? "border-accent text-accent" : "border-transparent text-gray-400 hover:text-gray-500"}`}>
-                  {locale === "zh" ? "PRD 文档" : "PRD Doc"}
-                  {prdData && <span className="ml-1 w-1.5 h-1.5 rounded-full bg-accent inline-block" />}
-                </button>
-                <button onClick={() => setPreviewTab("resources")} className={`flex-1 py-2 text-[11px] font-medium text-center border-b-2 transition-all ${previewTab === "resources" ? "border-accent text-accent" : "border-transparent text-gray-400 hover:text-gray-500"}`}>
-                  {locale === "zh" ? "项目资源" : "Resources"}
-                  {siteResources.length > 0 && <span className="ml-1 w-1.5 h-1.5 rounded-full bg-accent inline-block" />}
-                </button>
-              </div>
+              {/* Tab bar removed — preview panel shows website directly */}
 
               {/* Preview tab */}
+              {/* Persistent header — always visible when previewUrl exists */}
+              {previewUrl && genStatus !== "generating" && (
+                <div className="shrink-0 border-b border-gray-200/60 bg-white px-3 py-2">
+                  <div className="flex items-center gap-2">
+                    <div className="flex gap-1"><div className="w-2 h-2 rounded-full bg-red-400/50" /><div className="w-2 h-2 rounded-full bg-yellow-400/50" /><div className="w-2 h-2 rounded-full bg-green-400/50" /></div>
+                    <div className="flex-1 min-w-0">
+                      <div className="px-2 py-1 rounded-lg bg-gray-100 text-[9px] text-gray-500 truncate">
+                        {selectedTemplate && !siteId ? `${locale === "zh" ? "模板预览" : "Template Preview"} · ${previewUrl}` : previewUrl}
+                      </div>
+                    </div>
+                    <span className={`px-2 py-1 rounded-lg text-[9px] ${siteStatus === "published" ? "bg-green-500/10 text-green-600" : "bg-yellow-500/10 text-yellow-700"}`}>
+                      {siteStatus === "published" ? (locale === "zh" ? "已发布" : "Published") : (locale === "zh" ? "草稿" : "Draft")}
+                    </span>
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    <button onClick={() => setPreviewTab("preview")} className={`px-2.5 py-1 rounded-lg text-[10px] transition-all ${previewTab === "preview" ? "bg-accent/10 text-accent font-medium" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
+                      {locale === "zh" ? "预览" : "Preview"}
+                    </button>
+                    <button onClick={() => setPreviewTab("prd")} className={`px-2.5 py-1 rounded-lg text-[10px] transition-all ${previewTab === "prd" ? "bg-accent/10 text-accent font-medium" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
+                      {locale === "zh" ? "PRD" : "PRD"}
+                      {prdData && previewTab !== "prd" && <span className="ml-1 w-1.5 h-1.5 rounded-full bg-accent inline-block" />}
+                    </button>
+                    <button onClick={() => setPreviewTab("resources")} className={`px-2.5 py-1 rounded-lg text-[10px] transition-all ${previewTab === "resources" ? "bg-accent/10 text-accent font-medium" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
+                      {locale === "zh" ? "资源" : "Resources"}
+                      {siteResources.length > 0 && previewTab !== "resources" && <span className="ml-1 w-1.5 h-1.5 rounded-full bg-accent inline-block" />}
+                    </button>
+                    <span className="border-l border-gray-200 mx-0.5" />
+                    {siteStatus === "published" ? (
+                      <>
+                        <button onClick={() => void handlePublish()} className="px-2.5 py-1 rounded-lg bg-accent text-[10px] text-white hover:bg-accent/90 transition-all">
+                          {locale === "zh" ? "更新发布" : "Update Publish"}
+                        </button>
+                        <button onClick={() => void handleUnpublish()} className="px-2.5 py-1 rounded-lg bg-gray-900 text-[10px] text-white hover:bg-gray-800 transition-all">
+                          {locale === "zh" ? "取消发布" : "Unpublish"}
+                        </button>
+                      </>
+                    ) : (
+                      <button onClick={() => void handlePublish()} className="px-2.5 py-1 rounded-lg bg-accent text-[10px] text-white hover:bg-accent/90 transition-all">
+                        {locale === "zh" ? "发布站点" : "Publish"}
+                      </button>
+                    )}
+                    <a href={publishedUrl || previewUrl} target="_blank" rel="noopener noreferrer" className="px-2.5 py-1 rounded-lg bg-gray-100 text-[10px] text-gray-600 hover:bg-gray-200 transition-all">
+                      {locale === "zh" ? "新窗口打开" : "Open"}
+                    </a>
+                  </div>
+                  {publishedUrl && (
+                    <p className="mt-2 text-[10px] text-gray-500">
+                      {locale === "zh" ? "发布域名：" : "Published URL: "}
+                      <a href={publishedUrl} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">
+                        {publishedUrl}
+                      </a>
+                    </p>
+                  )}
+                  {selectedTemplate && !siteId && (
+                    <p className="mt-2 text-[10px] text-gray-500">
+                      {locale === "zh"
+                        ? `当前展示的是模板案例预览「${selectedTemplate.nameCn}」。发送你的资料或修改要求后，会基于这个模板生成你的专属站点。`
+                        : `You are currently viewing the "${selectedTemplate.name}" demo preview. Once you send your content or edit requests, the system will generate your own site from this template.`}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* Preview content */}
               {previewTab === "preview" && (
                 genStatus === "generating" ? (
                   <div className="flex-1 flex flex-col items-center justify-center gap-4">
@@ -1388,63 +1620,7 @@ function CreatePageInner() {
                     )}
                   </div>
                 ) : previewUrl ? (
-                  <>
-                    <div className="shrink-0 border-b border-gray-200/60 bg-white px-3 py-2">
-                      <div className="flex items-center gap-2">
-                        <div className="flex gap-1"><div className="w-2 h-2 rounded-full bg-red-400/50" /><div className="w-2 h-2 rounded-full bg-yellow-400/50" /><div className="w-2 h-2 rounded-full bg-green-400/50" /></div>
-                        <div className="flex-1 min-w-0">
-                          <div className="px-2 py-1 rounded-lg bg-gray-100 text-[9px] text-gray-500 truncate">
-                            {selectedTemplate && !siteId ? `${locale === "zh" ? "模板预览" : "Template Preview"} · ${previewUrl}` : previewUrl}
-                          </div>
-                        </div>
-                        <span className={`px-2 py-1 rounded-lg text-[9px] ${siteStatus === "published" ? "bg-green-500/10 text-green-600" : "bg-yellow-500/10 text-yellow-700"}`}>
-                          {siteStatus === "published" ? (locale === "zh" ? "已发布" : "Published") : (locale === "zh" ? "草稿" : "Draft")}
-                        </span>
-                      </div>
-                      <div className="mt-2 flex flex-wrap gap-1.5">
-                        <span className="px-2.5 py-1 rounded-lg bg-accent/10 text-[10px] text-accent">
-                          {locale === "zh" ? "内容来源" : "Content Source"}: {contentSourceLabel}
-                        </span>
-                        <button onClick={() => setPreviewTab("prd")} className="px-2.5 py-1 rounded-lg bg-gray-100 text-[10px] text-gray-600 hover:bg-gray-200 transition-all">
-                          {locale === "zh" ? "查看 PRD" : "View PRD"}
-                        </button>
-                        <button onClick={() => setPreviewTab("resources")} className="px-2.5 py-1 rounded-lg bg-gray-100 text-[10px] text-gray-600 hover:bg-gray-200 transition-all">
-                          {locale === "zh" ? "查看资源" : "View Resources"}
-                        </button>
-                        <button onClick={() => quickGenerate()} className="px-2.5 py-1 rounded-lg bg-gray-100 text-[10px] text-gray-600 hover:bg-gray-200 transition-all">
-                          {locale === "zh" ? "重新生成预览" : "Regenerate"}
-                        </button>
-                        {siteStatus === "published" ? (
-                          <button onClick={() => void handleUnpublish()} className="px-2.5 py-1 rounded-lg bg-gray-900 text-[10px] text-white hover:bg-gray-800 transition-all">
-                            {locale === "zh" ? "取消发布" : "Unpublish"}
-                          </button>
-                        ) : (
-                          <button onClick={() => void handlePublish()} className="px-2.5 py-1 rounded-lg bg-accent text-[10px] text-white hover:bg-accent/90 transition-all">
-                            {locale === "zh" ? "发布站点" : "Publish"}
-                          </button>
-                        )}
-                        <a href={publishedUrl || previewUrl} target="_blank" rel="noopener noreferrer" className="px-2.5 py-1 rounded-lg bg-gray-100 text-[10px] text-gray-600 hover:bg-gray-200 transition-all">
-                          {locale === "zh" ? "新窗口打开" : "Open"}
-                        </a>
-                      </div>
-                      {publishedUrl && (
-                        <p className="mt-2 text-[10px] text-gray-500">
-                          {locale === "zh" ? "发布域名：" : "Published URL: "}
-                          <a href={publishedUrl} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">
-                            {publishedUrl}
-                          </a>
-                        </p>
-                      )}
-                      {selectedTemplate && !siteId && (
-                        <p className="mt-2 text-[10px] text-gray-500">
-                          {locale === "zh"
-                            ? `当前展示的是模板案例预览「${selectedTemplate.nameCn}」。发送你的资料或修改要求后，会基于这个模板生成你的专属站点。`
-                            : `You are currently viewing the "${selectedTemplate.name}" demo preview. Once you send your content or edit requests, the system will generate your own site from this template.`}
-                        </p>
-                      )}
-                    </div>
-                    <iframe key={previewKey} src={`${previewUrl}?t=${previewKey}`} className="flex-1 w-full border-0 bg-white" title="Preview" />
-                  </>
+                  <iframe key={previewKey} src={`${previewUrl}?t=${previewKey}`} className="flex-1 w-full border-0 bg-white" title="Preview" />
                 ) : (
                   <div className="flex-1 flex items-center justify-center"><p className="text-xs text-gray-500">{locale === "zh" ? "回答几个问题后会自动生成首版预览" : "A first preview appears automatically after a few questions"}</p></div>
                 )
@@ -1454,13 +1630,6 @@ function CreatePageInner() {
               {previewTab === "prd" && (
                 prdData ? (
                   <div className="flex-1 flex flex-col overflow-hidden">
-                    {/* PRD header */}
-                    <div className="shrink-0 px-4 py-2 bg-white border-b border-gray-200 flex items-center justify-between">
-                      <span className="text-[10px] text-gray-400">v{prdData.version || 1}{prdData.siteType ? ` · ${prdData.siteType}` : ""}</span>
-                      <button onClick={() => setPreviewTab("preview")} className="px-3 py-1 rounded-lg bg-gray-100 text-gray-600 text-[10px] hover:bg-gray-200 transition-all">
-                        {locale === "zh" ? "返回预览" : "Back to Preview"}
-                      </button>
-                    </div>
                     {/* PRD content */}
                     <div className="flex-1 overflow-y-auto bg-white">
                       <div className="p-5 max-w-none prose prose-sm prose-gray prose-headings:text-gray-800 prose-p:text-gray-600 prose-li:text-gray-600 prose-strong:text-gray-800 prose-code:text-accent prose-code:bg-accent/5 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:before:content-none prose-code:after:content-none">
@@ -1636,21 +1805,44 @@ function CreatePageInner() {
                 <p className="text-xs text-gray-500 mt-0.5">{kGroups.length} {locale === "zh" ? "个知识组" : "groups"} · {selectedCount}/{items.length} {locale === "zh" ? "条已选" : "selected"}</p>
               </div>
               <div className="flex items-center gap-2">
-                <input type="text" placeholder={locale === "zh" ? "搜索知识..." : "Search..."} value={knowledgeSearch} onChange={e => setKnowledgeSearch(e.target.value)}
-                  className="px-3 py-1.5 rounded-lg bg-gray-100 border border-gray-200 text-xs text-gray-900 placeholder:text-gray-500 focus:outline-none focus:border-accent/50 w-48" />
-                <button onClick={async () => { const allSel = items.every(i => i.selected); const newVal = !allSel; setItems(p => p.map(i => ({ ...i, selected: newVal }))); await fetch("/api/knowledge", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ selected: newVal }) }); await loadGroups(); }} className="px-3 py-1.5 rounded-lg bg-gray-100 text-[10px] text-gray-400 hover:bg-gray-200/50 transition-all">
-                  {items.every(i => i.selected) ? (locale === "zh" ? "全部取消" : "Deselect all") : (locale === "zh" ? "全部选择" : "Select all")}
-                </button>
+                {/* List / Graph toggle */}
+                <div className="flex rounded-lg border border-gray-200 overflow-hidden">
+                  <button
+                    onClick={() => setKnowledgeViewMode("list")}
+                    className={`px-2.5 py-1.5 text-[10px] transition-all ${knowledgeViewMode === "list" ? "bg-accent text-white" : "bg-white text-gray-500 hover:bg-gray-50"}`}
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 10h16M4 14h16M4 18h16" /></svg>
+                  </button>
+                  <button
+                    onClick={() => setKnowledgeViewMode("graph")}
+                    className={`px-2.5 py-1.5 text-[10px] transition-all ${knowledgeViewMode === "graph" ? "bg-accent text-white" : "bg-white text-gray-500 hover:bg-gray-50"}`}
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="6" cy="6" r="2" strokeWidth={2} /><circle cx="18" cy="6" r="2" strokeWidth={2} /><circle cx="12" cy="18" r="2" strokeWidth={2} /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7.5 7.5l3 7.5m6-7.5l-3 7.5" /></svg>
+                  </button>
+                </div>
+                {knowledgeViewMode === "list" && (
+                  <>
+                    <input type="text" placeholder={locale === "zh" ? "搜索知识..." : "Search..."} value={knowledgeSearch} onChange={e => setKnowledgeSearch(e.target.value)}
+                      className="px-3 py-1.5 rounded-lg bg-gray-100 border border-gray-200 text-xs text-gray-900 placeholder:text-gray-500 focus:outline-none focus:border-accent/50 w-48" />
+                    <button onClick={async () => { const allSel = items.every(i => i.selected); const newVal = !allSel; setItems(p => p.map(i => ({ ...i, selected: newVal }))); await fetch("/api/knowledge", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ selected: newVal }) }); await loadGroups(); }} className="px-3 py-1.5 rounded-lg bg-gray-100 text-[10px] text-gray-400 hover:bg-gray-200/50 transition-all">
+                      {items.every(i => i.selected) ? (locale === "zh" ? "全部取消" : "Deselect all") : (locale === "zh" ? "全部选择" : "Select all")}
+                    </button>
+                  </>
+                )}
               </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-6">
+            {/* Graph view */}
+            {knowledgeViewMode === "graph" && <KnowledgeGraph />}
+
+            {/* List view */}
+            {knowledgeViewMode === "list" && <div className="flex-1 overflow-y-auto p-6">
               {!itemsLoaded ? <div className="space-y-3">{[1,2,3].map(i => <div key={i} className="h-16 rounded-xl bg-gray-100 animate-pulse" />)}</div>
               : kGroups.length === 0 ? (
                 <div className="text-center py-20">
                   <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-gray-100 flex items-center justify-center"><span className="text-2xl opacity-30">📚</span></div>
                   <p className="text-gray-500">{locale === "zh" ? "暂无知识。前往数据源添加内容。" : "No knowledge. Add sources first."}</p>
-                  <button onClick={() => setView("sources")} className="mt-4 px-4 py-2 rounded-lg bg-accent/10 text-accent text-xs hover:bg-accent/20 transition-all">{locale === "zh" ? "添加数据源" : "Add Sources"}</button>
+                  <button onClick={() => router.push("/knowledge")} className="mt-4 px-4 py-2 rounded-lg bg-accent/10 text-accent text-xs hover:bg-accent/20 transition-all">{locale === "zh" ? "添加数据源" : "Add Sources"}</button>
                 </div>
               ) : expandedGroupId ? (
                 /* ── Expanded: show single group's items ── */
@@ -1777,7 +1969,7 @@ function CreatePageInner() {
                   })}
                 </div>
               )}
-            </div>
+            </div>}
           </div>
         )}
       </div>

@@ -4,18 +4,26 @@ import path from "path";
 
 const SILICONFLOW_URL = "https://api.siliconflow.cn/v1/images/generations";
 const API_KEY = process.env.SILICONFLOW_API_KEY || "";
-const OUTPUT_DIR = path.join(process.cwd(), "output");
+const PREVIEW_PUBLISH_DIR = process.env.PREVIEW_PUBLISH_DIR?.trim() || "";
+const DRAFTS_SEGMENT = "drafts";
+const IMAGE_MODELS = (process.env.SILICONFLOW_IMAGE_MODELS?.trim() || process.env.SILICONFLOW_IMAGE_MODEL?.trim() || "")
+  .split(",")
+  .map((item) => item.trim())
+  .filter(Boolean);
 
 /**
- * Generate an image via SiliconFlow (FLUX.1-schnell) and save to output/public/images/.
- * Body: { prompt: string; filename: string; style: string }
+ * Generate an image via SiliconFlow (FLUX.1-schnell) and save to either:
+ * - sites-data/<siteId>/public/images/
+ * - public/images/ (fallback for local app assets)
+ * Body: { prompt: string; filename: string; style: string; siteId?: string }
  */
 export async function POST(req: NextRequest) {
   try {
-    const { prompt, filename } = (await req.json()) as {
+    const { prompt, filename, siteId } = (await req.json()) as {
       prompt: string;
       filename: string;
       style: string;
+      siteId?: string;
     };
 
     if (!API_KEY) {
@@ -25,34 +33,52 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    if (IMAGE_MODELS.length === 0) {
+      return NextResponse.json(
+        { error: "Image generation is not enabled. Set SILICONFLOW_IMAGE_MODEL or SILICONFLOW_IMAGE_MODELS to an available model." },
+        { status: 400 },
+      );
+    }
+
     // Determine image size: square for avatars/icons, 16:9 for backgrounds/projects
     const isSquare = filename === "avatar.png" || filename === "chatbot-spirit.png";
     const imageSize = isSquare ? "1024x1024" : "1024x576";
 
-    const response = await fetch(SILICONFLOW_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: "black-forest-labs/FLUX.1-schnell",
-        prompt,
-        image_size: imageSize,
-        num_inference_steps: 20,
-      }),
-    });
+    let imageResponse: Response | null = null;
+    let lastError = "";
+    for (const model of IMAGE_MODELS) {
+      const response = await fetch(SILICONFLOW_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${API_KEY}`,
+        },
+        body: JSON.stringify({
+          model,
+          prompt,
+          image_size: imageSize,
+          num_inference_steps: 20,
+        }),
+      });
 
-    if (!response.ok) {
+      if (response.ok) {
+        imageResponse = response;
+        break;
+      }
+
       const errText = await response.text();
-      console.error("SiliconFlow image error:", errText);
+      lastError = `${model}: ${response.status} ${errText.slice(0, 300)}`;
+      console.error("SiliconFlow image error:", lastError);
+    }
+
+    if (!imageResponse) {
       return NextResponse.json(
-        { error: `Image generation failed: ${response.status}` },
+        { error: `Image generation failed for all configured models. ${lastError}` },
         { status: 500 },
       );
     }
 
-    const result = await response.json();
+    const result = await imageResponse.json();
     const imageUrl = result.images?.[0]?.url;
 
     if (!imageUrl) {
@@ -71,16 +97,32 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const safeFilename = path.basename(filename);
+    console.log("[generate-image] request", { filename: safeFilename, siteId: siteId || null });
     const buffer = Buffer.from(await imgRes.arrayBuffer());
-    const imagesDir = path.join(OUTPUT_DIR, "public", "images");
-    await fs.mkdir(imagesDir, { recursive: true });
-    const savePath = path.join(imagesDir, filename);
-    await fs.writeFile(savePath, buffer);
+    const targetDirs = new Set<string>();
+
+    if (siteId) {
+      targetDirs.add(path.join(process.cwd(), "sites-data", siteId, "public", "images"));
+      targetDirs.add(path.join(process.cwd(), "sites-data", siteId, "out", "images"));
+      if (PREVIEW_PUBLISH_DIR) {
+        targetDirs.add(path.join(PREVIEW_PUBLISH_DIR, DRAFTS_SEGMENT, siteId, "images"));
+      }
+    } else {
+      targetDirs.add(path.join(process.cwd(), "public", "images"));
+    }
+
+    for (const imagesDir of targetDirs) {
+      await fs.mkdir(imagesDir, { recursive: true });
+      await fs.writeFile(path.join(imagesDir, safeFilename), buffer);
+    }
 
     return NextResponse.json({
       success: true,
-      path: `/images/${filename}`,
+      path: `/images/${safeFilename}`,
       size: buffer.length,
+      filename: safeFilename,
+      siteId: siteId || null,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";

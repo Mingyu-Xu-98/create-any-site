@@ -64,12 +64,24 @@ export interface EducationItem {
 
 // ---- Selection types ----
 
-export type SiteType = "portfolio" | "brand" | "blog" | "landing" | "custom";
+/**
+ * Site type — open string. Common values for reference:
+ * portfolio, brand, blog, landing, saas, e-commerce, agency, event, docs, custom
+ */
+export type SiteType = string;
 
+/**
+ * Theme — kept as union for type-safe CSS/config mapping.
+ * "custom" allows agent to use arbitrary style_keywords via customTheme.
+ */
 export type ThemeStyle = "cyberpunk" | "minimalist" | "ghibli" | "glassmorphism" | "retro" | "brutalist"
   | "cinematic" | "bold-creative" | "editorial" | "nature" | "gradient-mesh" | "neo-tokyo"
   | "tpl-business" | "tpl-resume-bold" | "tpl-resume-dark" | "tpl-blog" | "custom";
 
+/**
+ * Layout — kept as union for legacy generator compatibility.
+ * CompositionPlan.layout is open string and not limited to these.
+ */
 export type LayoutType = "two-column" | "split-screen" | "asymmetric" | "f-shape" | "z-shape"
   | "card-grid" | "hero-media" | "masonry" | "magazine" | "fixed-nav" | "hidden-nav"
   | "interactive" | "custom";
@@ -159,6 +171,10 @@ export interface UserSelections {
   customTheme: string;
   customLayout: string;
   features: FeatureFlags;
+  /** Composition plan from AI agent — drives the component assembler */
+  compositionPlan?: import("./components/types").CompositionPlan;
+  /** Full site spec from compile-spec (carries pages/design/interactions) */
+  fullSpec?: import("./site-spec").SiteSpec;
 }
 
 export interface WizardStep {

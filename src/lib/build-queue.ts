@@ -8,13 +8,20 @@ import type { WorkspaceData, UserSelections } from "@/lib/types";
 interface BuildPayload {
   data: WorkspaceData;
   selections: UserSelections;
-  spec?: { sections?: Array<{ id?: string; type?: string; enabled?: boolean }> } | null;
+  spec?: import("./site-spec").SiteSpec | null;
   prd?: unknown;
   previewBaseUrl: string;
   knowledgeRefs?: unknown[];
+  userId?: string;
 }
 
 const runningJobs = new Set<string>();
+let kickScheduled = false;
+
+function getBuildConcurrency(): number {
+  const raw = Number.parseInt(process.env.BUILD_MAX_CONCURRENCY || "", 10);
+  return Number.isFinite(raw) && raw > 0 ? raw : 2;
+}
 
 export function shouldInlineBuildJobs(): boolean {
   if (process.env.BUILD_INLINE_JOBS === "1") return true;
@@ -22,15 +29,32 @@ export function shouldInlineBuildJobs(): boolean {
   return process.env.NODE_ENV !== "production";
 }
 
-export function scheduleBuildJob(jobId: string) {
+async function kickInlineBuildQueue() {
   if (!shouldInlineBuildJobs()) return;
-  if (runningJobs.has(jobId)) return;
-  runningJobs.add(jobId);
-  setTimeout(() => {
-    void processBuildJob(jobId).finally(() => {
-      runningJobs.delete(jobId);
-    });
-  }, 0);
+  if (kickScheduled) return;
+  kickScheduled = true;
+
+  try {
+    while (runningJobs.size < getBuildConcurrency()) {
+      const nextJobId = await claimNextQueuedBuildJob();
+      if (!nextJobId) break;
+      if (runningJobs.has(nextJobId)) continue;
+
+      runningJobs.add(nextJobId);
+      setTimeout(() => {
+        void processBuildJob(nextJobId, { alreadyClaimed: true }).finally(() => {
+          runningJobs.delete(nextJobId);
+          void kickInlineBuildQueue();
+        });
+      }, 0);
+    }
+  } finally {
+    kickScheduled = false;
+  }
+}
+
+export function scheduleBuildJob(_jobId: string) {
+  void kickInlineBuildQueue();
 }
 
 export async function processBuildJob(jobId: string, options?: { alreadyClaimed?: boolean }) {
@@ -53,6 +77,7 @@ export async function processBuildJob(jobId: string, options?: { alreadyClaimed?
     const payload = JSON.parse(job.payload) as BuildPayload;
     const result = await runSiteBuild({
       siteId: job.siteId,
+      userId: payload.userId,
       data: payload.data,
       selections: payload.selections,
       spec: payload.spec || null,
@@ -108,12 +133,26 @@ export async function processBuildJob(jobId: string, options?: { alreadyClaimed?
       buildError: message,
       updatedAt: finishedAt,
     }).where(eq(sites.id, job.siteId));
+  } finally {
+    if (shouldInlineBuildJobs()) {
+      void kickInlineBuildQueue();
+    }
   }
 }
 
 export async function claimNextQueuedBuildJob(): Promise<string | null> {
   const now = new Date().toISOString();
   const claim = sqlite.transaction(() => {
+    const buildingCount = sqlite.prepare(`
+      SELECT COUNT(*) as count
+      FROM site_builds
+      WHERE status = 'building'
+    `).get() as { count: number } | undefined;
+
+    if ((buildingCount?.count || 0) >= getBuildConcurrency()) {
+      return null;
+    }
+
     const next = sqlite.prepare(`
       SELECT id, site_id
       FROM site_builds

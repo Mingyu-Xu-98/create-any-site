@@ -2,7 +2,7 @@
 
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import Link from "next/link";
 import Navbar from "@/components/Navbar";
 import { useLocale } from "@/components/LocaleProvider";
@@ -123,81 +123,114 @@ export default function DashboardPage() {
             </Link>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
             {sites.map((site) => (
-              <div key={site.id} className="group overflow-hidden rounded-3xl bg-white border border-gray-200 hover:border-accent/30 transition-all shadow-sm hover:shadow-lg">
-                <div className="h-2 w-full" style={{ background: `linear-gradient(90deg, ${site.theme === "cyberpunk" ? "#00fff0" : site.theme === "ghibli" ? "#7d9b5f" : site.theme === "glassmorphism" ? "#c89bda" : site.theme === "bold-creative" ? "#ff6b6b" : "#111827"}, ${site.theme === "cyberpunk" ? "#ff00ff" : site.theme === "ghibli" ? "#e8a87c" : site.theme === "glassmorphism" ? "#e8b88a" : site.theme === "bold-creative" ? "#4d96ff" : "#6b7280"})` }} />
+              <div key={site.id} className="group overflow-hidden rounded-2xl bg-white border border-gray-200 hover:border-accent/30 transition-all shadow-sm hover:shadow-md">
+                <div className="h-1.5 w-full" style={{ background: `linear-gradient(90deg, ${site.theme === "cyberpunk" ? "#00fff0" : site.theme === "ghibli" ? "#7d9b5f" : site.theme === "glassmorphism" ? "#c89bda" : site.theme === "bold-creative" ? "#ff6b6b" : site.theme === "brutalist" ? "#4493f8" : site.theme === "cinematic" ? "#e94560" : site.theme === "retro" ? "#c0392b" : site.theme === "neo-tokyo" ? "#ff2e63" : "#6366f1"}, ${site.theme === "cyberpunk" ? "#ff00ff" : site.theme === "ghibli" ? "#e8a87c" : site.theme === "glassmorphism" ? "#e8b88a" : site.theme === "bold-creative" ? "#4d96ff" : "#818cf8"})` }} />
                 <div className="p-5">
-                <div className="flex items-start justify-between mb-3">
-                  <h3 className="font-medium text-sm group-hover:text-accent transition-colors truncate">
-                    {site.name}
-                  </h3>
-                  <div className="flex items-center gap-2">
-                    <span className={`text-[10px] px-2 py-0.5 rounded-full ${buildStatusColors[site.buildStatus || "idle"] || buildStatusColors.idle}`}>
-                      {site.buildStatus || "idle"}
-                    </span>
-                    <span className={`text-[10px] px-2 py-0.5 rounded-full ${statusColors[site.status] || statusColors.draft}`}>
-                      {site.status}
-                    </span>
-                  </div>
-                </div>
-                <div className="mt-4 rounded-2xl border border-gray-200 bg-gray-50 p-4">
-                  <div className="flex items-center justify-between text-[10px] text-gray-500 uppercase tracking-[0.16em]">
-                    <span>{themeLabels[site.theme] || site.theme}</span>
-                    <span>{site.siteType}</span>
-                  </div>
-                  <div className="mt-3 h-24 rounded-2xl border border-white bg-white shadow-inner px-4 py-3">
-                    <div className="w-16 h-1.5 rounded-full bg-gray-200" />
-                    <div className="mt-3 w-28 h-3 rounded-full bg-gray-900/80" />
-                    <div className="mt-2 w-20 h-2 rounded-full bg-gray-300" />
-                    <div className="mt-4 grid grid-cols-3 gap-2">
-                      <div className="h-8 rounded-lg bg-gray-100" />
-                      <div className="h-8 rounded-lg bg-gray-100" />
-                      <div className="h-8 rounded-lg bg-gray-100" />
+                  {/* Header: name + status */}
+                  <div className="flex items-start justify-between gap-3 mb-4">
+                    <h3
+                      className="font-semibold text-base text-gray-900 group-hover:text-accent transition-colors truncate cursor-text min-w-0 flex-1"
+                      title={locale === "zh" ? "双击重命名" : "Double-click to rename"}
+                      contentEditable={false}
+                      suppressContentEditableWarning
+                      onDoubleClick={(e) => {
+                        const el = e.currentTarget;
+                        el.contentEditable = "true";
+                        el.focus();
+                        const range = document.createRange();
+                        range.selectNodeContents(el);
+                        window.getSelection()?.removeAllRanges();
+                        window.getSelection()?.addRange(range);
+                      }}
+                      onBlur={async (e) => {
+                        const el = e.currentTarget;
+                        el.contentEditable = "false";
+                        const newName = el.textContent?.trim();
+                        if (newName && newName !== site.name) {
+                          await fetch(`/api/sites/${site.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: newName }) });
+                          setSites(prev => prev.map(s => s.id === site.id ? { ...s, name: newName } : s));
+                        } else {
+                          el.textContent = site.name;
+                        }
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); }
+                        if (e.key === "Escape") { e.currentTarget.textContent = site.name; e.currentTarget.blur(); }
+                      }}
+                    >
+                      {site.name}
+                    </h3>
+                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                      <span className={`text-xs px-2 py-0.5 rounded-md font-medium ${statusColors[site.status] || statusColors.draft}`}>
+                        {site.status === "published" ? (locale === "zh" ? "已发布" : "Live") : (locale === "zh" ? "草稿" : "Draft")}
+                      </span>
                     </div>
                   </div>
-                </div>
-                {site.buildError && (
-                  <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2">
-                    <p className="text-[10px] font-medium text-red-700">{locale === "zh" ? "最近一次构建失败" : "Last build failed"}</p>
-                    <p className="mt-1 text-[10px] text-red-600 line-clamp-2">{site.buildError}</p>
+
+                  {/* Meta info */}
+                  <div className="flex items-center gap-3 text-xs text-gray-500 mb-4">
+                    <span className="inline-flex items-center gap-1">
+                      <span className="w-2 h-2 rounded-full" style={{ background: site.theme === "cyberpunk" ? "#00fff0" : site.theme === "ghibli" ? "#7d9b5f" : site.theme === "glassmorphism" ? "#c89bda" : "#6366f1" }} />
+                      {themeLabels[site.theme] || site.theme}
+                    </span>
+                    <span className="text-gray-300">|</span>
+                    <span>{site.siteType}</span>
+                    {site.buildStatus === "failed" && (
+                      <>
+                        <span className="text-gray-300">|</span>
+                        <span className="text-red-500 font-medium">{locale === "zh" ? "构建失败" : "Build failed"}</span>
+                      </>
+                    )}
                   </div>
-                )}
-                <div className="mt-3 pt-3 border-t border-gray-200 flex items-center justify-between">
-                  <span className="text-[10px] text-gray-500">
+
+                  {/* Build error */}
+                  {site.buildError && (
+                    <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2">
+                      <p className="text-xs text-red-600 line-clamp-2">{site.buildError}</p>
+                    </div>
+                  )}
+
+                  {/* Timestamp */}
+                  <div className="text-xs text-gray-400 mb-4">
                     {site.lastBuiltAt
-                      ? `${locale === "zh" ? "最近构建" : "Built"} · ${new Date(site.lastBuiltAt).toLocaleDateString()}`
-                      : new Date(site.createdAt).toLocaleDateString()}
-                  </span>
-                  <div className="flex items-center gap-2">
+                      ? `${locale === "zh" ? "最近构建" : "Built"} ${new Date(site.lastBuiltAt).toLocaleDateString()}`
+                      : `${locale === "zh" ? "创建于" : "Created"} ${new Date(site.createdAt).toLocaleDateString()}`}
+                  </div>
+
+                  {/* Actions */}
+                  <div className="pt-4 border-t border-gray-100 flex flex-wrap items-center gap-2">
+                    <Link
+                      href={site.conversationId ? `/create?siteId=${site.id}` : `/create`}
+                      className="px-3 py-1.5 rounded-lg bg-accent text-xs text-white font-medium hover:bg-accent/90 transition-all"
+                    >
+                      {locale === "zh" ? "编辑" : "Edit"}
+                    </Link>
                     {site.previewUrl && (
-                      <a
-                        href={site.previewUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="px-3 py-1 rounded-lg bg-gray-100 text-gray-600 text-[10px] hover:bg-gray-200 transition-all"
-                      >
-                        {locale === "zh" ? "预览站点" : "Preview"}
+                      <a href={site.previewUrl} target="_blank" rel="noopener noreferrer"
+                        className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs text-gray-600 hover:bg-gray-50 transition-all">
+                        {locale === "zh" ? "预览" : "Preview"}
                       </a>
                     )}
                     {site.publishedUrl && (
-                      <a
-                        href={site.publishedUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="px-3 py-1 rounded-lg bg-gray-100 text-gray-600 text-[10px] hover:bg-gray-200 transition-all"
-                      >
-                        {locale === "zh" ? "访问站点" : "Visit Site"}
+                      <a href={site.publishedUrl} target="_blank" rel="noopener noreferrer"
+                        className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs text-gray-600 hover:bg-gray-50 transition-all">
+                        {locale === "zh" ? "访问" : "Visit"}
                       </a>
                     )}
-                    <Link
-                      href={site.conversationId ? `/create?siteId=${site.id}` : `/create`}
-                      className="px-3 py-1 rounded-lg bg-accent/10 text-accent text-[10px] hover:bg-accent/20 transition-all"
+                    <button
+                      onClick={async () => {
+                        const msg = locale === "zh" ? `确定要删除「${site.name}」吗？此操作不可撤销。` : `Delete "${site.name}"? This cannot be undone.`;
+                        if (!confirm(msg)) return;
+                        await fetch(`/api/sites/${site.id}`, { method: "DELETE" });
+                        setSites(prev => prev.filter(s => s.id !== site.id));
+                      }}
+                      className="ml-auto px-3 py-1.5 rounded-lg text-xs text-red-500 hover:bg-red-50 transition-all"
                     >
-                      {locale === "zh" ? "继续编辑" : "Continue Editing"}
-                    </Link>
+                      {locale === "zh" ? "删除" : "Delete"}
+                    </button>
                   </div>
-                </div>
                 </div>
               </div>
             ))}

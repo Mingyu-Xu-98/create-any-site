@@ -7,15 +7,30 @@ type SpecValue = { value?: string | null } | string | null | undefined;
 export interface SiteSpecSection {
   id?: string;
   type?: string;
+  /** Rendering category — matches SectionKind from component library */
+  kind?: string;
   enabled?: boolean;
+  /** Content depth: how much of this section to show */
+  depth?: "teaser" | "summary" | "full" | "interactive";
+  /** Knowledge routing: which knowledge items power this section */
+  content_source?: string;
   data?: Record<string, unknown>;
+}
+
+export interface SiteSpecPage {
+  id: string;
+  route: string;
+  purpose?: string;
+  priority?: number;
+  sections: SiteSpecSection[];
 }
 
 export interface SiteSpec {
   product?: {
-    siteType?: string;
+    siteType?: string;         // Free-form: "portfolio", "saas-landing", "agency", etc.
     targetAudience?: string;
     purpose?: string;
+    tone?: string;             // "professional", "playful", "luxurious", etc.
   };
   identity?: {
     name?: SpecValue;
@@ -23,17 +38,46 @@ export interface SiteSpec {
     title?: SpecValue;
     bio?: SpecValue;
     bioEn?: SpecValue;
+    logo?: string;
     contact?: {
       email?: SpecValue;
       github?: SpecValue;
       linkedin?: SpecValue;
+      [key: string]: SpecValue;
     };
   };
+  /** Legacy flat sections (backwards compatible) */
   sections?: SiteSpecSection[];
+  /** New: multi-page structure (takes priority over sections when present) */
+  pages?: SiteSpecPage[];
+  /** Navigation structure */
+  navigation?: {
+    style?: string;
+    items?: Array<{ label: string; target: string; children?: Array<{ label: string; target: string }> }>;
+  };
+  /** Design system — open-ended, not locked to preset themes */
+  design?: {
+    preset_theme?: string;      // Optional: use a preset as starting point
+    colors?: Record<string, string>;
+    typography?: { heading?: string; body?: string; mono?: string };
+    style_keywords?: string[];  // "glassmorphism", "brutalist", "organic", etc.
+    border_radius?: string;
+    motion_level?: "none" | "subtle" | "moderate" | "rich";
+  };
+  /** Legacy design system (backwards compatible) */
   designSystem?: {
     theme?: string;
     customDescription?: string;
   };
+  /** Interaction plan */
+  interactions?: {
+    chatbot?: { enabled: boolean; persona?: string };
+    forms?: Array<{ id: string; purpose: string; fields?: string[] }>;
+    animations?: string[];
+    embeds?: Array<{ type: string; config: Record<string, unknown> }>;
+  };
+  /** Knowledge routing map: section_id → knowledge_item_ids[] */
+  knowledge_routing?: Record<string, string[]>;
 }
 
 function readSpecValue(input: SpecValue): string {
@@ -98,12 +142,18 @@ function extractSectionSummary(section?: SiteSpecSection): string {
 export function buildWorkspaceDataFromSpec(spec: SiteSpec, items: KnowledgeItem[]): WorkspaceData {
   const fallback = buildWorkspaceDataFromKnowledge(items);
   const identity = spec.identity || {};
-  const sections = Array.isArray(spec.sections) ? spec.sections.filter(section => section.enabled !== false) : [];
-  const skillsSection = sections.find(section => (section.id || section.type) === "skills");
-  const projectsSection = sections.find(section => (section.id || section.type) === "projects");
-  const timelineSection = sections.find(section => (section.id || section.type) === "timeline");
-  const aboutSection = sections.find(section => (section.id || section.type) === "about");
-  const contactSection = sections.find(section => (section.id || section.type) === "contact");
+  // Flatten pages[] if present, else use sections[]
+  const allSections = spec.pages?.flatMap(p => p.sections) || spec.sections || [];
+  const sections = allSections.filter(section => section.enabled !== false);
+  // Find sections by id/type OR by kind (new system)
+  const findSection = (idOrKind: string) => sections.find(s =>
+    (s.id || s.type) === idOrKind || s.kind === idOrKind
+  );
+  const skillsSection = findSection("skills");
+  const projectsSection = findSection("projects") || findSection("showcase");
+  const timelineSection = findSection("timeline");
+  const aboutSection = findSection("about") || findSection("content");
+  const contactSection = findSection("contact") || findSection("cta");
 
   const specSkills = Array.isArray(skillsSection?.data?.groups)
     ? (skillsSection?.data?.groups as Array<{ title?: string; items?: string[] }>).map(group => ({
@@ -185,8 +235,13 @@ export function deriveSelectionsFromSpec(
   fallback: Pick<UserSelections, "siteType" | "theme" | "layout" | "customSiteType" | "customTheme" | "customLayout" | "features">,
 ): UserSelections {
   const siteType = (spec.product?.siteType as SiteType | undefined) || fallback.siteType;
-  const theme = (spec.designSystem?.theme as ThemeStyle | undefined) || fallback.theme;
-  const customTheme = spec.designSystem?.customDescription || fallback.customTheme;
+  // Read theme from new design.preset_theme or legacy designSystem.theme
+  const theme = (spec.design?.preset_theme as ThemeStyle | undefined)
+    || (spec.designSystem?.theme as ThemeStyle | undefined)
+    || fallback.theme;
+  const customTheme = spec.design?.style_keywords?.join(", ")
+    || spec.designSystem?.customDescription
+    || fallback.customTheme;
   const layout = (fallback.layout as LayoutType | null) || getAutoLayout((theme || "minimalist"), (siteType || "portfolio"));
 
   return {
@@ -198,4 +253,13 @@ export function deriveSelectionsFromSpec(
     customLayout: fallback.customLayout,
     features: fallback.features,
   };
+}
+
+/** Get flat sections list — from pages[0].sections if available, else legacy sections[] */
+export function getSpecSections(spec: SiteSpec): SiteSpecSection[] {
+  if (spec.pages && spec.pages.length > 0) {
+    // For now, flatten all pages' sections (multi-page rendering is P5)
+    return spec.pages.flatMap(p => p.sections).filter(s => s.enabled !== false);
+  }
+  return (spec.sections || []).filter(s => s.enabled !== false);
 }

@@ -1,6 +1,7 @@
 import fs from "fs/promises";
 import path from "path";
 import type { WorkspaceData, UserSelections, ThemeStyle } from "./types";
+import { getInstalledNextVersion } from "./next-version";
 
 const TEMPLATES_BASE = path.join(process.cwd(), "..", "create-any-web");
 
@@ -176,6 +177,15 @@ export default function ClientScripts() {
     ? `import ClientScripts from "@/components/ClientScripts";\n`
     : "";
   const scriptTag = scriptContent ? `\n      <ClientScripts />` : "";
+
+  files["src/app/not-found.tsx"] = `export default function NotFound() {
+  return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh" }}>
+      <h1>404 - Page Not Found</h1>
+    </div>
+  );
+}
+`;
 
   files["src/app/page.tsx"] = `${scriptImport}
 export default function Home() {
@@ -393,6 +403,7 @@ export async function POST(req: NextRequest) {
 // ---- Config file generators (same as regular generator) ----
 
 function genTemplatePackageJson(): string {
+  const nextVersion = getInstalledNextVersion();
   return JSON.stringify({
     name: "my-portfolio",
     version: "1.0.0",
@@ -401,9 +412,13 @@ function genTemplatePackageJson(): string {
     dependencies: {
       "@tailwindcss/postcss": "^4.2.1",
       "@types/node": "^25.4.0",
+      "@types/qrcode": "^1.5.5",
       "@types/react": "^19.2.14",
-      next: "^16.1.6",
+      dijkstrajs: "^1.0.3",
+      next: nextVersion,
+      pngjs: "^7.0.0",
       postcss: "^8.5.8",
+      qrcode: "^1.5.4",
       react: "^19.2.4",
       "react-dom": "^19.2.4",
       tailwindcss: "^4.2.1",

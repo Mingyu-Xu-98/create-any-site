@@ -10,6 +10,28 @@ import { logger } from "@/lib/logger";
 import { syncDraftPreview } from "@/lib/build-runtime";
 
 const SITES_DIR = path.join(process.cwd(), "sites-data");
+const TRANSLATIONS_FILE = "src/i18n/translations.ts";
+
+function getPreviewUrl(siteId: string): string {
+  const base = (process.env.PREVIEW_BASE_URL?.trim() || "http://localhost:3002").replace(/\/+$/, "");
+  return process.env.PREVIEW_PUBLISH_DIR?.trim()
+    ? `${base}/drafts/${siteId}`
+    : `${base}/${siteId}`;
+}
+
+function normalizeTranslationsModule(content: string, fallback: string): string {
+  const trimmed = content.trim().replace(/^```(?:ts|typescript|json)?\s*/i, "").replace(/\s*```$/, "").trim();
+  if (trimmed.includes("export const translations")) return trimmed;
+
+  try {
+    const parsed = JSON.parse(trimmed) as Record<string, unknown>;
+    if (parsed && typeof parsed === "object" && ("zh" in parsed || "en" in parsed)) {
+      return `export const translations = ${JSON.stringify(parsed, null, 2)};\n\nexport type Lang = keyof typeof translations;\nexport type Translations = typeof translations.zh;\n`;
+    }
+  } catch {}
+
+  return fallback;
+}
 
 function getBuildEnv(): NodeJS.ProcessEnv {
   const buildEnv = { ...process.env, NODE_ENV: "production" } as NodeJS.ProcessEnv;
@@ -115,9 +137,12 @@ export async function POST(req: NextRequest) {
         applied.push(`deleted: ${filePath}`);
       } else if (change.action === "replace" || change.action === "create") {
         if (!change.content) continue;
-        fileMap[filePath] = change.content;
+        const nextContent = filePath === TRANSLATIONS_FILE
+          ? normalizeTranslationsModule(change.content, fileMap[filePath] || "")
+          : change.content;
+        fileMap[filePath] = nextContent;
         await fs.mkdir(path.dirname(fullPath), { recursive: true });
-        await fs.writeFile(fullPath, change.content, "utf-8");
+        await fs.writeFile(fullPath, nextContent, "utf-8");
         applied.push(`${change.action}: ${filePath}`);
       }
     }
@@ -138,7 +163,7 @@ export async function POST(req: NextRequest) {
     let buildLogs: string[] = [];
     let verification: { ok: boolean; checks: Array<{ label: string; ok: boolean }> } | null = null;
     try {
-      const nextBin = path.join(siteDir, "node_modules", ".bin", "next");
+      const nextBin = path.join(siteDir, "node_modules", "next", "dist", "bin", "next");
       await new Promise<void>((resolve, reject) => {
         exec(`"${nextBin}" build --webpack`, { cwd: siteDir, timeout: 180_000, env: getBuildEnv() }, (err, stdout, stderr) => {
           if (err) { logger.warn("modify", `Rebuild failed: ${err.message}`); reject(Object.assign(err, { stdout, stderr })); }
@@ -148,7 +173,7 @@ export async function POST(req: NextRequest) {
       await syncDraftPreview(siteId, siteDir);
       verification = await runVerification(siteDir, spec);
       await db.update(sites).set({
-        previewUrl: site?.previewUrl || `${(process.env.PREVIEW_BASE_URL?.trim() || "http://localhost:3002").replace(/\/+$/, "")}/drafts/${siteId}`,
+        previewUrl: site?.previewUrl || getPreviewUrl(siteId),
         buildStatus: "ready",
         buildError: null,
         updatedAt: new Date().toISOString(),

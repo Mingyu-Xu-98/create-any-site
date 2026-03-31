@@ -114,15 +114,10 @@ Spec 是上游（知识库）和下游（代码生成器）之间的合同。它
   "── 1. 产品定义 ──": "",
 
   "product": {
-    "siteType": "portfolio | brand | blog | landing | custom",
+    "siteType": "<自由文本: portfolio, saas-landing, brand, agency, e-commerce, blog, event 等>",
     "purpose": "网站核心目的，一句话",
     "targetAudience": "目标受众描述",
-    "locale": {
-      "primary": "zh",
-      "secondary": "en"
-    },
-    "tone": ["professional", "creative", "warm"],
-    "constraints": ["用户提到的任何约束"]
+    "tone": "professional | playful | luxurious | minimalist | bold | warm"
   },
 
   "── 2. 身份信息 ──": "",
@@ -131,53 +126,49 @@ Spec 是上游（知识库）和下游（代码生成器）之间的合同。它
     "name": { "value": "张三", "source": "knowledge" },
     "nameEn": { "value": "San Zhang", "source": "inferred" },
     "title": { "value": "全栈工程师", "source": "knowledge" },
-    "tagline": { "value": "构建有温度的数字体验", "source": "inferred" },
     "bio": { "value": "...", "source": "knowledge" },
     "bioEn": { "value": "...", "source": "inferred" },
-    "avatar": { "value": null, "source": "missing" },
     "contact": {
       "email": { "value": "...", "source": "knowledge" },
-      "github": { "value": "...", "source": "knowledge" },
-      "linkedin": { "value": null, "source": "missing" }
+      "github": { "value": "...", "source": "knowledge" }
     }
   },
 
-  "── 3. 内容编排 ──": "",
+  "── 3. 内容编排 (sections, 或 pages 用于多页站) ──": "",
+
+  "sections（单页站用 sections，多页站用 pages）": "",
 
   "sections": [
     {
       "id": "hero",
-      "type": "hero",
+      "kind": "hero（渲染类别: hero | content | showcase | skills | timeline | proof | gallery | cta | pricing | faq | custom）",
+      "type": "brand-hero（语义标签，自由文本）",
+      "depth": "full（内容深度: teaser | summary | full | interactive）",
       "enabled": true,
-      "priority": 1,
       "data": {
         "headline": "...",
         "subheadline": "...",
         "cta": { "label": "查看作品", "target": "#projects" }
       },
-      "layout": "split-screen | centered | asymmetric",
-      "notes": "基于 arrange skill 建议采用非对称布局"
+      "content_source": "（可选）知识库路由描述，如 'experience items about work history'"
     },
     {
       "id": "about",
-      "type": "about",
+      "kind": "content",
+      "type": "about-bio",
+      "depth": "full",
       "enabled": true,
-      "priority": 2,
       "data": {
         "bio": "...",
-        "highlights": ["特征1", "特征2"],
-        "stats": [
-          { "label": "年经验", "value": "5+" },
-          { "label": "项目数", "value": "20+" }
-        ]
-      },
-      "sourceEntities": ["knowledge-item-id-1", "knowledge-item-id-2"]
+        "highlights": ["特征1", "特征2"]
+      }
     },
     {
       "id": "projects",
-      "type": "projects",
+      "kind": "showcase",
+      "type": "project-highlights",
+      "depth": "summary",
       "enabled": true,
-      "priority": 3,
       "data": {
         "items": [
           {
@@ -236,34 +227,40 @@ Spec 是上游（知识库）和下游（代码生成器）之间的合同。它
 
   "── 4. 设计系统 ──": "",
 
-  "designSystem": {
-    "theme": "minimalist",
-    "customDescription": "用户的自定义风格描述（如有）",
+  "design": {
+    "preset_theme": "<可选：从 cyberpunk/minimalist/ghibli/glassmorphism/retro/brutalist/cinematic/bold-creative/editorial/nature/gradient-mesh/neo-tokyo 中选一个作为基础，或留空自定义>",
+    "style_keywords": ["<描述风格的关键词，如 glassmorphism, organic, editorial, luxurious>"],
+    "motion_level": "subtle | moderate | rich",
 
     "colors": {
       "primary": "#2563EB",
-      "onPrimary": "#FFFFFF",
       "secondary": "#3B82F6",
       "accent": "#F97316",
       "background": "#FAFAFA",
-      "foreground": "#1E293B",
-      "card": "#FFFFFF",
-      "muted": "#E8ECF0",
-      "border": "#E4E4E7"
+      "text": "#1E293B"
     },
-    "colorStrategy": "由 colorize skill 输出的色彩策略说明",
 
     "typography": {
-      "headingFont": "Inter",
-      "bodyFont": "Inter",
-      "cssImport": "@import url('...')",
-      "scale": "1.25 (major third)"
+      "heading": "Playfair Display",
+      "body": "Inter",
+      "mono": "JetBrains Mono"
     },
+    "border_radius": "12px"
+  },
 
-    "spacing": {
-      "unit": "4px",
-      "scale": [0, 1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64]
-    },
+  "── 兼容旧字段 ──": "",
+
+  "designSystem": {
+    "theme": "<同 design.preset_theme>",
+    "customDescription": "<同 design.style_keywords 拼接>"
+  },
+
+  "── 旧字段，保持兼容 ──": "",
+
+  "spacing（可选，如无则用默认）": {
+    "unit": "4px",
+    "scale": [0, 1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64]
+  },
 
     "components": {
       "borderRadius": "0.75rem",

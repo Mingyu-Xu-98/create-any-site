@@ -8,3 +8,4 @@ sites-data/
 data/
 *.tsbuildinfo
 __pycache__/
+skills/

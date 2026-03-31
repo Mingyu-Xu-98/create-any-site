@@ -13,8 +13,14 @@ export default function Navbar() {
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const navItems = [
+    ...(session?.user ? [
+      { href: "/create", label: t("nav.create") },
+    ] : []),
     { href: "/templates", label: t("nav.templates") },
-    ...(session?.user ? [{ href: "/dashboard", label: t("nav.dashboard") }] : []),
+    ...(session?.user ? [
+      { href: "/knowledge", label: t("nav.knowledge") },
+      { href: "/dashboard", label: t("nav.dashboard") },
+    ] : []),
   ];
 
   const linkClass = (href: string) =>

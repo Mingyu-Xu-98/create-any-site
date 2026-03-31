@@ -3,7 +3,9 @@ export type Locale = "zh" | "en";
 export const translations: Record<string, Record<Locale, string>> = {
   // Navbar
   "nav.templates": { zh: "模板", en: "Templates" },
-  "nav.dashboard": { zh: "工作台", en: "Dashboard" },
+  "nav.create": { zh: "创建", en: "Create" },
+  "nav.knowledge": { zh: "知识库", en: "Knowledge" },
+  "nav.dashboard": { zh: "我的网站", en: "My Sites" },
   "nav.admin": { zh: "管理后台", en: "Admin" },
   "nav.login": { zh: "登录", en: "Login" },
   "nav.logout": { zh: "退出", en: "Logout" },

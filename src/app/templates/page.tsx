@@ -27,10 +27,10 @@ export default function TemplatesPage() {
             </p>
           </div>
           <Link
-            href={session?.user ? `/create?template=${previewTemplate?.id || ""}` : "/login"}
+            href={session?.user ? "/create" : "/login"}
             className="inline-flex items-center justify-center px-5 py-3 rounded-xl bg-accent text-white text-sm font-medium hover:bg-accent/90 transition-all shadow-lg shadow-accent/20"
           >
-            {locale === "zh" ? "基于当前模板开始构建" : "Build From This Template"}
+            {locale === "zh" ? "直接去创建" : "Start Creating"}
           </Link>
         </div>
 

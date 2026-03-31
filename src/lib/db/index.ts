@@ -138,6 +138,31 @@ function initDb() {
       updated_at TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS ingestion_tasks (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      file_name TEXT NOT NULL,
+      file_type TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'queued',
+      progress TEXT,
+      item_count INTEGER,
+      group_id TEXT,
+      error TEXT,
+      created_at TEXT,
+      updated_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS knowledge_relations (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      from_id TEXT NOT NULL REFERENCES knowledge_items(id) ON DELETE CASCADE,
+      to_id TEXT NOT NULL REFERENCES knowledge_items(id) ON DELETE CASCADE,
+      relation_type TEXT NOT NULL,
+      label TEXT,
+      strength INTEGER DEFAULT 1,
+      created_at TEXT
+    );
+
     CREATE TABLE IF NOT EXISTS conversations (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -191,6 +216,9 @@ function initDb() {
     "ALTER TABLE site_builds ADD COLUMN spec_snapshot TEXT",
     "ALTER TABLE site_builds ADD COLUMN prd_snapshot TEXT",
     "ALTER TABLE site_builds ADD COLUMN knowledge_refs_snapshot TEXT",
+    "ALTER TABLE knowledge_items ADD COLUMN use_case TEXT",
+    "ALTER TABLE knowledge_items ADD COLUMN format TEXT",
+    "ALTER TABLE knowledge_groups ADD COLUMN eureka_md TEXT",
   ];
 
   for (const statement of alterStatements) {

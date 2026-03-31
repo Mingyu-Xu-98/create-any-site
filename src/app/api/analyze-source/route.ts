@@ -3,6 +3,8 @@ import JSZip from "jszip";
 import mammoth from "mammoth";
 import type { KnowledgeItem, KnowledgeCategory } from "@/lib/knowledge";
 import { logger } from "@/lib/logger";
+import { saveUserImage, isImageFile } from "@/lib/asset-store";
+import { auth } from "@/lib/auth";
 
 const MINERU_BASE = "https://mineru.net/api/v4";
 
@@ -130,23 +132,47 @@ async function parsePdfWithMinerU(buffer: ArrayBuffer, filename: string): Promis
 
   const zip = await JSZip.loadAsync(zipBuffer);
   const markdownFiles: string[] = [];
+  const extractedImages: string[] = [];
+
+  // Get user ID for image storage
+  const session = await auth();
+  const userId = session?.user?.id;
 
   for (const [filePath, entry] of Object.entries(zip.files)) {
     if (entry.dir) continue;
-    const ext = filePath.split(".").pop()?.toLowerCase();
+    const ext = filePath.split(".").pop()?.toLowerCase() || "";
+    const fileName = filePath.split("/").pop() || filePath;
+
+    // Extract text files
     if (ext === "md" || ext === "txt" || ext === "json") {
       try {
         const content = await entry.async("string");
         if (content.length > 0) {
           markdownFiles.push(`=== ${filePath} ===\n${content}`);
-          logger.info("mineru", `Extracted: ${filePath} (${content.length} chars)`);
+          logger.info("mineru", `Extracted text: ${filePath} (${content.length} chars)`);
         }
       } catch { /* skip */ }
     }
+
+    // Extract images
+    if (isImageFile(fileName) && userId) {
+      try {
+        const imgBuffer = await entry.async("nodebuffer");
+        if (imgBuffer.byteLength > 500) { // Skip tiny/broken images
+          const savedName = await saveUserImage(userId, fileName, imgBuffer, `mineru:${filename}`);
+          extractedImages.push(savedName);
+          logger.info("mineru", `Saved image: ${fileName} → ${savedName} (${(imgBuffer.byteLength / 1024).toFixed(1)}KB)`);
+        }
+      } catch { /* skip broken images */ }
+    }
+  }
+
+  if (extractedImages.length > 0) {
+    logger.info("mineru", `Extracted ${extractedImages.length} images from PDF`);
   }
 
   const result = markdownFiles.join("\n\n");
-  logger.info("mineru", `PDF parse complete. Total content: ${result.length} chars from ${markdownFiles.length} files`);
+  logger.info("mineru", `PDF parse complete. Total content: ${result.length} chars from ${markdownFiles.length} files, ${extractedImages.length} images`);
   return result;
 }
 
@@ -297,7 +323,43 @@ async function fetchUrlContent(url: string, type: "git" | "bilibili" | "youtube"
 }
 
 // ─── Parse Markdown response into KnowledgeItems ───
-const VALID_CATEGORIES = ["factual", "skills", "experience", "relational", "media", "opinion", "meta"];
+const VALID_CATEGORIES = ["factual", "skills", "experience", "relational", "media", "opinion", "meta", "workflow", "framework"];
+
+interface ParsedRelation {
+  fromTitle: string;
+  relationType: string;
+  toTitle: string;
+}
+
+interface ParseResult {
+  items: KnowledgeItem[];
+  relations: ParsedRelation[];
+}
+
+function parseRelationsFromContent(content: string): ParsedRelation[] {
+  const relations: ParsedRelation[] = [];
+  const validTypes = ["used_in", "belongs_to", "requires", "produced", "collaborated_with", "led_to", "part_of"];
+  const lines = content.split("\n");
+  for (const line of lines) {
+    // Match: - FROM -> TYPE -> TO
+    const match = line.match(/^-\s*(.+?)\s*->\s*(\w+)\s*->\s*(.+)$/);
+    if (match) {
+      const [, fromTitle, relationType, toTitle] = match;
+      if (validTypes.includes(relationType)) {
+        relations.push({ fromTitle: fromTitle.trim(), relationType, toTitle: toTitle.trim() });
+      }
+    }
+  }
+  return relations;
+}
+
+function parseMarkdownToItemsAndRelations(markdown: string): ParseResult {
+  const result = parseMarkdownToItems(markdown);
+  // Extract relations from the Knowledge Relations meta item
+  const relationsItem = result.find(item => item.title === "Knowledge Relations");
+  const relations = relationsItem ? parseRelationsFromContent(relationsItem.content) : [];
+  return { items: result, relations };
+}
 
 function parseMarkdownToItems(markdown: string): KnowledgeItem[] {
   const items: KnowledgeItem[] = [];
@@ -322,15 +384,19 @@ function parseMarkdownToItems(markdown: string): KnowledgeItem[] {
       title = catMatch[2].trim();
     }
 
-    // Extract content (everything except header and Tags line)
+    // Extract content, Tags, and UseCase lines
     const contentLines: string[] = [];
     let tags: string[] = [];
+    let useCase = "";
 
     for (let i = 1; i < lines.length; i++) {
       const line = lines[i];
       const tagMatch = line.match(/^Tags:\s*(.+)$/i);
+      const useCaseMatch = line.match(/^UseCase:\s*(.+)$/i);
       if (tagMatch) {
         tags = tagMatch[1].split(",").map((t) => t.trim()).filter(Boolean);
+      } else if (useCaseMatch) {
+        useCase = useCaseMatch[1].trim();
       } else {
         contentLines.push(line);
       }
@@ -347,6 +413,7 @@ function parseMarkdownToItems(markdown: string): KnowledgeItem[] {
       sourceId: "",
       selected: true,
       tags,
+      useCase: useCase || undefined,
     });
   }
 
@@ -372,7 +439,7 @@ async function aiExtractKnowledge(
   sourceContent: string,
   sourceName: string,
   sourceType: string,
-): Promise<KnowledgeItem[]> {
+): Promise<{ items: KnowledgeItem[]; relations: ParsedRelation[] }> {
   const apiKey = process.env.SILICONFLOW_API_KEY;
   if (!apiKey) throw new Error("SILICONFLOW_API_KEY not configured");
 
@@ -380,42 +447,81 @@ async function aiExtractKnowledge(
     contentLength: sourceContent.length,
   });
 
-  const systemPrompt = `You are a knowledge extraction AI. Given content from a ${sourceType} source, analyze it and extract structured knowledge items.
+  const systemPrompt = `You are a knowledge extraction AI using the Ontology method. Given content from a ${sourceType} source, extract ALL knowledge into structured units following MECE principle (Mutually Exclusive, Collectively Exhaustive).
 
-Use these categories:
-- factual: Facts, dates, locations, numbers, events, definitions, names
-- skills: Abilities, tools, programming languages, certifications, techniques
-- experience: Work history, education, projects, achievements, career events
-- relational: Connections between concepts, cause-effect, dependencies, workflows
-- media: Images, videos, links, references to external resources
+## Knowledge Types
+
+### Factual knowledge (things that ARE):
+- factual: Basic facts, definitions, data points, statistics, names, dates, locations, numbers
+- experience: Work history, education, projects, achievements, career events, milestones
+- relational: Connections between concepts, cause-effect, dependencies, collaborations
+- media: Images, videos, links, references to external resources, portfolios
 - opinion: Views, reviews, preferences, recommendations, personal takes
-- meta: Summary, tags, keywords, overall themes, high-level categorization
+- meta: Summary, tags, keywords, overall themes
 
-Output in Markdown format. Each knowledge item is an H2 section with a category tag in square brackets at the start of the title. Include tags as a comma-separated list after "Tags:". Example:
+### Procedural knowledge (things you DO):
+- skills: Abilities, tools, programming languages, certifications, techniques
+- workflow: Step-by-step processes, methodologies, standard operating procedures
+- framework: Analysis frameworks, decision models, evaluation criteria
 
-## [factual] Person Name
-John Smith, born 1990 in Beijing.
-Tags: identity, personal-info
+## Output Format
 
-## [skills] Programming Languages
-Proficient in Python, TypeScript, Go. 5+ years of experience with React.
-Tags: programming, frontend, backend
+Each knowledge unit is an H2 section with category tag, followed by content and metadata:
 
-## [experience] Senior Engineer at TechCorp
-2020-2023. Led a team of 5 engineers building microservices architecture.
-Tags: leadership, microservices
+\`\`\`
+## [category] Title
+Content here (keep original detail, don't over-summarize)
+Tags: tag1, tag2, tag3
+UseCase: When to use this knowledge (one sentence describing the retrieval scenario)
+\`\`\`
 
-## [meta] Overall Summary
-A senior full-stack engineer with strong backend skills and leadership experience.
-Tags: summary, engineering
+## MECE Rules (IMPORTANT):
+- Each unit should be self-contained and understandable on its own
+- Units must NOT overlap — don't repeat the same information in different units
+- Together they must cover ALL information in the source
+- Structured data (tables, lists, JSON arrays) must stay as ONE unit — never split rows of the same table
+- When unsure, prefer fewer larger units over many tiny ones
+- Keep original detail and accuracy
+- Aim for 10-30 units depending on content richness
+- Always include at least one "meta" unit summarizing the overall source
 
-Rules:
-- Extract ALL meaningful information, don't skip anything important
-- Each item should be self-contained and understandable on its own
-- Keep original detail and accuracy, don't summarize too aggressively
-- For media items, include the URLs/references
-- Include at least one "meta" item that summarizes the overall source
-- Aim for 10-30 items depending on content richness`;
+## UseCase examples:
+- "When user asks about work experience at company X"
+- "When building the projects section of a portfolio"
+- "When the chatbot needs to answer questions about technical skills"
+- "When generating the hero section headline and tagline"
+
+## At the END, add TWO special sections:
+
+### 1. Relations section — describe connections between extracted units:
+
+## [meta] Knowledge Relations
+Format each relation as: \`FROM_TITLE -> RELATION_TYPE -> TO_TITLE\`
+Valid relation types: used_in, belongs_to, requires, produced, collaborated_with, led_to, part_of
+
+Example:
+- Python -> used_in -> Data Pipeline Project
+- Senior Engineer Role -> belongs_to -> TechCorp
+- React -> requires -> JavaScript
+- ML Research -> produced -> Published Paper on NLP
+- Internship at StartupX -> led_to -> Full-time at TechCorp
+
+List ALL meaningful connections between the extracted units above.
+Tags: relations, graph
+
+### 2. Routing section — map units to website sections:
+
+## [meta] Knowledge Routing Summary
+A bullet list mapping each extracted unit to its best website section:
+- hero: [list unit titles relevant to hero/headline]
+- about: [list unit titles relevant to about/bio]
+- projects: [list unit titles relevant to projects]
+- skills: [list unit titles relevant to skills]
+- timeline: [list unit titles relevant to work history]
+- education: [list unit titles relevant to education]
+- contact: [list unit titles relevant to contact info]
+- chatbot: [list unit titles that enrich chatbot knowledge]
+Tags: routing, mapping`;
 
   const userMessage = `Source: ${sourceName}\nType: ${sourceType}\n\nContent:\n${sourceContent.slice(0, 60000)}`;
 
@@ -454,17 +560,18 @@ Rules:
     responseLength: rawContent.length,
   });
 
-  // Parse Markdown into knowledge items
-  const items = parseMarkdownToItems(rawContent);
+  // Parse Markdown into knowledge items and relations
+  const { items, relations } = parseMarkdownToItemsAndRelations(rawContent);
 
-  logger.info("ai", `Extracted ${items.length} knowledge items`, {
+  logger.info("ai", `Extracted ${items.length} knowledge items, ${relations.length} relations`, {
     categories: items.reduce<Record<string, number>>((acc, i) => {
       acc[i.category] = (acc[i.category] || 0) + 1;
       return acc;
     }, {}),
+    relations: relations.length,
   });
 
-  return items;
+  return { items, relations };
 }
 
 // ─── DOCX extraction ───
@@ -510,6 +617,25 @@ async function parseZipPerFile(buffer: ArrayBuffer): Promise<ZipFileResult[]> {
   const results: ZipFileResult[] = [];
   const supportedExts = ["pdf", "docx", "doc", "txt", "md", "json", "csv", "yaml", "yml", "html"];
 
+  // Extract images from ZIP
+  const session = await auth();
+  const userId = session?.user?.id;
+  let imageCount = 0;
+  for (const [filePath, entry] of Object.entries(zip.files)) {
+    if (entry.dir) continue;
+    const fileName = filePath.split("/").pop() || filePath;
+    if (isImageFile(fileName) && userId) {
+      try {
+        const imgBuffer = await entry.async("nodebuffer");
+        if (imgBuffer.byteLength > 500) {
+          await saveUserImage(userId, fileName, imgBuffer, "zip-upload");
+          imageCount++;
+        }
+      } catch { /* skip */ }
+    }
+  }
+  if (imageCount > 0) logger.info("zip-per-file", `Extracted ${imageCount} images from ZIP`);
+
   for (const [filePath, entry] of Object.entries(zip.files)) {
     if (entry.dir) continue;
     const fileName = filePath.split("/").pop() || filePath;
@@ -537,7 +663,7 @@ async function parseZipPerFile(buffer: ArrayBuffer): Promise<ZipFileResult[]> {
         continue;
       }
 
-      const items = await aiExtractKnowledge(content, fileName, ext);
+      const { items, relations: extractedRelations } = await aiExtractKnowledge(content, fileName, ext);
       results.push({ name: fileName, type: ext, items });
       logger.info("zip-per-file", `${fileName}: ${items.length} items extracted`);
     } catch (err) {
@@ -566,6 +692,25 @@ export async function POST(req: NextRequest) {
 
       logger.info("handler", `[${requestId}] File upload: ${sourceName} (${(buffer.byteLength / 1024).toFixed(1)}KB), type: ${fileType}`);
 
+      // Direct image upload — save to asset store, return as media knowledge item
+      if (isImageFile(sourceName)) {
+        const imgSession = await auth();
+        if (imgSession?.user?.id) {
+          const savedName = await saveUserImage(imgSession.user.id, sourceName, Buffer.from(buffer), "direct-upload");
+          logger.info("handler", `[${requestId}] Image saved: ${savedName}`);
+          const item: KnowledgeItem = {
+            id: crypto.randomUUID(),
+            category: "media",
+            title: sourceName,
+            content: `Image: /images/${savedName}`,
+            sourceId: "",
+            selected: true,
+            tags: ["image", sourceName.split(".").pop() || ""],
+          };
+          return NextResponse.json({ items: [item], images: [savedName], sourceType: "image" });
+        }
+      }
+
       if (fileType === "zip") {
         // ZIP: parse each file individually
         const results = await parseZipPerFile(buffer);
@@ -589,10 +734,10 @@ export async function POST(req: NextRequest) {
         }
 
         logger.info("handler", `[${requestId}] Content: ${content.length} chars, sending to AI...`);
-        const items = await aiExtractKnowledge(content, sourceName, fileType);
+        const { items, relations: extractedRelations } = await aiExtractKnowledge(content, sourceName, fileType);
         logger.info("handler", `[${requestId}] Complete. ${items.length} items from "${sourceName}"`);
 
-        return NextResponse.json({ items, sourceType: fileType });
+        return NextResponse.json({ items, relations: extractedRelations, sourceType: fileType });
       } else {
         return NextResponse.json({ error: `Unsupported file type: ${fileType}` }, { status: 400 });
       }
@@ -606,10 +751,10 @@ export async function POST(req: NextRequest) {
       const content = await fetchUrlContent(body.url, body.type);
 
       logger.info("handler", `[${requestId}] Content: ${content.length} chars, sending to AI...`);
-      const items = await aiExtractKnowledge(content, body.url, body.type);
+      const { items, relations: extractedRelations } = await aiExtractKnowledge(content, body.url, body.type);
       logger.info("handler", `[${requestId}] Complete. ${items.length} items`);
 
-      return NextResponse.json({ items, sourceType: body.type });
+      return NextResponse.json({ items, relations: extractedRelations, sourceType: body.type });
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";

@@ -2,9 +2,12 @@
 
 import Link from "next/link";
 import { useSession } from "next-auth/react";
+import dynamic from "next/dynamic";
 import Navbar from "@/components/Navbar";
 import { useLocale } from "@/components/LocaleProvider";
 import { TEMPLATE_CASES } from "@/lib/template-showcase";
+
+const HeroAnimation = dynamic(() => import("@/components/HeroAnimation"), { ssr: false });
 
 export default function LandingPage() {
   const { data: session } = useSession();
@@ -33,14 +36,14 @@ export default function LandingPage() {
   ];
 
   const siteTypes = [
-    { label: "Portfolio", icon: "✦" },
-    { label: "Brand Site", icon: "◉" },
-    { label: "Blog", icon: "✎" },
-    { label: "Landing Page", icon: "▲" },
-    { label: "SaaS", icon: "▣" },
-    { label: "E-commerce", icon: "◌" },
-    { label: "Event Page", icon: "✸" },
-    { label: "Docs Site", icon: "☰" },
+    { label: locale === "zh" ? "个人作品集" : "Portfolio", icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg> },
+    { label: locale === "zh" ? "品牌官网" : "Brand Site", icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg> },
+    { label: locale === "zh" ? "博客" : "Blog", icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg> },
+    { label: locale === "zh" ? "落地页" : "Landing Page", icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg> },
+    { label: "SaaS", icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z" /></svg> },
+    { label: locale === "zh" ? "电商" : "E-commerce", icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 100 4 2 2 0 000-4z" /></svg> },
+    { label: locale === "zh" ? "活动页" : "Event Page", icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg> },
+    { label: locale === "zh" ? "文档站" : "Docs Site", icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg> },
   ];
 
   return (
@@ -49,13 +52,13 @@ export default function LandingPage() {
       <Navbar />
 
       <section className="relative z-10 pt-28 pb-20 px-6">
-        <div className="max-w-6xl mx-auto grid lg:grid-cols-[1.1fr_0.9fr] gap-12 items-center">
+        <div className="max-w-6xl mx-auto grid lg:grid-cols-[1fr_1fr] gap-16 items-center">
           <div>
             <div className="inline-flex items-center gap-2 mb-6 px-4 py-1.5 rounded-full bg-white/75 border border-accent/15 text-xs text-accent font-medium shadow-sm">
               <span className="w-2 h-2 rounded-full bg-accent animate-pulse" />
               {t("landing.badge")}
             </div>
-            <h1 className="text-5xl md:text-6xl lg:text-7xl font-bold leading-[1.02] tracking-tight text-gray-900">
+            <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold leading-[1.15] tracking-tight text-gray-900">
               {t("landing.title1")}
               <span className="bg-gradient-to-r from-violet-600 via-fuchsia-500 to-cyan-500 bg-clip-text text-transparent"> {t("landing.titleHighlight")} </span>
               {t("landing.title3")}
@@ -72,38 +75,7 @@ export default function LandingPage() {
           </div>
 
           <div className="relative">
-            <div className="absolute inset-0 bg-gradient-to-br from-violet-200/40 via-cyan-100/40 to-transparent blur-3xl" />
-            <div className="relative rounded-[28px] border border-white/60 bg-white/80 backdrop-blur-xl shadow-[0_30px_80px_rgba(99,102,241,0.15)] p-5">
-              <div className="grid grid-cols-2 gap-4">
-                {featuredTemplates.map((template, index) => (
-                  <div key={template.id} className={`${index === 0 ? "col-span-2" : ""} rounded-2xl border border-gray-200/80 bg-white p-4 shadow-sm`}>
-                    <div className="flex items-center justify-between mb-3">
-                      <span className="text-[10px] font-medium text-gray-500 uppercase tracking-[0.18em]">{locale === "zh" ? template.categoryCn : template.category}</span>
-                      <div className="flex gap-1.5">
-                        {template.palette.map((color) => (
-                          <span key={color} className="w-2.5 h-2.5 rounded-full border border-white shadow-sm" style={{ backgroundColor: color }} />
-                        ))}
-                      </div>
-                    </div>
-                    <div className="relative rounded-xl overflow-hidden border border-gray-200 h-40 bg-white">
-                      <div className="absolute inset-0 origin-top-left scale-[0.34] w-[294%] h-[294%] pointer-events-none">
-                        <iframe
-                          src={template.previewUrl}
-                          className="w-full h-full border-0 bg-white"
-                          title={`${template.id}-landing-thumb`}
-                          loading="lazy"
-                        />
-                      </div>
-                      <div className="absolute inset-x-0 bottom-0 p-3 bg-gradient-to-t from-black/70 via-black/30 to-transparent text-white">
-                        <p className="text-[11px] uppercase tracking-[0.2em] text-white/65">{locale === "zh" ? template.clientCn : template.client}</p>
-                        <h3 className="mt-1 text-lg font-semibold">{locale === "zh" ? template.nameCn : template.name}</h3>
-                        <p className="mt-1 text-xs text-white/80 line-clamp-2">{locale === "zh" ? template.taglineCn : template.tagline}</p>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
+            <HeroAnimation />
           </div>
         </div>
       </section>
@@ -111,7 +83,7 @@ export default function LandingPage() {
       <section className="relative z-10 py-16 px-6">
         <div className="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-6">
           {featureCards.map((feature) => (
-            <div key={feature.title} className="group relative overflow-hidden rounded-3xl border border-white/70 bg-white/80 p-6 shadow-[0_12px_40px_rgba(15,23,42,0.06)] transition-all duration-300 hover:-translate-y-1 hover:scale-[1.01] hover:shadow-[0_24px_60px_rgba(79,70,229,0.14)]">
+            <div key={feature.title} className="group relative overflow-hidden rounded-2xl border border-gray-200 bg-white p-6 shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-lg hover:border-accent/20">
               <div className={`absolute inset-0 bg-gradient-to-br ${feature.accent} opacity-80`} />
               <div className="relative">
                 <div className="w-12 h-12 rounded-2xl bg-white/90 shadow-sm flex items-center justify-center mb-4">
@@ -139,7 +111,7 @@ export default function LandingPage() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {featuredTemplates.map((template) => (
-              <div key={template.id} className="rounded-3xl border border-gray-200/80 bg-white p-5 shadow-sm">
+              <div key={template.id} className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm hover:shadow-md transition-all">
                 <div className="relative rounded-2xl h-56 overflow-hidden border border-gray-200 bg-white">
                   <div className="absolute inset-0 origin-top-left scale-[0.42] w-[238%] h-[238%] pointer-events-none">
                     <iframe
@@ -187,9 +159,9 @@ export default function LandingPage() {
           <p className="text-gray-600 mb-12 text-center">{t("landing.siteTypesDesc")}</p>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             {siteTypes.map((type) => (
-              <div key={type.label} className="rounded-2xl border border-white/70 bg-white/80 px-4 py-5 shadow-sm hover:shadow-md transition-all">
-                <div className="text-2xl">{type.icon}</div>
-                <div className="mt-4 text-sm font-medium text-gray-800">{type.label}</div>
+              <div key={type.label} className="rounded-xl border border-gray-200 bg-white px-5 py-5 shadow-sm hover:shadow-md hover:border-accent/20 transition-all group">
+                <div className="text-accent">{type.icon}</div>
+                <div className="mt-3 text-sm font-medium text-gray-800 group-hover:text-accent transition-colors">{type.label}</div>
               </div>
             ))}
           </div>
@@ -197,7 +169,7 @@ export default function LandingPage() {
       </section>
 
       <section className="relative z-10 py-20 px-6">
-        <div className="max-w-3xl mx-auto rounded-[32px] border border-white/70 bg-white/80 backdrop-blur-xl p-10 text-center shadow-[0_20px_60px_rgba(15,23,42,0.08)]">
+        <div className="max-w-3xl mx-auto rounded-2xl border border-gray-200 bg-white p-10 text-center shadow-md">
           <h2 className="text-3xl font-bold text-gray-900 mb-4">{t("landing.readyTitle")}</h2>
           <p className="text-gray-600 mb-8">{t("landing.readyDesc")}</p>
           <Link href={session?.user ? "/create" : "/login"} className="inline-block px-8 py-3 rounded-xl bg-accent text-white font-medium hover:bg-accent/90 transition-all shadow-lg shadow-accent/20">
@@ -206,9 +178,10 @@ export default function LandingPage() {
         </div>
       </section>
 
-      <footer className="relative z-10 border-t border-gray-100 py-8 px-6">
-        <div className="max-w-6xl mx-auto flex items-center justify-between text-xs text-gray-400">
-          <span>CreateAnySite</span><span>Built with AI</span>
+      <footer className="relative z-10 border-t border-gray-200 py-10 px-6">
+        <div className="max-w-6xl mx-auto flex items-center justify-between text-sm text-gray-400">
+          <span className="font-medium text-gray-500">CreateAnySite</span>
+          <span>{locale === "zh" ? "AI 驱动的网站构建平台" : "AI-Powered Website Builder"}</span>
         </div>
       </footer>
     </div>

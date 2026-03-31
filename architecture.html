@@ -1,0 +1,995 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Create Any Portfolio — Architecture</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Outfit:wght@300;400;600;800&display=swap');
+
+:root {
+  --bg: #08080c;
+  --surface: #0e0e14;
+  --surface-2: #16161f;
+  --border: rgba(100, 120, 255, 0.08);
+  --border-glow: rgba(100, 120, 255, 0.2);
+  --text: #e8e8f0;
+  --text-muted: #6a6a80;
+  --accent: #6366f1;
+  --accent-glow: rgba(99, 102, 241, 0.3);
+  --cyan: #22d3ee;
+  --cyan-glow: rgba(34, 211, 238, 0.2);
+  --green: #34d399;
+  --green-glow: rgba(52, 211, 153, 0.2);
+  --orange: #f59e0b;
+  --orange-glow: rgba(245, 158, 11, 0.2);
+  --pink: #ec4899;
+  --pink-glow: rgba(236, 72, 153, 0.2);
+  --red: #ef4444;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Outfit', sans-serif;
+  overflow-x: hidden;
+  min-height: 100vh;
+}
+
+/* Grid background */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background:
+    linear-gradient(rgba(99, 102, 241, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(99, 102, 241, 0.03) 1px, transparent 1px);
+  background-size: 60px 60px;
+  z-index: 0;
+}
+
+.container {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 40px 24px 80px;
+  position: relative;
+  z-index: 1;
+}
+
+/* Header */
+.header {
+  text-align: center;
+  margin-bottom: 64px;
+  position: relative;
+}
+
+.header::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 400px;
+  height: 400px;
+  background: radial-gradient(circle, var(--accent-glow), transparent 70%);
+  z-index: -1;
+  opacity: 0.4;
+}
+
+.header h1 {
+  font-size: clamp(32px, 5vw, 56px);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  background: linear-gradient(135deg, #fff 0%, var(--accent) 50%, var(--cyan) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  margin-bottom: 12px;
+}
+
+.header .subtitle {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 14px;
+  color: var(--text-muted);
+  letter-spacing: 0.05em;
+}
+
+.header .version {
+  display: inline-block;
+  margin-top: 12px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border-glow);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--accent);
+  background: rgba(99, 102, 241, 0.05);
+}
+
+/* Section headers */
+.section-label {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 24px;
+  margin-top: 56px;
+}
+
+.section-label .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  animation: pulse-dot 2s ease infinite;
+}
+
+.section-label span {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--text-muted);
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 0.4; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.3); }
+}
+
+/* Flow arrow between sections */
+.flow-arrow {
+  display: flex;
+  justify-content: center;
+  margin: 32px 0;
+  position: relative;
+}
+
+.flow-arrow::before {
+  content: '';
+  width: 2px;
+  height: 48px;
+  background: linear-gradient(to bottom, var(--accent), transparent);
+  animation: flow-pulse 2s ease infinite;
+}
+
+.flow-arrow::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  width: 10px;
+  height: 10px;
+  border-right: 2px solid var(--accent);
+  border-bottom: 2px solid var(--accent);
+  transform: rotate(45deg) translateX(-3px);
+}
+
+@keyframes flow-pulse {
+  0% { opacity: 0.3; }
+  50% { opacity: 1; }
+  100% { opacity: 0.3; }
+}
+
+/* Cards */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 24px;
+  position: relative;
+  overflow: hidden;
+  transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.card:hover {
+  border-color: var(--border-glow);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3), 0 0 0 1px var(--border-glow);
+}
+
+.card-title {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.card-desc {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
+.card .icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+/* Tag */
+.tag {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+
+/* ===== Layer 1: User Entry ===== */
+.user-layer {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+}
+
+.user-layer .card { border-left: 3px solid var(--cyan); }
+.user-layer .icon { background: var(--cyan-glow); color: var(--cyan); }
+
+/* ===== Layer 2: Knowledge Intake ===== */
+.knowledge-layer {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.knowledge-layer .card {
+  padding: 16px;
+  border-left: 3px solid var(--orange);
+  text-align: center;
+}
+
+.knowledge-layer .card-title { justify-content: center; font-size: 14px; }
+.knowledge-layer .icon { background: var(--orange-glow); color: var(--orange); margin: 0 auto 8px; }
+
+/* ===== Layer 3: AI Agent Pipeline ===== */
+.agent-pipeline {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+  position: relative;
+}
+
+.agent-pipeline::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 15%;
+  right: 15%;
+  height: 2px;
+  background: linear-gradient(90deg, var(--accent), var(--pink), var(--green));
+  opacity: 0.15;
+  z-index: 0;
+}
+
+.agent-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 28px 24px;
+  position: relative;
+  z-index: 1;
+  transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.agent-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+}
+
+.agent-card.concept { border-top: 3px solid var(--accent); }
+.agent-card.concept:hover { box-shadow: 0 12px 40px rgba(0,0,0,0.4), 0 0 24px var(--accent-glow); }
+.agent-card.planning { border-top: 3px solid var(--pink); }
+.agent-card.planning:hover { box-shadow: 0 12px 40px rgba(0,0,0,0.4), 0 0 24px var(--pink-glow); }
+.agent-card.execution { border-top: 3px solid var(--green); }
+.agent-card.execution:hover { box-shadow: 0 12px 40px rgba(0,0,0,0.4), 0 0 24px var(--green-glow); }
+
+.agent-number {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  margin-bottom: 12px;
+}
+
+.agent-card h3 {
+  font-size: 20px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.agent-card p {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.6;
+  margin-bottom: 16px;
+}
+
+.agent-outputs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.agent-outputs .tag {
+  background: rgba(255,255,255,0.04);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+
+/* ===== Layer 4: Component Library ===== */
+.component-lib {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 32px;
+  position: relative;
+  overflow: hidden;
+}
+
+.component-lib::before {
+  content: '';
+  position: absolute;
+  top: -100px;
+  right: -100px;
+  width: 300px;
+  height: 300px;
+  background: radial-gradient(circle, var(--green-glow), transparent 70%);
+  opacity: 0.3;
+}
+
+.component-lib h3 {
+  font-size: 20px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.component-lib .meta {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  color: var(--green);
+  margin-bottom: 20px;
+}
+
+.comp-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.comp-item {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px;
+  transition: all 0.3s ease;
+  cursor: default;
+}
+
+.comp-item:hover {
+  border-color: var(--green);
+  background: rgba(52, 211, 153, 0.03);
+}
+
+.comp-item .comp-name {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.comp-item .comp-count {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--green);
+}
+
+.comp-item .comp-label {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* Extensions row */
+.ext-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.ext-item {
+  padding: 10px;
+  border-radius: 8px;
+  background: rgba(236, 72, 153, 0.04);
+  border: 1px solid rgba(236, 72, 153, 0.1);
+  text-align: center;
+  font-size: 11px;
+  color: var(--pink);
+  font-weight: 500;
+  transition: all 0.3s ease;
+}
+
+.ext-item:hover {
+  background: rgba(236, 72, 153, 0.08);
+  border-color: rgba(236, 72, 153, 0.3);
+}
+
+/* ===== Layer 5: Build Pipeline ===== */
+.build-pipeline {
+  display: flex;
+  gap: 0;
+  align-items: stretch;
+  position: relative;
+}
+
+.build-step {
+  flex: 1;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  padding: 20px 16px;
+  position: relative;
+  transition: all 0.3s ease;
+}
+
+.build-step:first-child { border-radius: 16px 0 0 16px; }
+.build-step:last-child { border-radius: 0 16px 16px 0; }
+.build-step:not(:last-child)::after {
+  content: '\203A';
+  position: absolute;
+  right: -8px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 20px;
+  color: var(--accent);
+  z-index: 2;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.build-step:hover { background: var(--surface-2); }
+
+.build-step .step-num {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: var(--accent);
+  margin-bottom: 8px;
+}
+
+.build-step .step-title {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.build-step .step-detail {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* ===== Layer 6: Output ===== */
+.output-layer {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.output-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 24px;
+  transition: all 0.3s ease;
+}
+
+.output-card:hover {
+  border-color: var(--cyan);
+  box-shadow: 0 0 24px var(--cyan-glow);
+}
+
+.output-card h4 {
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.output-card p {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.output-card code {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--cyan);
+  background: rgba(34, 211, 238, 0.06);
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+
+/* ===== Layer 7: External Services ===== */
+.services-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+
+.service-card {
+  background: var(--surface);
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  transition: all 0.3s ease;
+}
+
+.service-card:hover {
+  border-style: solid;
+  border-color: var(--border-glow);
+}
+
+.service-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.service-card .service-name {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.service-card .service-role {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* ===== Database ===== */
+.db-tables {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.db-table {
+  padding: 6px 12px;
+  border-radius: 6px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--text-muted);
+  transition: all 0.2s ease;
+}
+
+.db-table:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* ===== Stats banner ===== */
+.stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-top: 56px;
+  padding-top: 40px;
+  border-top: 1px solid var(--border);
+}
+
+.stat {
+  text-align: center;
+}
+
+.stat .stat-value {
+  font-size: 36px;
+  font-weight: 800;
+  background: linear-gradient(135deg, var(--text), var(--accent));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.stat .stat-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .agent-pipeline { grid-template-columns: 1fr; }
+  .agent-pipeline::before { display: none; }
+  .build-pipeline { flex-direction: column; }
+  .build-step { border-radius: 12px !important; }
+  .build-step:not(:last-child)::after { display: none; }
+  .output-layer { grid-template-columns: 1fr; }
+  .stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* Animate in */
+.fade-in {
+  opacity: 0;
+  transform: translateY(20px);
+  animation: fadeSlideIn 0.6s ease forwards;
+}
+
+@keyframes fadeSlideIn {
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.delay-1 { animation-delay: 0.1s; }
+.delay-2 { animation-delay: 0.2s; }
+.delay-3 { animation-delay: 0.3s; }
+.delay-4 { animation-delay: 0.4s; }
+.delay-5 { animation-delay: 0.5s; }
+.delay-6 { animation-delay: 0.6s; }
+.delay-7 { animation-delay: 0.7s; }
+</style>
+</head>
+<body>
+
+<div class="container">
+
+  <!-- Header -->
+  <div class="header fade-in">
+    <h1>Create Any Portfolio</h1>
+    <div class="subtitle">// SYSTEM ARCHITECTURE — TECHNICAL & BUSINESS FLOW</div>
+    <div class="version">v2.0 &mdash; Component Library Architecture</div>
+  </div>
+
+  <!-- Layer 1: User Entry -->
+  <div class="section-label fade-in delay-1">
+    <div class="dot" style="background: var(--cyan);"></div>
+    <span>Layer 01 &mdash; User Entry Points</span>
+  </div>
+
+  <div class="user-layer fade-in delay-1">
+    <div class="card">
+      <div class="card-title"><div class="icon">🌐</div> Web UI</div>
+      <div class="card-desc">
+        <code>/create</code> 多轮 AI 对话向导<br>
+        <code>/dashboard</code> 站点管理<br>
+        <code>/templates</code> 模板浏览
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title"><div class="icon">🔑</div> Authentication</div>
+      <div class="card-desc">
+        NextAuth + bcrypt<br>
+        Session-based access control<br>
+        <code>/login</code> <code>/register</code>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title"><div class="icon">📡</div> API Layer</div>
+      <div class="card-desc">
+        18 个 REST API 路由<br>
+        <code>/api/generate</code> 构建触发<br>
+        <code>/api/chat-build</code> AI 对话<br>
+        <code>/api/modify</code> 增量更新
+      </div>
+    </div>
+  </div>
+
+  <div class="flow-arrow"></div>
+
+  <!-- Layer 2: Knowledge Intake -->
+  <div class="section-label fade-in delay-2">
+    <div class="dot" style="background: var(--orange);"></div>
+    <span>Layer 02 &mdash; Knowledge Intake (Multi-Source)</span>
+  </div>
+
+  <div class="knowledge-layer fade-in delay-2">
+    <div class="card">
+      <div class="icon" style="background:var(--orange-glow);color:var(--orange);">📄</div>
+      <div class="card-title">PDF</div>
+      <div class="card-desc">MinerU API 解析</div>
+    </div>
+    <div class="card">
+      <div class="icon" style="background:var(--orange-glow);color:var(--orange);">📝</div>
+      <div class="card-title">DOCX</div>
+      <div class="card-desc">Mammoth 提取</div>
+    </div>
+    <div class="card">
+      <div class="icon" style="background:var(--orange-glow);color:var(--orange);">📦</div>
+      <div class="card-title">ZIP</div>
+      <div class="card-desc">工作区导入</div>
+    </div>
+    <div class="card">
+      <div class="icon" style="background:var(--orange-glow);color:var(--orange);">🔗</div>
+      <div class="card-title">Git/URL</div>
+      <div class="card-desc">仓库 & 链接</div>
+    </div>
+    <div class="card">
+      <div class="icon" style="background:var(--orange-glow);color:var(--orange);">📺</div>
+      <div class="card-title">Video</div>
+      <div class="card-desc">Bilibili / YouTube</div>
+    </div>
+    <div class="card">
+      <div class="icon" style="background:var(--orange-glow);color:var(--orange);">✍️</div>
+      <div class="card-title">Manual</div>
+      <div class="card-desc">手动输入</div>
+    </div>
+  </div>
+
+  <div class="flow-arrow"></div>
+
+  <!-- Layer 3: AI Agent Pipeline -->
+  <div class="section-label fade-in delay-3">
+    <div class="dot" style="background: var(--accent);"></div>
+    <span>Layer 03 &mdash; AI Agent Pipeline (Three-Phase)</span>
+  </div>
+
+  <div class="agent-pipeline fade-in delay-3">
+    <div class="agent-card concept">
+      <div class="agent-number" style="color: var(--accent);">PHASE 01</div>
+      <h3>构思智能体</h3>
+      <p>理解用户需求，明确网站目标，选择风格方向。多轮对话澄清意图。</p>
+      <div class="agent-outputs">
+        <span class="tag">siteType</span>
+        <span class="tag">theme</span>
+        <span class="tag">layout</span>
+        <span class="tag">skills activation</span>
+      </div>
+    </div>
+    <div class="agent-card planning">
+      <div class="agent-number" style="color: var(--pink);">PHASE 02</div>
+      <h3>计划智能体</h3>
+      <p>生成 PRD 产品需求文档，编译 SiteSpec 结构化规范，设计信息架构。</p>
+      <div class="agent-outputs">
+        <span class="tag">PRD.md</span>
+        <span class="tag">SiteSpec JSON</span>
+        <span class="tag">CompositionPlan</span>
+      </div>
+    </div>
+    <div class="agent-card execution">
+      <div class="agent-number" style="color: var(--green);">PHASE 03</div>
+      <h3>执行智能体</h3>
+      <p>调用组件库组装页面，生成完整代码，触发构建流水线。</p>
+      <div class="agent-outputs">
+        <span class="tag">generateFileMap()</span>
+        <span class="tag">assemblePage()</span>
+        <span class="tag">trigger build</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="flow-arrow"></div>
+
+  <!-- Layer 4: Component Library -->
+  <div class="section-label fade-in delay-4">
+    <div class="dot" style="background: var(--green);"></div>
+    <span>Layer 04 &mdash; Component Library (Composable)</span>
+  </div>
+
+  <div class="component-lib fade-in delay-4">
+    <h3>Section Variant Registry</h3>
+    <div class="meta">62 variants &times; 4 layouts = ~15,000,000 combinations</div>
+
+    <div class="comp-grid">
+      <div class="comp-item">
+        <div class="comp-name">Hero</div>
+        <div class="comp-count">9</div>
+        <div class="comp-label">variants</div>
+      </div>
+      <div class="comp-item">
+        <div class="comp-name">Projects</div>
+        <div class="comp-count">13</div>
+        <div class="comp-label">variants</div>
+      </div>
+      <div class="comp-item">
+        <div class="comp-name">Skills</div>
+        <div class="comp-count">7</div>
+        <div class="comp-label">variants</div>
+      </div>
+      <div class="comp-item">
+        <div class="comp-name">Timeline</div>
+        <div class="comp-count">6</div>
+        <div class="comp-label">variants</div>
+      </div>
+      <div class="comp-item">
+        <div class="comp-name">Education</div>
+        <div class="comp-count">6</div>
+        <div class="comp-label">variants</div>
+      </div>
+      <div class="comp-item">
+        <div class="comp-name">Contact</div>
+        <div class="comp-count">5</div>
+        <div class="comp-label">variants</div>
+      </div>
+      <div class="comp-item">
+        <div class="comp-name">Nav</div>
+        <div class="comp-count">8</div>
+        <div class="comp-label">variants</div>
+      </div>
+      <div class="comp-item">
+        <div class="comp-name">Footer</div>
+        <div class="comp-count">4</div>
+        <div class="comp-label">variants</div>
+      </div>
+      <div class="comp-item">
+        <div class="comp-name">Layouts</div>
+        <div class="comp-count">4</div>
+        <div class="comp-label">wrappers</div>
+      </div>
+    </div>
+
+    <div class="ext-grid">
+      <div class="ext-item">SVG Animation</div>
+      <div class="ext-item">Video BG</div>
+      <div class="ext-item">Video Embed</div>
+      <div class="ext-item">Three.js 3D</div>
+      <div class="ext-item">Canvas 2D</div>
+      <div class="ext-item">Digital Human</div>
+    </div>
+  </div>
+
+  <div class="flow-arrow"></div>
+
+  <!-- Layer 5: Build Pipeline -->
+  <div class="section-label fade-in delay-5">
+    <div class="dot" style="background: var(--accent);"></div>
+    <span>Layer 05 &mdash; Build Pipeline</span>
+  </div>
+
+  <div class="build-pipeline fade-in delay-5">
+    <div class="build-step">
+      <div class="step-num">01</div>
+      <div class="step-title">Code Generation</div>
+      <div class="step-detail">generateFileMap()<br>~20 files output</div>
+    </div>
+    <div class="build-step">
+      <div class="step-num">02</div>
+      <div class="step-title">Write to Disk</div>
+      <div class="step-detail">sites-data/{siteId}/<br>src/ + config files</div>
+    </div>
+    <div class="build-step">
+      <div class="step-num">03</div>
+      <div class="step-title">Install Deps</div>
+      <div class="step-detail">npm install<br>Next.js 16 + React 19</div>
+    </div>
+    <div class="build-step">
+      <div class="step-num">04</div>
+      <div class="step-title">Static Build</div>
+      <div class="step-detail">next build<br>output: "export"</div>
+    </div>
+    <div class="build-step">
+      <div class="step-num">05</div>
+      <div class="step-title">Verify</div>
+      <div class="step-detail">check index.html<br>asset integrity</div>
+    </div>
+    <div class="build-step">
+      <div class="step-num">06</div>
+      <div class="step-title">Publish</div>
+      <div class="step-detail">sync to<br>PREVIEW_PUBLISH_DIR</div>
+    </div>
+  </div>
+
+  <div class="flow-arrow"></div>
+
+  <!-- Layer 6: Output -->
+  <div class="section-label fade-in delay-6">
+    <div class="dot" style="background: var(--cyan);"></div>
+    <span>Layer 06 &mdash; Output & Delivery</span>
+  </div>
+
+  <div class="output-layer fade-in delay-6">
+    <div class="output-card">
+      <h4>📋 Draft Preview</h4>
+      <p>
+        每次构建自动部署到草稿目录<br>
+        URL: <code>/drafts/{siteId}</code><br>
+        用户可在线预览、迭代修改
+      </p>
+    </div>
+    <div class="output-card">
+      <h4>🚀 Published Site</h4>
+      <p>
+        用户点击发布后复制到正式目录<br>
+        URL: <code>/{siteId}</code><br>
+        Nginx 静态托管，CDN 就绪
+      </p>
+    </div>
+  </div>
+
+  <div class="flow-arrow"></div>
+
+  <!-- Layer 7: External Services + DB -->
+  <div class="section-label fade-in delay-7">
+    <div class="dot" style="background: var(--pink);"></div>
+    <span>Layer 07 &mdash; External Services & Storage</span>
+  </div>
+
+  <div class="services-grid fade-in delay-7">
+    <div class="service-card">
+      <div class="service-icon" style="background: rgba(99,102,241,0.1); color: var(--accent);">🧠</div>
+      <div>
+        <div class="service-name">SiliconFlow</div>
+        <div class="service-role">Primary LLM / Image Gen</div>
+      </div>
+    </div>
+    <div class="service-card">
+      <div class="service-icon" style="background: rgba(236,72,153,0.1); color: var(--pink);">🔀</div>
+      <div>
+        <div class="service-name">OpenRouter</div>
+        <div class="service-role">LLM Fallback Gateway</div>
+      </div>
+    </div>
+    <div class="service-card">
+      <div class="service-icon" style="background: rgba(245,158,11,0.1); color: var(--orange);">📑</div>
+      <div>
+        <div class="service-name">MinerU</div>
+        <div class="service-role">Enterprise PDF Parsing</div>
+      </div>
+    </div>
+    <div class="service-card">
+      <div class="service-icon" style="background: rgba(52,211,153,0.1); color: var(--green);">🗄️</div>
+      <div>
+        <div class="service-name">SQLite + Drizzle</div>
+        <div class="service-role">Local Database ORM</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card fade-in delay-7" style="margin-top: 16px; border-left: 3px solid var(--pink);">
+    <div class="card-title" style="font-size: 14px;">Database Tables</div>
+    <div class="db-tables">
+      <div class="db-table">users</div>
+      <div class="db-table">sites</div>
+      <div class="db-table">siteBuilds</div>
+      <div class="db-table">conversations</div>
+      <div class="db-table">knowledgeSources</div>
+      <div class="db-table">knowledgeItems</div>
+      <div class="db-table">knowledgeGroups</div>
+      <div class="db-table">skills</div>
+      <div class="db-table">templateCases</div>
+      <div class="db-table">prdHistory</div>
+    </div>
+  </div>
+
+  <!-- Stats -->
+  <div class="stats fade-in delay-7">
+    <div class="stat">
+      <div class="stat-value">62</div>
+      <div class="stat-label">Section Variants</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value">6</div>
+      <div class="stat-label">Extension Slots</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value">18</div>
+      <div class="stat-label">API Routes</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value">15M+</div>
+      <div class="stat-label">Page Combinations</div>
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>

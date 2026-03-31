@@ -90,6 +90,22 @@ export const siteBuilds = sqliteTable("site_builds", {
   updatedAt: text("updated_at").$defaultFn(() => new Date().toISOString()),
 });
 
+// ---- Ingestion Tasks (background file processing) ----
+
+export const ingestionTasks = sqliteTable("ingestion_tasks", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  fileName: text("file_name").notNull(),
+  fileType: text("file_type").notNull(),
+  status: text("status").notNull().default("queued"), // queued | processing | done | error
+  progress: text("progress"),           // Human-readable progress message
+  itemCount: integer("item_count"),     // How many items extracted
+  groupId: text("group_id"),            // Created knowledge group ID
+  error: text("error"),
+  createdAt: text("created_at").$defaultFn(() => new Date().toISOString()),
+  updatedAt: text("updated_at").$defaultFn(() => new Date().toISOString()),
+});
+
 // ---- Knowledge Groups (folders) ----
 
 export const knowledgeGroups = sqliteTable("knowledge_groups", {
@@ -97,7 +113,8 @@ export const knowledgeGroups = sqliteTable("knowledge_groups", {
   userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   description: text("description"),
-  indexMd: text("index_md"),           // AI-generated index for model consumption
+  indexMd: text("index_md"),           // AI-generated index for model consumption (mapping/routing)
+  eurekaMd: text("eureka_md"),        // Cross-domain insights discovered during extraction
   tags: text("tags"),                  // JSON array
   sourceFile: text("source_file"),     // Original filename
   sourceType: text("source_type"),     // pdf/zip/docx/txt/md
@@ -118,9 +135,24 @@ export const knowledgeItems = sqliteTable("knowledge_items", {
   title: text("title").notNull(),
   content: text("content").notNull(),
   tags: text("tags"),         // JSON array
+  useCase: text("use_case"),  // When to retrieve this knowledge (routing hint)
+  format: text("format"),     // "narrative" or "structured"
   selected: integer("selected").default(1),
   createdAt: text("created_at").$defaultFn(() => new Date().toISOString()),
   updatedAt: text("updated_at").$defaultFn(() => new Date().toISOString()),
+});
+
+// ---- Knowledge Relations (edges between items) ----
+
+export const knowledgeRelations = sqliteTable("knowledge_relations", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  fromId: text("from_id").notNull().references(() => knowledgeItems.id, { onDelete: "cascade" }),
+  toId: text("to_id").notNull().references(() => knowledgeItems.id, { onDelete: "cascade" }),
+  relationType: text("relation_type").notNull(), // used_in, belongs_to, requires, produced, collaborated_with, led_to, part_of
+  label: text("label"),             // Human-readable: "Python used in Data Pipeline project"
+  strength: integer("strength").default(1), // 1=weak, 2=medium, 3=strong
+  createdAt: text("created_at").$defaultFn(() => new Date().toISOString()),
 });
 
 // ---- Conversations ----

@@ -27,13 +27,13 @@ Use this thinking block format:
 [交付] ...
 ```
 
-Action format:
+Action format (IMPORTANT — choose values that match the user's actual intent, NOT the defaults below):
 ```action
 {
   "type": "prd",
-  "siteType": "portfolio",
-  "theme": "minimalist",
-  "layout": "card-grid",
+  "siteType": "<portfolio|brand|blog|landing|custom — match the user's site type>",
+  "theme": "<choose from: cyberpunk, minimalist, ghibli, glassmorphism, retro, brutalist, cinematic, bold-creative, editorial, nature, gradient-mesh, neo-tokyo — pick one that fits the brand/mood>",
+  "layout": "<two-column|split-screen|card-grid|masonry|magazine|hidden-nav|interactive|etc — match the content structure>",
   "planner": "mattpocock/skills",
   "version": 1
 }

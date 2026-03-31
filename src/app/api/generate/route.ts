@@ -30,12 +30,13 @@ export async function POST(req: NextRequest) {
       data: WorkspaceData;
       selections: UserSelections;
       siteId?: string;
+      siteName?: string;
       prd?: unknown;
-      spec?: { sections?: Array<{ id?: string; type?: string; enabled?: boolean }> };
+      spec?: import("@/lib/site-spec").SiteSpec;
       knowledgeRefs?: unknown[];
     };
 
-    const { data, selections, siteId: inputSiteId, prd, spec, knowledgeRefs } = body;
+    const { data, selections, siteId: inputSiteId, siteName, prd, spec, knowledgeRefs } = body;
     if (!data || !selections) {
       return NextResponse.json({ error: "Missing data or selections" }, { status: 400 });
     }
@@ -49,9 +50,9 @@ export async function POST(req: NextRequest) {
         id: siteId,
         userId: session.user.id,
         slug: nanoid(10),
-        name: data.name || "My Site",
+        name: siteName || `${data.name || "My"} - ${(selections.siteType || "portfolio")}`,
         siteType: selections.siteType || "portfolio",
-        theme: selections.theme || "minimalist",
+        theme: selections.theme || "cyberpunk",
         layout: selections.layout || "card-grid",
         workspaceData: JSON.stringify(data),
         selections: JSON.stringify(selections),
@@ -72,9 +73,9 @@ export async function POST(req: NextRequest) {
       }
 
       await db.update(sites).set({
-        name: data.name || "My Site",
+        name: siteName || data.name || "My Site",
         siteType: selections.siteType || "portfolio",
-        theme: selections.theme || "minimalist",
+        theme: selections.theme || "cyberpunk",
         layout: selections.layout || "card-grid",
         workspaceData: JSON.stringify(data),
         selections: JSON.stringify(selections),
@@ -99,6 +100,7 @@ export async function POST(req: NextRequest) {
         prd: prd || null,
         previewBaseUrl,
         knowledgeRefs: Array.isArray(knowledgeRefs) ? knowledgeRefs : [],
+        userId: session.user.id,
       }),
       createdAt: now,
       updatedAt: now,
