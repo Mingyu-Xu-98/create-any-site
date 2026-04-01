@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { ingestionTasks } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, or, gte } from "drizzle-orm";
 import { runIngestionTask } from "@/lib/ingestion-worker";
 
 /**
@@ -63,11 +63,14 @@ export async function POST(req: NextRequest) {
 }
 
 /**
- * GET /api/ingestion — List all tasks for the current user.
+ * GET /api/ingestion — List active + recent tasks for the current user.
+ * Returns: all queued/processing tasks + done/error tasks from the last hour.
  */
 export async function GET(_req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const oneHourAgo = new Date(Date.now() - 3600_000).toISOString();
 
   const tasks = await db
     .select()
@@ -75,5 +78,11 @@ export async function GET(_req: NextRequest) {
     .where(eq(ingestionTasks.userId, session.user.id))
     .orderBy(ingestionTasks.createdAt);
 
-  return NextResponse.json({ tasks });
+  // Return active tasks + recently completed ones (not full history)
+  const filtered = tasks.filter(t =>
+    t.status === "queued" || t.status === "processing" ||
+    (t.updatedAt && t.updatedAt >= oneHourAgo)
+  );
+
+  return NextResponse.json({ tasks: filtered });
 }

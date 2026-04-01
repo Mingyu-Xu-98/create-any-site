@@ -134,12 +134,12 @@ export default function KnowledgePage() {
 
   // Load tasks on mount (restores in-progress tasks after page navigation)
   useEffect(() => {
-    loadTasks();
-  }, [loadTasks]);
+    if (session?.user) loadTasks();
+  }, [session, loadTasks]);
 
   // Poll while tasks are active
   useEffect(() => {
-    if (!hasActiveTasks) return;
+    if (!hasActiveTasks || !session?.user) return;
     const interval = setInterval(async () => {
       await loadTasks();
       await loadGroups();
@@ -322,35 +322,7 @@ export default function KnowledgePage() {
             </div>
           )}
 
-          {/* Legacy: Processing status bar — always visible when files are uploading */}
-          {hasActiveTasks && (
-            <div className="mb-4 rounded-xl border border-accent/20 bg-accent/5 px-4 py-3">
-              <div className="flex items-center gap-2 mb-2">
-                <span className="w-4 h-4 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />
-                <span className="text-xs font-medium text-accent">{zh ? "正在处理..." : "Processing..."}</span>
-              </div>
-              <div className="space-y-1">
-                {uploadingFiles.filter(f => f.status === "uploading" || f.status === "extracting").map(f => (
-                  <div key={f.id} className="flex items-center gap-2 text-xs text-gray-600">
-                    <span>{SOURCE_TYPE_META[f.type as SourceType]?.icon || "📄"}</span>
-                    <span className="truncate flex-1">{f.name}</span>
-                    <span className="text-accent">{f.progress}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Recently completed uploads */}
-          {uploadingFiles.some(f => f.status === "done") && !hasActiveTasks && (
-            <div className="mb-4 rounded-xl border border-gray-200 bg-white px-4 py-3 flex items-center justify-between">
-              <div className="flex items-center gap-2 text-xs text-gray-500">
-                <span className="text-green-500">✓</span>
-                {zh ? `${uploadingFiles.filter(f => f.status === "done").length} 个文件处理完成` : `${uploadingFiles.filter(f => f.status === "done").length} files processed`}
-              </div>
-              <button onClick={() => setUploadingFiles([])} className="text-xs text-gray-400 hover:text-gray-600">{zh ? "清除" : "Dismiss"}</button>
-            </div>
-          )}
+          {/* Processing tasks — shown inline as cards in the group list */}
 
           {/* ===== Upload Modal ===== */}
           {showUploadModal && (
@@ -434,16 +406,11 @@ export default function KnowledgePage() {
             </div>
           )}
 
-          {/* Legacy knowledge groups list */}
-          {groups.length > 0 && (
+          {/* Knowledge groups list + inline task cards */}
+          {(groups.length > 0 || uploadingFiles.length > 0) && (
             <div>
               {!loaded ? (
                 <div className="space-y-3">{[1, 2, 3].map(i => <div key={i} className="h-20 rounded-xl bg-white border border-gray-200 animate-pulse" />)}</div>
-              ) : groups.length === 0 ? (
-                <div className="text-center py-20">
-                  <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-gray-100 flex items-center justify-center"><span className="text-2xl opacity-30">📚</span></div>
-                  <p className="text-gray-500">{zh ? "暂无知识。上传文件开始构建知识库。" : "No knowledge yet. Upload files to get started."}</p>
-                </div>
               ) : expandedGroup ? (
                 // Expanded group detail
                 (() => {
@@ -508,8 +475,54 @@ export default function KnowledgePage() {
                   );
                 })()
               ) : (
-                // Group list
+                // Group list (with inline task status cards)
                 <div className="space-y-3">
+                  {/* Active + recent tasks shown as cards in the list */}
+                  {uploadingFiles.map(f => (
+                    <div key={`task-${f.id}`} className={`rounded-xl border p-4 transition-all ${
+                      f.status === "error" ? "border-red-200 bg-red-50/50" :
+                      f.status === "done" ? "border-green-200 bg-green-50/30" :
+                      "border-accent/20 bg-accent/3"
+                    }`}>
+                      <div className="flex items-center gap-4">
+                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center text-lg shrink-0 ${
+                          f.status === "error" ? "bg-red-100" :
+                          f.status === "done" ? "bg-green-100" :
+                          "bg-accent/10"
+                        }`}>
+                          {SOURCE_TYPE_META[f.type as SourceType]?.icon || "📄"}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <h3 className="text-sm font-semibold text-gray-800 truncate">{f.name}</h3>
+                          <div className="flex items-center gap-2 mt-1">
+                            {f.status === "uploading" || f.status === "extracting" ? (
+                              <span className="flex items-center gap-1.5 text-xs text-accent font-medium">
+                                <span className="w-3 h-3 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />
+                                {f.progress || (zh ? "处理中..." : "Processing...")}
+                              </span>
+                            ) : f.status === "done" ? (
+                              <span className="flex items-center gap-1.5 text-xs text-green-600 font-medium">
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                                {f.itemCount ? (zh ? `完成，提取 ${f.itemCount} 条知识` : `Done, ${f.itemCount} items extracted`) : (zh ? "处理完成" : "Done")}
+                              </span>
+                            ) : (
+                              <span className="text-xs text-red-500">{f.error || (zh ? "处理失败" : "Failed")}</span>
+                            )}
+                          </div>
+                        </div>
+                        {f.status === "done" && (
+                          <button onClick={() => setUploadingFiles(prev => prev.filter(t => t.id !== f.id))} className="p-2 rounded-lg text-gray-300 hover:text-gray-500 hover:bg-gray-100 transition-all" title={zh ? "清除" : "Dismiss"}>
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                          </button>
+                        )}
+                        {f.status === "error" && (
+                          <button onClick={() => setUploadingFiles(prev => prev.filter(t => t.id !== f.id))} className="p-2 rounded-lg text-gray-300 hover:text-red-400 hover:bg-red-50 transition-all" title={zh ? "清除" : "Dismiss"}>
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
                   {groups.filter(g => !search || g.name.toLowerCase().includes(search.toLowerCase())).map(g => (
                     <div key={g.id} onClick={() => openGroup(g.id)} className="rounded-xl border border-gray-200 bg-white p-4 hover:border-accent/20 hover:shadow-sm transition-all cursor-pointer group">
                       <div className="flex items-center gap-4">
