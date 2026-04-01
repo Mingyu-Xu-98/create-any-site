@@ -79,7 +79,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ bas
         } else if (entryExt === "pdf") {
           // For PDFs inside ZIP, use MinerU via analyze-source
           const pdfBuf = await entry.async("arraybuffer");
-          entryContent = await parsePdfContent(pdfBuf, entryName);
+          entryContent = await parsePdfContent(pdfBuf, entryName, session.user.id);
           entryType = "pdf";
         } else if (entryExt === "docx" || entryExt === "doc") {
           const docBuf = await entry.async("arraybuffer");
@@ -123,7 +123,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ bas
     // PDF: parse with MinerU API
     else if (ext === "pdf") {
       fileType = "pdf";
-      rawContent = await parsePdfContent(buffer, fileName);
+      rawContent = await parsePdfContent(buffer, fileName, session.user.id);
     }
     // DOCX
     else if (ext === "docx" || ext === "doc") {
@@ -182,9 +182,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ bas
 /**
  * Parse PDF via MinerU → markdown. Directly calls shared parser (no HTTP self-fetch).
  */
-async function parsePdfContent(buffer: ArrayBuffer, filename: string): Promise<string> {
+async function parsePdfContent(buffer: ArrayBuffer, filename: string, userId?: string): Promise<string> {
   const { parsePdfSafe } = await import("@/lib/pdf-parser");
-  return parsePdfSafe(buffer, filename);
+  return parsePdfSafe(buffer, filename, userId ? {
+    saveImage: async (fn, buf, src) => saveUserImage(userId, fn, buf, src),
+  } : undefined);
 }
 
 async function fetchLinkContent(url: string, type: string): Promise<string> {
