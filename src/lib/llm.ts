@@ -97,9 +97,9 @@ function getSiliconFlowConfig(): ProviderConfig | null {
   };
 }
 
-/** Provider priority: OpenRouter > Anthropic > SiliconFlow */
+/** Provider priority: OpenRouter > SiliconFlow (Anthropic disabled — use via OpenRouter instead) */
 function getProviderConfig() {
-  return getOpenRouterConfig() || getAnthropicConfig() || getSiliconFlowConfig();
+  return getOpenRouterConfig() || getSiliconFlowConfig();
 }
 
 /** Get a stronger model config for advanced mode */
@@ -108,10 +108,6 @@ function getAdvancedProviderConfig(): ProviderConfig | null {
   const orConfig = getOpenRouterConfig();
   if (orConfig) {
     return { ...orConfig, model: advancedModel || DEFAULTS.ADVANCED_MODEL_OPENROUTER };
-  }
-  const anthropicConfig = getAnthropicConfig();
-  if (anthropicConfig) {
-    return { ...anthropicConfig, model: advancedModel || DEFAULTS.ADVANCED_MODEL_ANTHROPIC };
   }
   return getSiliconFlowConfig();
 }
