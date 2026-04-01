@@ -46,38 +46,54 @@ type ProviderConfig =
       model: string;
     };
 
+// ---- Model defaults: change here or override via env vars ----
+const DEFAULTS = {
+  ANTHROPIC_MODEL: "claude-opus-4-20250514",
+  ANTHROPIC_BASE_URL: "https://api.anthropic.com",
+  OPENROUTER_MODEL: "openai/gpt-4.1-mini",
+  OPENROUTER_BASE_URL: "https://openrouter.ai/api/v1",
+  SILICONFLOW_MODEL: "Pro/zai-org/GLM-5",
+  SILICONFLOW_BASE_URL: "https://api.siliconflow.cn/v1",
+  ADVANCED_MODEL_ANTHROPIC: "claude-opus-4-20250514",
+  ADVANCED_MODEL_OPENROUTER: "anthropic/claude-opus-4-20250514",
+};
+
+function env(key: string, fallback?: string): string {
+  return process.env[key]?.trim() || fallback || "";
+}
+
 function getAnthropicConfig(): ProviderConfig | null {
-  const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
+  const apiKey = env("ANTHROPIC_API_KEY");
   if (!apiKey) return null;
   return {
     provider: "anthropic",
     apiKey,
-    baseUrl: (process.env.ANTHROPIC_BASE_URL?.trim() || "https://api.anthropic.com").replace(/\/+$/, ""),
-    model: process.env.ANTHROPIC_MODEL?.trim() || "claude-sonnet-4-6-20250514",
+    baseUrl: env("ANTHROPIC_BASE_URL", DEFAULTS.ANTHROPIC_BASE_URL).replace(/\/+$/, ""),
+    model: env("ANTHROPIC_MODEL", DEFAULTS.ANTHROPIC_MODEL),
   };
 }
 
 function getOpenRouterConfig(): ProviderConfig | null {
-  const apiKey = process.env.OPENROUTER_API_KEY?.trim();
+  const apiKey = env("OPENROUTER_API_KEY");
   if (!apiKey) return null;
   return {
     provider: "openrouter",
     apiKey,
-    baseUrl: (process.env.OPENROUTER_BASE_URL?.trim() || "https://openrouter.ai/api/v1").replace(/\/+$/, ""),
-    model: process.env.OPENROUTER_MODEL?.trim() || "openai/gpt-4.1-mini",
-    referer: process.env.OPENROUTER_HTTP_REFERER?.trim() || process.env.NEXTAUTH_URL?.trim() || "http://localhost:3000",
-    title: process.env.OPENROUTER_APP_NAME?.trim() || "CreateAnySite",
+    baseUrl: env("OPENROUTER_BASE_URL", DEFAULTS.OPENROUTER_BASE_URL).replace(/\/+$/, ""),
+    model: env("OPENROUTER_MODEL", DEFAULTS.OPENROUTER_MODEL),
+    referer: env("OPENROUTER_HTTP_REFERER") || env("NEXTAUTH_URL") || "http://localhost:3000",
+    title: env("OPENROUTER_APP_NAME") || "CreateAnySite",
   };
 }
 
 function getSiliconFlowConfig(): ProviderConfig | null {
-  const apiKey = process.env.SILICONFLOW_API_KEY?.trim();
+  const apiKey = env("SILICONFLOW_API_KEY");
   if (!apiKey) return null;
   return {
     provider: "siliconflow",
     apiKey,
-    baseUrl: "https://api.siliconflow.cn/v1",
-    model: process.env.SILICONFLOW_MODEL?.trim() || "Pro/zai-org/GLM-5",
+    baseUrl: DEFAULTS.SILICONFLOW_BASE_URL,
+    model: env("SILICONFLOW_MODEL", DEFAULTS.SILICONFLOW_MODEL),
   };
 }
 
@@ -88,19 +104,15 @@ function getProviderConfig() {
 
 /** Get a stronger model config for advanced mode */
 function getAdvancedProviderConfig(): ProviderConfig | null {
-  // Priority 1: Anthropic native API (best quality for Claude models)
+  const advancedModel = env("ADVANCED_MODEL");
   const anthropicConfig = getAnthropicConfig();
   if (anthropicConfig) {
-    const advancedModel = process.env.ADVANCED_MODEL?.trim() || "claude-sonnet-4-6-20250514";
-    return { ...anthropicConfig, model: advancedModel };
+    return { ...anthropicConfig, model: advancedModel || DEFAULTS.ADVANCED_MODEL_ANTHROPIC };
   }
-  // Priority 2: OpenRouter with Claude Sonnet 4.6
   const orConfig = getOpenRouterConfig();
   if (orConfig) {
-    const advancedModel = process.env.ADVANCED_MODEL?.trim() || "anthropic/claude-sonnet-4-6";
-    return { ...orConfig, model: advancedModel };
+    return { ...orConfig, model: advancedModel || DEFAULTS.ADVANCED_MODEL_OPENROUTER };
   }
-  // Fallback: SiliconFlow
   return getSiliconFlowConfig();
 }
 
