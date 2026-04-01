@@ -163,45 +163,100 @@ export default function KnowledgeBaseDetail() {
             </div>
           )}
 
-          {/* File list tab */}
-          {detailTab === "files" && (files.length === 0 ? (
-            <div className="text-center py-20">
-              <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-gray-100 flex items-center justify-center"><span className="text-2xl opacity-30">📁</span></div>
-              <p className="text-gray-500">{zh ? "暂无文件。点击上方添加。" : "No files yet. Add some above."}</p>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {files.map(f => {
-                const kw: string[] = f.keywords ? JSON.parse(f.keywords) : [];
-                return (
-                  <div key={f.id} className="rounded-xl border border-gray-200 bg-white p-4 hover:border-accent/20 transition-all group">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="text-sm">{f.type === "image" ? "🖼️" : f.type === "link" ? "🔗" : f.type === "pdf" ? "📄" : "📝"}</span>
-                          <h3 className="text-sm font-medium text-gray-800 truncate">{f.name}</h3>
-                          <span className="text-[10px] text-gray-400 shrink-0">{f.contentLength.toLocaleString()} {zh ? "字" : "chars"}</span>
-                        </div>
-                        <p className="text-xs text-gray-500 line-clamp-1">{f.description}</p>
-                        {kw.length > 0 && (
-                          <div className="flex flex-wrap gap-1 mt-2">
-                            {kw.slice(0, 6).map(k => <span key={k} className="text-[9px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">{k}</span>)}
+          {/* File list tab — grouped by type */}
+          {detailTab === "files" && (() => {
+            const docs = files.filter(f => f.type !== "image");
+            const images = files.filter(f => f.type === "image");
+            if (files.length === 0) return (
+              <div className="text-center py-20">
+                <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-gray-100 flex items-center justify-center"><span className="text-2xl opacity-30">📁</span></div>
+                <p className="text-gray-500">{zh ? "暂无文件。点击上方添加。" : "No files yet. Add some above."}</p>
+              </div>
+            );
+            return (
+              <div className="space-y-6">
+                {/* Documents section */}
+                {docs.length > 0 && (
+                  <div>
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className="w-6 h-6 rounded-lg bg-blue-50 flex items-center justify-center"><svg className="w-3.5 h-3.5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg></div>
+                      <h3 className="text-sm font-semibold text-gray-700">{zh ? "文档" : "Documents"} <span className="text-gray-400 font-normal">({docs.length})</span></h3>
+                    </div>
+                    <div className="space-y-2">
+                      {docs.map(f => {
+                        const kw: string[] = f.keywords ? JSON.parse(f.keywords) : [];
+                        const typeIcon = f.type === "link" ? "🔗" : f.type === "pdf" ? "📄" : "📝";
+                        const typeLabel = f.type === "link" ? (zh ? "链接" : "Link") : f.type === "pdf" ? "PDF" : (zh ? "文档" : "Doc");
+                        return (
+                          <div key={f.id} className="rounded-xl border border-gray-200 bg-white p-4 hover:border-accent/20 hover:shadow-sm transition-all group">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 mb-1">
+                                  <span className="text-sm">{typeIcon}</span>
+                                  <h3 className="text-sm font-medium text-gray-800 truncate">{f.name}</h3>
+                                  <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-400 shrink-0">{typeLabel}</span>
+                                  <span className="text-[10px] text-gray-400 shrink-0">{f.contentLength.toLocaleString()} {zh ? "字" : "chars"}</span>
+                                </div>
+                                <p className="text-xs text-gray-500 line-clamp-2">{f.description}</p>
+                                {kw.length > 0 && (
+                                  <div className="flex flex-wrap gap-1 mt-2">
+                                    {kw.slice(0, 6).map(k => <span key={k} className="text-[9px] px-1.5 py-0.5 rounded-full bg-gray-50 text-gray-500 border border-gray-100">{k}</span>)}
+                                  </div>
+                                )}
+                                {f.originalUrl && <p className="text-[10px] text-accent mt-1 truncate">{f.originalUrl}</p>}
+                              </div>
+                              <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-all shrink-0">
+                                <button onClick={() => viewFileContent(f.id, f.name)} className="px-2.5 py-1 rounded-lg text-[10px] text-gray-500 hover:bg-gray-100 transition-colors">{zh ? "查看" : "View"}</button>
+                                <button onClick={() => deleteFile(f.id)} className="px-2.5 py-1 rounded-lg text-[10px] text-red-500 hover:bg-red-50 transition-colors">{zh ? "删除" : "Delete"}</button>
+                              </div>
+                            </div>
                           </div>
-                        )}
-                        {f.originalUrl && <p className="text-[10px] text-accent mt-1 truncate">{f.originalUrl}</p>}
-                      </div>
-                      <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-all shrink-0">
-                        {f.type !== "image" && (
-                          <button onClick={() => viewFileContent(f.id, f.name)} className="px-2 py-1 rounded text-[10px] text-gray-500 hover:bg-gray-100">{zh ? "查看" : "View"}</button>
-                        )}
-                        <button onClick={() => deleteFile(f.id)} className="px-2 py-1 rounded text-[10px] text-red-500 hover:bg-red-50">{zh ? "删除" : "Delete"}</button>
-                      </div>
+                        );
+                      })}
                     </div>
                   </div>
-                );
-              })}
-            </div>
-          ))}
+                )}
+
+                {/* Images section — grid with thumbnails */}
+                {images.length > 0 && (
+                  <div>
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className="w-6 h-6 rounded-lg bg-purple-50 flex items-center justify-center"><svg className="w-3.5 h-3.5 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg></div>
+                      <h3 className="text-sm font-semibold text-gray-700">{zh ? "图片素材" : "Images"} <span className="text-gray-400 font-normal">({images.length})</span></h3>
+                    </div>
+                    <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3">
+                      {images.map(f => {
+                        const imgSrc = f.originalUrl || (f.name.startsWith("/") ? f.name : `/api/user-assets/${f.name}`);
+                        const displayName = f.description || f.name.replace(/^[\w-]+-/, "").replace(/\.\w+$/, "") || (zh ? "图片" : "Image");
+                        return (
+                          <div key={f.id} className="group relative rounded-xl border border-gray-200 bg-white overflow-hidden hover:border-accent/30 hover:shadow-md transition-all">
+                            <div className="aspect-square bg-gray-50 flex items-center justify-center overflow-hidden">
+                              <img
+                                src={imgSrc}
+                                alt={displayName}
+                                className="w-full h-full object-cover"
+                                onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; (e.target as HTMLImageElement).parentElement!.innerHTML = '<span class="text-2xl opacity-20">🖼️</span>'; }}
+                              />
+                            </div>
+                            <div className="px-2 py-1.5">
+                              <p className="text-[10px] text-gray-600 truncate font-medium">{displayName}</p>
+                              <p className="text-[9px] text-gray-400">{(f.contentLength / 1024).toFixed(0)}KB</p>
+                            </div>
+                            <button
+                              onClick={() => deleteFile(f.id)}
+                              className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-black/40 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-red-500 transition-all"
+                            >
+                              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* Upload Modal */}
           {showUploadModal && (
