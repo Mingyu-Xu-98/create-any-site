@@ -748,11 +748,18 @@ function fixTranslationKeySafety(
     replacement: `_guardrail_${key}`,
   }));
 
-  let patched = page.replace(langLine[0], langLine[0] + "\n  // Guardrail: safe defaults for unknown translation keys\n" + defaults + "\n\n");
+  // Insert defaults block after useLanguage()
+  const defaultsBlock = "\n  // Guardrail: safe defaults for unknown translation keys\n" + defaults + "\n\n";
+  let patched = page.replace(langLine[0], langLine[0] + defaultsBlock);
 
+  // Replace t.key → _guardrail_key, but NOT inside the defaults block itself
+  const insertPos = page.indexOf(langLine[0]) + langLine[0].length + defaultsBlock.length;
+  const before = patched.slice(0, insertPos);
+  let after = patched.slice(insertPos);
   for (const { pattern, replacement } of replacements) {
-    patched = patched.replace(pattern, replacement);
+    after = after.replace(pattern, replacement);
   }
+  patched = before + after;
 
   files["src/app/page.tsx"] = patched;
   fixes.push(`page.tsx: added safe defaults for unknown translation keys: ${missingKeys.join(", ")}`);

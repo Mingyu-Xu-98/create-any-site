@@ -1,6 +1,7 @@
 import type { WorkspaceData, UserSelections, ThemeStyle, LayoutType, FeatureFlags, DesignIntelligence } from "./types";
 import type { SiteSpec, SiteSpecSection } from "./site-spec";
-import { type LayoutFamily, LAYOUT_FAMILY, type ResolvedStyle } from "./generator-config";
+import { type LayoutFamily, LAYOUT_FAMILY, type ResolvedStyle, recipeToResolvedStyle } from "./generator-config";
+import { getRecipe, mergeRecipes, type DesignRecipe } from "./recipes/loader";
 import {
   resolveSelections, getStyleBgMarkup, readSpecValue, getSpecTitle, getSpecName,
   getSectionTitles, getAvailableSections, findSpecSection, readStringArray,
@@ -63,7 +64,6 @@ export function generateFileMap(
   const files: Record<string, string> = {};
 
   // Resolve recipe — this is the primary design token source
-  const { getRecipe, mergeRecipes } = require("./recipes/loader") as typeof import("./recipes/loader");
   const recipeId = (selections as any).recipe || theme;
   const baseRecipe = getRecipe(recipeId) || getRecipe("custom")!;
   const recipeLayers: Partial<import("./recipes/loader").DesignRecipe>[] = [];
@@ -96,7 +96,6 @@ export function generateFileMap(
   const resolvedRecipe = mergeRecipes(baseRecipe, ...recipeLayers);
 
   // Derive ResolvedStyle from recipe (for backward compat with functions still expecting it)
-  const { recipeToResolvedStyle } = require("./generator-config") as typeof import("./generator-config");
   const styleConfig = recipeToResolvedStyle(resolvedRecipe);
 
   files["package.json"] = genPackageJson();
