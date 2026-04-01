@@ -433,8 +433,12 @@ export default function SharePoster() {
     avatarImg.crossOrigin = "anonymous";
     avatarImg.onload = () => drawContent(avatarImg);
     avatarImg.onerror = () => drawContent();
-    avatarImg.src = "/images/avatar.png";
-  }, [open, lang, t, share]);
+    // Avatar path: handle both direct serve and siteId-prefixed static export
+    const basePath = typeof window !== "undefined" ? window.location.pathname.replace(/\\/index\\.html$/, "").replace(/\\/$/, "") : "";
+    avatarImg.src = basePath + "/images/avatar.png";
+    // If avatar doesn't load within 1s, draw without it
+    setTimeout(() => { if (!avatarImg.complete) drawContent(); }, 1000);
+  }, [open, lang, t]);
 
   useEffect(() => {
     if (open) {
@@ -454,7 +458,19 @@ export default function SharePoster() {
 
   const handleCopy = async () => {
     try {
-      await navigator.clipboard.writeText(window.location.href);
+      const url = window.location.href;
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(url);
+      } else {
+        // Fallback for HTTP: use hidden textarea
+        const ta = document.createElement("textarea");
+        ta.value = url;
+        ta.style.cssText = "position:fixed;left:-9999px";
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        document.body.removeChild(ta);
+      }
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {}
