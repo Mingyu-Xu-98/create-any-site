@@ -50,7 +50,7 @@ type ProviderConfig =
 const DEFAULTS = {
   ANTHROPIC_MODEL: "claude-opus-4-20250514",
   ANTHROPIC_BASE_URL: "https://api.anthropic.com",
-  OPENROUTER_MODEL: "openai/gpt-4.1-mini",
+  OPENROUTER_MODEL: "anthropic/claude-sonnet-4-20250514",
   OPENROUTER_BASE_URL: "https://openrouter.ai/api/v1",
   SILICONFLOW_MODEL: "Pro/zai-org/GLM-5",
   SILICONFLOW_BASE_URL: "https://api.siliconflow.cn/v1",
