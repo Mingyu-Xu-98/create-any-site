@@ -226,8 +226,8 @@ export default function KnowledgeBaseDetail() {
                     </div>
                     <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3">
                       {images.map(f => {
-                        const imgSrc = f.originalUrl || (f.name.startsWith("/") ? f.name : `/api/user-assets/${f.name}`);
-                        const displayName = f.description || f.name.replace(/^[\w-]+-/, "").replace(/\.\w+$/, "") || (zh ? "图片" : "Image");
+                        const imgSrc = f.assetPath ? `/api/user-assets/${f.assetPath}` : f.originalUrl || (f.name.startsWith("/") ? f.name : `/api/user-assets/${f.name}`);
+                        const displayName = f.description || f.name.replace(/\.\w+$/, "") || (zh ? "图片" : "Image");
                         return (
                           <div key={f.id} className="group relative rounded-xl border border-gray-200 bg-white overflow-hidden hover:border-accent/30 hover:shadow-md transition-all">
                             <div className="aspect-square bg-gray-50 flex items-center justify-center overflow-hidden">
