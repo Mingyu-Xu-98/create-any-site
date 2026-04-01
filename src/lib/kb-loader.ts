@@ -90,7 +90,7 @@ export async function loadFullKBContext(userId: string, knowledgeBaseId?: string
  */
 export function formatFilesForPrompt(
   fileContents: Map<string, { name: string; content: string; type: string }>,
-  maxTotalChars = 30000,
+  maxTotalChars = 60000,
 ): string {
   const parts: string[] = [];
   let totalChars = 0;

@@ -12,33 +12,45 @@ import "../assets"; // Register all assets
 // ---- Kind-based registry ----
 // Each kind maps to a set of named variants.
 
+/** Metadata describing a variant — used by Agent to pick components */
+export interface VariantMeta {
+  description: string;
+  bestFor: string[];
+  dataShape?: string;
+}
+
 const kindRegistry: Record<string, Record<string, SectionVariantFn>> = {};
+const metaRegistry: Record<string, Record<string, VariantMeta>> = {};
 const navRegistry: Record<string, SectionVariantFn> = {};
+const navMetaRegistry: Record<string, VariantMeta> = {};
 const footerRegistry: Record<string, SectionVariantFn> = {};
+const footerMetaRegistry: Record<string, VariantMeta> = {};
 const layoutRegistry: Record<string, LayoutWrapperFn> = {};
 const effectRegistry: Record<string, EffectFn> = {};
 
 function ensureKind(kind: string) {
   if (!kindRegistry[kind]) kindRegistry[kind] = {};
+  if (!metaRegistry[kind]) metaRegistry[kind] = {};
 }
 
 // ---- Registration ----
 
-/** Register a section variant under a kind */
-export function registerSection(kind: string, variant: string, fn: SectionVariantFn) {
+/** Register a section variant under a kind, with optional metadata */
+export function registerSection(kind: string, variant: string, fn: SectionVariantFn, meta?: VariantMeta) {
   ensureKind(kind);
   kindRegistry[kind][variant] = fn;
+  if (meta) metaRegistry[kind][variant] = meta;
 }
 
 // Legacy helpers — delegate to registerSection with appropriate kind
-export function registerHero(name: string, fn: SectionVariantFn) { registerSection("hero", name, fn); }
-export function registerProjects(name: string, fn: SectionVariantFn) { registerSection("showcase", name, fn); }
-export function registerSkills(name: string, fn: SectionVariantFn) { registerSection("skills", name, fn); }
-export function registerTimeline(name: string, fn: SectionVariantFn) { registerSection("timeline", name, fn); }
-export function registerEducation(name: string, fn: SectionVariantFn) { registerSection("content", `education-${name}`, fn); }
-export function registerContact(name: string, fn: SectionVariantFn) { registerSection("cta", name, fn); }
-export function registerNav(name: string, fn: SectionVariantFn) { navRegistry[name] = fn; }
-export function registerFooter(name: string, fn: SectionVariantFn) { footerRegistry[name] = fn; }
+export function registerHero(name: string, fn: SectionVariantFn, meta?: VariantMeta) { registerSection("hero", name, fn, meta); }
+export function registerProjects(name: string, fn: SectionVariantFn, meta?: VariantMeta) { registerSection("showcase", name, fn, meta); }
+export function registerSkills(name: string, fn: SectionVariantFn, meta?: VariantMeta) { registerSection("skills", name, fn, meta); }
+export function registerTimeline(name: string, fn: SectionVariantFn, meta?: VariantMeta) { registerSection("timeline", name, fn, meta); }
+export function registerEducation(name: string, fn: SectionVariantFn, meta?: VariantMeta) { registerSection("content", `education-${name}`, fn, meta); }
+export function registerContact(name: string, fn: SectionVariantFn, meta?: VariantMeta) { registerSection("cta", name, fn, meta); }
+export function registerNav(name: string, fn: SectionVariantFn, meta?: VariantMeta) { navRegistry[name] = fn; if (meta) navMetaRegistry[name] = meta; }
+export function registerFooter(name: string, fn: SectionVariantFn, meta?: VariantMeta) { footerRegistry[name] = fn; if (meta) footerMetaRegistry[name] = meta; }
 export function registerLayout(name: string, fn: LayoutWrapperFn) { layoutRegistry[name] = fn; }
 export function registerEffect(name: string, fn: EffectFn) { effectRegistry[name] = fn; }
 
@@ -58,6 +70,59 @@ export function listLayouts(): string[] {
 
 export function listEffects(): string[] {
   return Object.keys(effectRegistry);
+}
+
+/** Search variants by mood, ranked by bestFor match score */
+export function searchVariants(kind: string, mood?: string, limit = 5): Array<{ variant: string } & VariantMeta> {
+  const all = Object.entries(metaRegistry[kind] || {}).map(([v, m]) => ({ variant: v, ...m }));
+  if (!mood || all.length === 0) return all.slice(0, limit);
+  return all
+    .map(v => ({ ...v, _score: v.bestFor.filter(b => mood.includes(b)).length }))
+    .sort((a, b) => b._score - a._score)
+    .map(({ _score, ...rest }) => rest)
+    .slice(0, limit);
+}
+
+/** Generate a compact variant catalog for the Design Agent prompt */
+export function getVariantCatalog(): string {
+  const lines: string[] = ["## Component Variants\n"];
+
+  // Section variants
+  for (const kind of listKinds()) {
+    lines.push(`### ${kind}`);
+    const metas = metaRegistry[kind] || {};
+    const allVariants = Object.keys(kindRegistry[kind] || {});
+    for (const v of allVariants) {
+      const m = metas[v];
+      if (m) {
+        lines.push(`- **${v}**: ${m.description} [${m.bestFor.join(", ")}]`);
+      } else {
+        lines.push(`- **${v}**`);
+      }
+    }
+    lines.push("");
+  }
+
+  // Nav variants
+  lines.push("### nav");
+  for (const [v, m] of Object.entries(navMetaRegistry)) {
+    lines.push(`- **${v}**: ${m.description} [${m.bestFor.join(", ")}]`);
+  }
+  for (const v of Object.keys(navRegistry)) {
+    if (!navMetaRegistry[v]) lines.push(`- **${v}**`);
+  }
+  lines.push("");
+
+  // Footer variants
+  lines.push("### footer");
+  for (const [v, m] of Object.entries(footerMetaRegistry)) {
+    lines.push(`- **${v}**: ${m.description} [${m.bestFor.join(", ")}]`);
+  }
+  for (const v of Object.keys(footerRegistry)) {
+    if (!footerMetaRegistry[v]) lines.push(`- **${v}**`);
+  }
+
+  return lines.join("\n");
 }
 
 // ---- Resolve a section ----

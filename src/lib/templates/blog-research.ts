@@ -106,7 +106,7 @@ export function useLanguage() {
   // page.tsx
   files["src/app/page.tsx"] = `"use client";
 import { useLanguage } from "@/components/LanguageProvider";
-import { LanguageProvider } from "@/components/LanguageProvider";
+import LanguageProvider from "@/components/LanguageProvider";
 
 function PageContent() {
   const { lang, t, toggle } = useLanguage();

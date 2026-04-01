@@ -10,7 +10,7 @@ import { footerMinimal } from "./minimal";
 import { footerBlog } from "./blog";
 import { footerBold } from "./bold";
 
-registerFooter("standard", footerStandard);
-registerFooter("minimal", footerMinimal);
-registerFooter("blog", footerBlog);
-registerFooter("bold", footerBold);
+registerFooter("standard", footerStandard, { description: "Centered copyright + name with border-top", bestFor: ["any", "light-clean"] });
+registerFooter("minimal", footerMinimal, { description: "Single-line text-only footer", bestFor: ["dark-tech", "brutalist", "compact"] });
+registerFooter("blog", footerBlog, { description: "Footer with links and categories for blog sites", bestFor: ["editorial-refined", "blog"] });
+registerFooter("bold", footerBold, { description: "Strong typography bold footer", bestFor: ["bold-creative"] });

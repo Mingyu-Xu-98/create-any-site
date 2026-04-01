@@ -1,8 +1,13 @@
 /**
  * Style configuration, layout family mapping, and design intelligence integration.
  * Extracted from generator.ts — Phase 1 refactor.
+ *
+ * Supports two paths:
+ *   1. Legacy: STYLE_CONFIG[theme] → ResolvedStyle (existing, always works)
+ *   2. Recipe: DesignRecipe → ResolvedStyle (new, richer tokens, layerable)
  */
 import type { ThemeStyle, LayoutType, DesignIntelligence } from "./types";
+import type { DesignRecipe } from "./recipes/loader";
 
 // ---- Layout family mapping ----
 
@@ -309,6 +314,14 @@ export function applyDesignIntelligence(
   let fontHeading = base.fontHeading;
   let fontImport = "";
 
+  // ★ Color overrides from design intelligence (new)
+  const c = (intel as any).colorOverrides as Record<string, string> | undefined;
+  if (c) {
+    for (const [key, val] of Object.entries(c)) {
+      if (val && typeof val === "string") colors[key] = val;
+    }
+  }
+
   if (t?.bodyFont) {
     fontSans = `"${t.bodyFont}", ${base.fontSans}`;
   }
@@ -320,4 +333,68 @@ export function applyDesignIntelligence(
   }
 
   return { colors, fontSans, fontHeading, fontImport, borderRadius: base.borderRadius };
+}
+
+// ---- Recipe → ResolvedStyle bridge ----
+
+/**
+ * Convert a DesignRecipe into a ResolvedStyle compatible with the existing pipeline.
+ * This allows recipes to slot into generateFileMap without rewriting everything.
+ */
+export function recipeToResolvedStyle(recipe: DesignRecipe): ResolvedStyle {
+  return {
+    colors: { ...recipe.colors },
+    fontSans: recipe.typography.body || "-apple-system, sans-serif",
+    fontHeading: recipe.typography.heading || "-apple-system, sans-serif",
+    fontImport: recipe.typography.import
+      ? (recipe.typography.import.startsWith("@import")
+        ? recipe.typography.import
+        : `@import url('${recipe.typography.import}');`)
+      : "",
+    borderRadius: recipe.radius.md || "12px",
+  };
+}
+
+/**
+ * Generate extra CSS variables from a recipe (beyond what ResolvedStyle provides).
+ * Appended after the base @theme block in genGlobalCSS.
+ */
+export function recipeExtraCSS(recipe: DesignRecipe): string {
+  const lines: string[] = [];
+
+  // Multi-level radius
+  lines.push(`  --radius-sm: ${recipe.radius.sm};`);
+  lines.push(`  --radius-md: ${recipe.radius.md};`);
+  lines.push(`  --radius-lg: ${recipe.radius.lg};`);
+  lines.push(`  --radius-full: ${recipe.radius.full};`);
+
+  // Shadows
+  lines.push(`  --shadow-sm: ${recipe.shadows.sm};`);
+  lines.push(`  --shadow-md: ${recipe.shadows.md};`);
+  lines.push(`  --shadow-lg: ${recipe.shadows.lg};`);
+
+  // Mono font
+  lines.push(`  --font-mono: ${recipe.typography.mono};`);
+
+  // Type scale
+  const ratio = recipe.typography.scaleRatio || 1.25;
+  const base = 16;
+  lines.push(`  --text-xs: ${(base / ratio / ratio).toFixed(2)}px;`);
+  lines.push(`  --text-sm: ${(base / ratio).toFixed(2)}px;`);
+  lines.push(`  --text-base: ${base}px;`);
+  lines.push(`  --text-lg: ${(base * ratio).toFixed(2)}px;`);
+  lines.push(`  --text-xl: ${(base * ratio * ratio).toFixed(2)}px;`);
+  lines.push(`  --text-2xl: ${(base * ratio ** 3).toFixed(2)}px;`);
+  lines.push(`  --text-3xl: ${(base * ratio ** 4).toFixed(2)}px;`);
+
+  // Spacing scale
+  const unit = recipe.spacing.unit || 8;
+  lines.push(`  --space-1: ${unit}px;`);
+  lines.push(`  --space-2: ${unit * 2}px;`);
+  lines.push(`  --space-4: ${unit * 4}px;`);
+  lines.push(`  --space-6: ${unit * 6}px;`);
+  lines.push(`  --space-8: ${unit * 8}px;`);
+  lines.push(`  --space-12: ${unit * 12}px;`);
+
+  return lines.join("\n");
 }

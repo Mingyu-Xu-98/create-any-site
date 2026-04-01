@@ -3,11 +3,12 @@
 // Two-column layout: copy block (kicker + title + subtitle + CTA buttons + tag row)
 // paired with a theme-specific visual panel (terminal, poster, retro card, etc.).
 import type { SectionContext, SectionVariantFn } from "../types";
-import type { ThemeStyle } from "../../types";
+import { getSemanticsFromContext } from "../theme-semantics";
 
-function themeVisual(theme: ThemeStyle): string {
-  if (theme === "cyberpunk") {
-    return `
+// ---- Visual panels keyed by semantic heroVisual, not theme name ----
+
+const HERO_VISUALS: Record<string, string> = {
+  terminal: `
             <div className="showcase-terminal">
               <div className="showcase-terminal-bar">
                 <span />
@@ -19,38 +20,22 @@ function themeVisual(theme: ThemeStyle): string {
                   <div key={line} className="showcase-terminal-line">{line}</div>
                 ))}
               </div>
-            </div>`;
-  }
-  if (theme === "cinematic") {
-    return `
+            </div>`,
+  poster: `
             <div className="showcase-poster-frame">
               <div className="showcase-poster-noise" />
               <div className="showcase-poster-label">Scene 01</div>
               <div className="showcase-poster-title">{t.hero.lines[0]?.replace("> ", "") || t.ui.heyIm}</div>
               <div className="showcase-poster-subtitle">{t.hero.lines[1]?.replace("> ", "") || ""}</div>
-            </div>`;
-  }
-  if (theme === "retro") {
-    return `
-            <div className="showcase-retro-stack">
-              <div className="showcase-retro-card">
-                <div className="showcase-retro-sticker">{t.hero.tags[0] || "Now"}</div>
-                <div className="showcase-retro-initials">{t.hero.lines[0]?.replace("> ", "").slice(0, 2)}</div>
-              </div>
-              <div className="showcase-retro-shadow" />
-            </div>`;
-  }
-  if (theme === "nature") {
-    return `
+            </div>`,
+  nature: `
             <div className="showcase-nature-panel">
               <div className="showcase-nature-sun" />
               <div className="showcase-nature-hill hill-1" />
               <div className="showcase-nature-hill hill-2" />
               <div className="showcase-nature-copy">{t.about.tags.slice(0, 3).join(" · ")}</div>
-            </div>`;
-  }
-  if (theme === "neo-tokyo") {
-    return `
+            </div>`,
+  geometric: `
             <div className="showcase-tokyo-panel">
               <div className="showcase-tokyo-grid" />
               <div className="showcase-tokyo-copy">
@@ -58,32 +43,34 @@ function themeVisual(theme: ThemeStyle): string {
                 <strong>{t.hero.lines[0]?.replace("> ", "") || t.ui.heyIm}</strong>
                 <span>{t.hero.lines[1]?.replace("> ", "") || ""}</span>
               </div>
-            </div>`;
-  }
-  // default / gradient-mesh / glassmorphism / etc.
-  return `
+            </div>`,
+  orbital: `
             <div className="showcase-orbital-panel">
               <div className="showcase-orbital-ring ring-1" />
               <div className="showcase-orbital-ring ring-2" />
               <div className="showcase-orbital-core">{t.hero.tags[0] || "AI"}</div>
-            </div>`;
-}
+            </div>`,
+  none: `
+            <div className="showcase-orbital-panel">
+              <div className="showcase-orbital-ring ring-1" />
+              <div className="showcase-orbital-ring ring-2" />
+              <div className="showcase-orbital-core">{t.hero.tags[0] || "AI"}</div>
+            </div>`,
+};
 
-function themeHeroClass(theme: ThemeStyle): string {
-  const map: Partial<Record<ThemeStyle, string>> = {
-    cyberpunk: "theme-hero-cyberpunk",
-    cinematic: "theme-hero-cinematic",
-    retro: "theme-hero-retro",
-    nature: "theme-hero-nature",
-    "gradient-mesh": "theme-hero-gradient-mesh",
-    "neo-tokyo": "theme-hero-neo-tokyo",
-  };
-  return map[theme] || "theme-hero-default";
-}
+const HERO_CLASS_MAP: Record<string, string> = {
+  terminal: "theme-hero-cyberpunk",
+  poster: "theme-hero-cinematic",
+  nature: "theme-hero-nature",
+  geometric: "theme-hero-neo-tokyo",
+  orbital: "theme-hero-default",
+  none: "theme-hero-default",
+};
 
 export const heroCentered: SectionVariantFn = (ctx) => {
-  const visual = themeVisual(ctx.theme);
-  const heroClass = themeHeroClass(ctx.theme);
+  const sem = getSemanticsFromContext(ctx);
+  const visual = HERO_VISUALS[sem.heroVisual] || HERO_VISUALS.orbital;
+  const heroClass = HERO_CLASS_MAP[sem.heroVisual] || "theme-hero-default";
 
   return `
         <section className="max-w-[1100px] mx-auto px-6 pt-20 pb-14">

@@ -120,7 +120,7 @@ export function useLanguage() {
   files["src/app/page.tsx"] = `"use client";
 import { useState } from "react";
 import { useLanguage } from "@/components/LanguageProvider";
-import { LanguageProvider } from "@/components/LanguageProvider";
+import LanguageProvider from "@/components/LanguageProvider";
 import Image from "next/image";
 
 function PageContent() {

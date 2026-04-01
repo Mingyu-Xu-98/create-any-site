@@ -12,8 +12,8 @@ import { contactBlogCenter } from "./blog-center";
 import { contactMinimal } from "./minimal";
 import { contactCard } from "./card";
 
-registerContact("center", contactCenter);
-registerContact("chips", contactChips);
-registerContact("blog-center", contactBlogCenter);
-registerContact("minimal", contactMinimal);
-registerContact("card", contactCard);
+registerContact("center", contactCenter, { description: "Centered icon buttons for email and social links", bestFor: ["any", "light-clean"], dataShape: "email, github" });
+registerContact("chips", contactChips, { description: "Chip-button contact links", bestFor: ["bold-creative"], dataShape: "email, github" });
+registerContact("blog-center", contactBlogCenter, { description: "Newsletter signup for blog sites", bestFor: ["editorial-refined", "blog"], dataShape: "email" });
+registerContact("minimal", contactMinimal, { description: "Text + link only, brutalist minimal", bestFor: ["dark-tech", "brutalist"], dataShape: "email" });
+registerContact("card", contactCard, { description: "Card-based contact form", bestFor: ["light-clean", "minimalist"], dataShape: "email" });

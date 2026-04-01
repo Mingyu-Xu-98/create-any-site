@@ -230,21 +230,31 @@ export default function DashboardPage() {
                         {locale === "zh" ? "访问" : "Visit"}
                       </a>
                     )}
-                    {site.status === "published" && (
-                      <button
-                        onClick={async () => {
-                          const newVal = site.isPublic ? 0 : 1;
-                          let desc = site.publicDesc || "";
-                          if (newVal === 1 && !desc) {
-                            desc = prompt(locale === "zh" ? "输入一句话描述（展示在首页）：" : "Enter a short description (shown on homepage):") || "";
-                          }
-                          await fetch(`/api/sites/${site.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ isPublic: newVal, publicDesc: desc }) });
-                          setSites(prev => prev.map(s => s.id === site.id ? { ...s, isPublic: newVal, publicDesc: desc } : s));
-                        }}
-                        className={`px-3 py-1.5 rounded-lg border text-xs transition-all ${site.isPublic ? "border-green-300 text-green-600 bg-green-50 hover:bg-green-100" : "border-gray-200 text-gray-400 hover:bg-gray-50"}`}
-                      >
-                        {site.isPublic ? (locale === "zh" ? "已公开" : "Public") : (locale === "zh" ? "公开" : "Make Public")}
-                      </button>
+                    {site.status === "published" && site.publishedUrl && (
+                      site.isPublic ? (
+                        <button
+                          onClick={async () => {
+                            const msg = locale === "zh" ? "确定要取消公开吗？网站将不再展示在首页。" : "Remove from public showcase?";
+                            if (!confirm(msg)) return;
+                            await fetch(`/api/sites/${site.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ isPublic: 0, publicDesc: null }) });
+                            setSites(prev => prev.map(s => s.id === site.id ? { ...s, isPublic: 0, publicDesc: null } : s));
+                          }}
+                          className="px-3 py-1.5 rounded-lg border border-green-300 text-green-600 bg-green-50 hover:bg-red-50 hover:border-red-300 hover:text-red-500 text-xs transition-all"
+                        >
+                          {locale === "zh" ? "已公开" : "Public"}
+                        </button>
+                      ) : (
+                        <button
+                          onClick={async () => {
+                            const desc = prompt(locale === "zh" ? "输入一句话描述（展示在首页）：" : "Enter a short description (shown on homepage):") || "";
+                            await fetch(`/api/sites/${site.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ isPublic: 1, publicDesc: desc }) });
+                            setSites(prev => prev.map(s => s.id === site.id ? { ...s, isPublic: 1, publicDesc: desc } : s));
+                          }}
+                          className="px-3 py-1.5 rounded-lg border border-gray-200 text-gray-400 hover:bg-gray-50 text-xs transition-all"
+                        >
+                          {locale === "zh" ? "公开" : "Make Public"}
+                        </button>
+                      )
                     )}
                     <button
                       onClick={async () => {

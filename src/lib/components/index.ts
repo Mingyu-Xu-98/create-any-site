@@ -21,8 +21,11 @@ import "./layouts/index";
 import "./extensions/index";
 
 // Re-export core APIs
-export { assemblePage, listVariants, listLayouts, listEffects, getVisualAssetCSS, getVisualAssetComponents } from "./registry";
+export { assemblePage, listVariants, listLayouts, listEffects, getVisualAssetCSS, getVisualAssetComponents, searchVariants, getVariantCatalog } from "./registry";
+export type { VariantMeta } from "./registry";
 export { buildCompositionPlan } from "./plan-builder";
 export { getExtensionRenderer, listExtensions, listExtensionIds } from "./extensions";
 export type { SectionContext, CompositionPlan, SectionVariantFn, LayoutWrapperFn, EffectFn } from "./types";
+export { getThemeSemantics, getSemanticsFromContext } from "./theme-semantics";
+export type { ThemeSemantics } from "./theme-semantics";
 export type { ExtensionOutput, ExtensionConfig, ExtensionDefinition } from "./extensions";

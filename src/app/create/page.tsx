@@ -634,7 +634,7 @@ function CreatePageInner() {
           layout?: string;
           planner?: string;
           skillIds?: string[];
-          changes?: Array<{ file: string; action: string; content?: string }>;
+          changes?: Array<{ file: string; action: string; content?: string; search?: string; replace?: string }>;
           executionSteps?: string[];
           customTheme?: string;
         };
@@ -963,23 +963,33 @@ function CreatePageInner() {
 
   const handlePublish = useCallback(async () => {
     if (!siteIdRef.current) return;
-    const defaultName = prdData?.theme ? `${prdData.theme} site` : "My Site";
-    const name = prompt(locale === "zh" ? "请给这个网站起个名字（方便在 Dashboard 中区分）：" : "Name this site (for your Dashboard):", defaultName);
-    if (name === null) return; // user cancelled
-    if (name.trim()) {
-      await fetch(`/api/sites/${siteIdRef.current}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: name.trim() }),
-      });
+    try {
+      const defaultName = prdData?.theme ? `${prdData.theme} site` : "My Site";
+      const name = prompt(locale === "zh" ? "请给这个网站起个名字（方便在 Dashboard 中区分）：" : "Name this site (for your Dashboard):", defaultName);
+      if (name === null) return; // user cancelled
+      if (name.trim()) {
+        await fetch(`/api/sites/${siteIdRef.current}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: name.trim() }),
+        });
+      }
+      await updateSitePublishState("publish");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      alert(locale === "zh" ? `发布失败：${msg}` : `Publish failed: ${msg}`);
     }
-    await updateSitePublishState("publish");
   }, [updateSitePublishState, prdData, locale]);
 
   const handleUnpublish = useCallback(async () => {
     if (!siteIdRef.current) return;
-    await updateSitePublishState("unpublish");
-  }, [updateSitePublishState]);
+    try {
+      await updateSitePublishState("unpublish");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      alert(locale === "zh" ? `取消发布失败：${msg}` : `Unpublish failed: ${msg}`);
+    }
+  }, [updateSitePublishState, locale]);
 
   const quickGenerate = () => handleGenerate({
     siteType: selectedTemplate?.category || "portfolio",
@@ -1300,7 +1310,7 @@ function CreatePageInner() {
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
                       {locale === "zh" ? "上传资料" : "Upload materials"}
                     </button>
-                    <button onClick={() => { setChatInput(locale === "zh" ? "帮我做一个网站" : "Build me a website"); }} className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-accent text-white text-sm font-medium hover:bg-accent/90 transition-all shadow-sm shadow-accent/20">
+                    <button onClick={() => { sendChat(locale === "zh" ? "帮我做一个网站" : "Build me a website"); }} className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-accent text-white text-sm font-medium hover:bg-accent/90 transition-all shadow-sm shadow-accent/20">
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
                       {locale === "zh" ? "直接对话" : "Start chatting"}
                     </button>
@@ -1314,25 +1324,25 @@ function CreatePageInner() {
                 // Check if user message is an option selection: [question] emoji label
                 const optionMatch = msg.role === "user" && msg.content.match(/^\[(.+?)\]\s*(\S+)\s+(.+)$/);
                 return (
-                  <div key={i} className={`flex gap-3 ${msg.role === "user" ? "flex-row-reverse" : ""}`}>
+                  <div key={i} className={`flex gap-2.5 animate-[fadeSlideIn_0.3s_ease] ${msg.role === "user" ? "flex-row-reverse" : ""}`}>
                     {/* Avatar */}
-                    <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 mt-1 ${msg.role === "assistant" ? "bg-accent/10" : "bg-gray-100"}`}>
+                    <div className={`w-7 h-7 rounded-xl flex items-center justify-center shrink-0 mt-0.5 shadow-sm ${msg.role === "assistant" ? "bg-gradient-to-br from-accent/20 to-accent/5 ring-1 ring-accent/10" : "bg-gradient-to-br from-gray-100 to-gray-50 ring-1 ring-gray-200/60"}`}>
                       {msg.role === "assistant" ? (
-                        <svg className="w-3 h-3 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                        <svg className="w-3.5 h-3.5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
                       ) : (
-                        <svg className="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
+                        <svg className="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
                       )}
                     </div>
                     {optionMatch ? (
-                      <div className="rounded-lg overflow-hidden border border-gray-200">
-                        <div className="px-3 py-1 bg-gray-50 text-[10px] text-gray-500">{optionMatch[1]}</div>
+                      <div className="rounded-xl overflow-hidden border border-accent/15 bg-accent/3 shadow-sm">
+                        <div className="px-3 py-1 bg-accent/5 text-[10px] text-accent/70 font-medium">{optionMatch[1]}</div>
                         <div className="px-3 py-2 flex items-center gap-2">
                           <span className="text-sm">{optionMatch[2]}</span>
-                          <span className="text-[13px] text-gray-700">{optionMatch[3]}</span>
+                          <span className="text-[13px] text-gray-700 font-medium">{optionMatch[3]}</span>
                         </div>
                       </div>
                     ) : (
-                      <div className={`flex-1 min-w-0 text-[13px] leading-[1.7] ${msg.role === "user" ? "text-gray-600" : "text-gray-800"}`}>
+                      <div className={`flex-1 min-w-0 text-[13px] leading-[1.7] ${msg.role === "user" ? "bg-gradient-to-br from-accent/8 to-accent/3 rounded-2xl rounded-tr-md px-3.5 py-2.5 text-gray-700 ring-1 ring-accent/10" : "text-gray-800"}`}>
                         {msg.role === "assistant" ? (
                           <div className="space-y-2">
                             {Array.isArray(msg.thinking) && msg.thinking.length > 0 && (
@@ -1394,7 +1404,7 @@ function CreatePageInner() {
                             sendChat(`[${question}] ${opt.icon} ${opt.label}`);
                           }
                         }}
-                          className={`flex items-start gap-2.5 p-3 rounded-xl border transition-all text-left ${isSelected ? "border-accent bg-accent/5" : "border-gray-200 bg-gray-50 hover:border-accent/30 hover:bg-gray-100"}`}>
+                          className={`flex items-start gap-2.5 p-3 rounded-xl border transition-all text-left hover:scale-[1.02] hover:shadow-md ${isSelected ? "border-accent bg-accent/5 shadow-sm shadow-accent/10 ring-1 ring-accent/20" : "border-gray-200/80 bg-white hover:border-accent/30 hover:shadow-accent/5"}`}>
                           {isMulti && (
                             <div className={`mt-0.5 w-4 h-4 rounded border shrink-0 flex items-center justify-center ${isSelected ? "bg-accent border-accent" : "border-gray-300"}`}>
                               {isSelected && <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
@@ -1511,12 +1521,12 @@ function CreatePageInner() {
                     : previewUrl
                       ? (locale === "zh" ? "描述你想修改的内容..." : "Describe your changes...")
                       : (locale === "zh" ? "描述你想创建的网站..." : "Describe the site you want...")}
-                  className="w-full pl-4 pr-12 py-3.5 rounded-xl border border-gray-200 bg-white text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:border-gray-300 focus:ring-1 focus:ring-gray-200 disabled:opacity-40 transition-all"
+                  className="w-full pl-4 pr-12 py-3.5 rounded-2xl border border-gray-200/80 bg-gray-50/50 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:border-accent/30 focus:ring-2 focus:ring-accent/10 focus:bg-white disabled:opacity-40 transition-all shadow-sm"
                 />
                 <button
                   onClick={() => sendChat()}
                   disabled={!chatInput.trim() || chatLoading || genStatus === "generating"}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-lg bg-accent text-white flex items-center justify-center hover:bg-accent/90 disabled:opacity-20 transition-all"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-xl bg-accent text-white flex items-center justify-center hover:bg-accent/90 hover:shadow-md hover:shadow-accent/20 disabled:opacity-20 transition-all"
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M12 5l7 7-7 7" /></svg>
                 </button>
@@ -1526,66 +1536,72 @@ function CreatePageInner() {
 
           {/* Splitter + Preview/PRD Panel */}
           {showPreview && <>
-            <div onMouseDown={() => { dragging.current = true; document.body.style.cursor = "col-resize"; document.body.style.userSelect = "none"; }} className="w-1 shrink-0 bg-gray-100 hover:bg-accent/30 cursor-col-resize transition-colors" />
-            <div className="flex flex-col bg-gray-50 overflow-hidden" style={{ width: `${100 - splitPct}%` }}>
+            <div onMouseDown={() => { dragging.current = true; document.body.style.cursor = "col-resize"; document.body.style.userSelect = "none"; }} className="w-1 shrink-0 bg-transparent hover:bg-accent/30 cursor-col-resize transition-colors" />
+            <div className="flex flex-col overflow-hidden p-3 pl-0" style={{ width: `${100 - splitPct}%` }}>
 
-              {/* Tab bar removed — preview panel shows website directly */}
+              {/* Browser-style preview window */}
+              <div className="flex-1 flex flex-col rounded-2xl overflow-hidden shadow-2xl shadow-black/8 border border-gray-200/60 bg-white">
 
-              {/* Preview tab */}
-              {/* Persistent header — always visible when previewUrl exists */}
+              {/* Browser chrome header */}
               {previewUrl && genStatus !== "generating" && (
-                <div className="shrink-0 border-b border-gray-200/60 bg-white px-3 py-2">
-                  <div className="flex items-center gap-2">
-                    <div className="flex gap-1"><div className="w-2 h-2 rounded-full bg-red-400/50" /><div className="w-2 h-2 rounded-full bg-yellow-400/50" /><div className="w-2 h-2 rounded-full bg-green-400/50" /></div>
+                <div className="shrink-0 bg-gradient-to-b from-gray-50 to-gray-100/80 px-3.5 py-2.5 border-b border-gray-200/50">
+                  <div className="flex items-center gap-2.5">
+                    <div className="flex gap-1.5">
+                      <div className="w-2.5 h-2.5 rounded-full bg-[#ff5f57] shadow-sm shadow-[#ff5f57]/30" />
+                      <div className="w-2.5 h-2.5 rounded-full bg-[#febc2e] shadow-sm shadow-[#febc2e]/30" />
+                      <div className="w-2.5 h-2.5 rounded-full bg-[#28c840] shadow-sm shadow-[#28c840]/30" />
+                    </div>
                     <div className="flex-1 min-w-0">
-                      <div className="px-2 py-1 rounded-lg bg-gray-100 text-[9px] text-gray-500 truncate">
-                        {selectedTemplate && !siteId ? `${locale === "zh" ? "模板预览" : "Template Preview"} · ${previewUrl}` : previewUrl}
+                      <div className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-white/80 border border-gray-200/60 shadow-inner shadow-gray-100">
+                        <svg className="w-2.5 h-2.5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 11c0 3.517-1.009 6.799-2.753 9.571m-3.44-2.04l.054-.09A13.916 13.916 0 008 11a4 4 0 118 0c0 1.017-.07 2.019-.203 3m-2.118 6.844A21.88 21.88 0 0015.171 17m3.839 1.132c.645-2.266.99-4.659.99-7.132A8 8 0 008 4.07M3 15.364c.64-1.319 1-2.8 1-4.364 0-1.457.39-2.823 1.07-4" /></svg>
+                        <span className="text-[9px] text-gray-500 truncate font-mono">
+                          {selectedTemplate && !siteId ? `${locale === "zh" ? "模板预览" : "Template"} · ${previewUrl}` : previewUrl}
+                        </span>
                       </div>
                     </div>
-                    <span className={`px-2 py-1 rounded-lg text-[9px] ${siteStatus === "published" ? "bg-green-500/10 text-green-600" : "bg-yellow-500/10 text-yellow-700"}`}>
+                    <span className={`px-2 py-0.5 rounded-full text-[9px] font-medium ${siteStatus === "published" ? "bg-emerald-500/10 text-emerald-600 ring-1 ring-emerald-500/20" : "bg-amber-500/10 text-amber-600 ring-1 ring-amber-500/20"}`}>
                       {siteStatus === "published" ? (locale === "zh" ? "已发布" : "Published") : (locale === "zh" ? "草稿" : "Draft")}
                     </span>
                   </div>
                   <div className="mt-2 flex flex-wrap gap-1.5">
-                    <button onClick={() => setPreviewTab("preview")} className={`px-2.5 py-1 rounded-lg text-[10px] transition-all ${previewTab === "preview" ? "bg-accent/10 text-accent font-medium" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
+                    <button onClick={() => setPreviewTab("preview")} className={`px-2.5 py-1 rounded-full text-[10px] font-medium transition-all ${previewTab === "preview" ? "bg-accent/10 text-accent ring-1 ring-accent/20" : "text-gray-500 hover:bg-gray-200/60"}`}>
                       {locale === "zh" ? "预览" : "Preview"}
                     </button>
-                    <button onClick={() => setPreviewTab("resources")} className={`px-2.5 py-1 rounded-lg text-[10px] transition-all ${previewTab === "resources" ? "bg-accent/10 text-accent font-medium" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
+                    <button onClick={() => setPreviewTab("resources")} className={`px-2.5 py-1 rounded-full text-[10px] font-medium transition-all ${previewTab === "resources" ? "bg-accent/10 text-accent ring-1 ring-accent/20" : "text-gray-500 hover:bg-gray-200/60"}`}>
                       {locale === "zh" ? "资源" : "Resources"}
-                      {(siteResources.length > 0 || selectedBaseId) && previewTab !== "resources" && <span className="ml-1 w-1.5 h-1.5 rounded-full bg-accent inline-block" />}
+                      {(siteResources.length > 0 || selectedBaseId) && previewTab !== "resources" && <span className="ml-1 w-1.5 h-1.5 rounded-full bg-accent inline-block animate-pulse" />}
                     </button>
-                    <span className="border-l border-gray-200 mx-0.5" />
+                    <span className="border-l border-gray-200/60 mx-0.5" />
                     {siteStatus === "published" ? (
                       <>
-                        <button onClick={() => void handlePublish()} className="px-2.5 py-1 rounded-lg bg-accent text-[10px] text-white hover:bg-accent/90 transition-all">
-                          {locale === "zh" ? "更新发布" : "Update Publish"}
+                        <button onClick={() => void handlePublish()} disabled={genStatus !== "ready"} className="px-3 py-1 rounded-full bg-accent text-[10px] font-medium text-white hover:bg-accent/90 transition-all shadow-sm shadow-accent/20 disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none">
+                          {locale === "zh" ? "更新发布" : "Update"}
                         </button>
-                        <button onClick={() => void handleUnpublish()} className="px-2.5 py-1 rounded-lg bg-gray-900 text-[10px] text-white hover:bg-gray-800 transition-all">
+                        <button onClick={() => void handleUnpublish()} disabled={genStatus !== "ready"} className="px-3 py-1 rounded-full bg-gray-800 text-[10px] font-medium text-white hover:bg-gray-700 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
                           {locale === "zh" ? "取消发布" : "Unpublish"}
                         </button>
                       </>
                     ) : (
-                      <button onClick={() => void handlePublish()} className="px-2.5 py-1 rounded-lg bg-accent text-[10px] text-white hover:bg-accent/90 transition-all">
+                      <button onClick={() => void handlePublish()} disabled={genStatus !== "ready"} className="px-3 py-1 rounded-full bg-accent text-[10px] font-medium text-white hover:bg-accent/90 transition-all shadow-sm shadow-accent/20 disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none">
                         {locale === "zh" ? "发布站点" : "Publish"}
                       </button>
                     )}
-                    <a href={publishedUrl || previewUrl} target="_blank" rel="noopener noreferrer" className="px-2.5 py-1 rounded-lg bg-gray-100 text-[10px] text-gray-600 hover:bg-gray-200 transition-all">
-                      {locale === "zh" ? "新窗口打开" : "Open"}
+                    <a href={publishedUrl || previewUrl} target="_blank" rel="noopener noreferrer" className="px-3 py-1 rounded-full text-[10px] text-gray-500 hover:bg-gray-100 transition-all flex items-center gap-1">
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                      {locale === "zh" ? "打开" : "Open"}
                     </a>
                   </div>
                   {publishedUrl && (
-                    <p className="mt-2 text-[10px] text-gray-500">
-                      {locale === "zh" ? "发布域名：" : "Published URL: "}
-                      <a href={publishedUrl} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">
-                        {publishedUrl}
-                      </a>
+                    <p className="mt-2 text-[10px] text-gray-400">
+                      {locale === "zh" ? "已发布：" : "Live: "}
+                      <a href={publishedUrl} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">{publishedUrl}</a>
                     </p>
                   )}
                   {selectedTemplate && !siteId && (
-                    <p className="mt-2 text-[10px] text-gray-500">
+                    <p className="mt-2 text-[10px] text-gray-400 italic">
                       {locale === "zh"
-                        ? `当前展示的是模板案例预览「${selectedTemplate.nameCn}」。发送你的资料或修改要求后，会基于这个模板生成你的专属站点。`
-                        : `You are currently viewing the "${selectedTemplate.name}" demo preview. Once you send your content or edit requests, the system will generate your own site from this template.`}
+                        ? `模板预览「${selectedTemplate.nameCn}」— 发送内容后生成你的专属站点`
+                        : `Template "${selectedTemplate.name}" — send your content to generate your site`}
                     </p>
                   )}
                 </div>
@@ -1594,21 +1610,45 @@ function CreatePageInner() {
               {/* Preview content */}
               {previewTab === "preview" && (
                 genStatus === "generating" ? (
-                  <div className="flex-1 flex flex-col items-center justify-center gap-4">
-                    <div className="w-10 h-10 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />
-                    <p className="text-sm text-gray-500">{locale === "zh" ? "正在生成网站..." : "Generating..."}</p>
+                  <div className="flex-1 flex flex-col items-center justify-center gap-5 bg-gradient-to-br from-gray-50 via-white to-accent/3">
+                    {/* Animated building blocks */}
+                    <div className="relative w-16 h-16">
+                      <div className="absolute inset-0 rounded-2xl bg-accent/10 animate-ping" style={{ animationDuration: "2s" }} />
+                      <div className="absolute inset-1 rounded-xl bg-accent/5 animate-pulse" />
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <svg className="w-7 h-7 text-accent animate-spin" style={{ animationDuration: "3s" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
+                        </svg>
+                      </div>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-sm font-medium text-gray-700">{locale === "zh" ? "正在构建你的网站" : "Building your site"}</p>
+                      <p className="text-[11px] text-gray-400 mt-1">{locale === "zh" ? "AI 正在编写代码、组装页面..." : "AI is writing code, assembling pages..."}</p>
+                    </div>
                     {thinkingSteps.length > 0 && (
-                      <div className="max-w-xs space-y-1 mt-4">
-                        {thinkingSteps.map((s, i) => <p key={i} className="text-[9px] text-gray-500 font-mono">{s}</p>)}
+                      <div className="max-w-xs w-full space-y-1.5 mt-2">
+                        {thinkingSteps.map((s, i) => (
+                          <div key={i} className="flex items-center gap-2 text-[10px] text-gray-500 font-mono animate-[fadeSlideIn_0.3s_ease]">
+                            <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${i === thinkingSteps.length - 1 ? "bg-accent animate-pulse" : "bg-gray-300"}`} />
+                            {s}
+                          </div>
+                        ))}
                       </div>
                     )}
                   </div>
                 ) : previewUrl ? (
                   <iframe key={previewKey} src={`${previewUrl}?t=${previewKey}`} className="flex-1 w-full border-0 bg-white" title="Preview" />
                 ) : (
-                  <div className="flex-1 flex items-center justify-center"><p className="text-xs text-gray-500">{locale === "zh" ? "回答几个问题后会自动生成首版预览" : "A first preview appears automatically after a few questions"}</p></div>
+                  <div className="flex-1 flex flex-col items-center justify-center gap-3 bg-gradient-to-br from-gray-50 via-white to-accent/3">
+                    <div className="w-12 h-12 rounded-2xl bg-accent/5 flex items-center justify-center">
+                      <svg className="w-6 h-6 text-accent/40" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+                    </div>
+                    <p className="text-xs text-gray-400">{locale === "zh" ? "回答几个问题后自动生成预览" : "Preview appears after a few questions"}</p>
+                  </div>
                 )
               )}
+
+              </div>{/* end browser window */}
 
               {previewTab === "resources" && (
                 <div className="flex-1 overflow-y-auto bg-white">

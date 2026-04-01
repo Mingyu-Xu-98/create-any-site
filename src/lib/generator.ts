@@ -1,6 +1,6 @@
 import type { WorkspaceData, UserSelections, ThemeStyle, LayoutType, FeatureFlags, DesignIntelligence } from "./types";
 import type { SiteSpec, SiteSpecSection } from "./site-spec";
-import { type LayoutFamily, LAYOUT_FAMILY, type ResolvedStyle, STYLE_CONFIG, applyDesignIntelligence } from "./generator-config";
+import { type LayoutFamily, LAYOUT_FAMILY, type ResolvedStyle } from "./generator-config";
 import {
   resolveSelections, getStyleBgMarkup, readSpecValue, getSpecTitle, getSpecName,
   getSectionTitles, getAvailableSections, findSpecSection, readStringArray,
@@ -62,8 +62,42 @@ export function generateFileMap(
   const features = selections.features;
   const files: Record<string, string> = {};
 
-  // If we have design intelligence from ui-ux-pro-max, apply it to override colors/fonts
-  const styleConfig = applyDesignIntelligence(theme, designIntel);
+  // Resolve recipe — this is the primary design token source
+  const { getRecipe, mergeRecipes } = require("./recipes/loader") as typeof import("./recipes/loader");
+  const recipeId = (selections as any).recipe || theme;
+  const baseRecipe = getRecipe(recipeId) || getRecipe("custom")!;
+  const recipeLayers: Partial<import("./recipes/loader").DesignRecipe>[] = [];
+  const layerIds = (selections as any).recipeLayers;
+  if (Array.isArray(layerIds)) {
+    for (const lid of layerIds) {
+      const l = getRecipe(lid);
+      if (l) recipeLayers.push(l);
+    }
+  }
+  // Apply DI color overrides as a layer
+  if (designIntel) {
+    const diLayer: Partial<import("./recipes/loader").DesignRecipe> = {};
+    const c = (designIntel as any).colorOverrides as Record<string, string> | undefined;
+    if (c && Object.keys(c).length > 0) diLayer.colors = c;
+    const t = designIntel.typography;
+    if (t?.bodyFont || t?.headingFont) {
+      diLayer.typography = {
+        heading: t?.headingFont || "",
+        body: t?.bodyFont || "",
+        mono: "",
+        scaleRatio: 0,
+        import: t?.cssImport || undefined,
+      };
+    }
+    if (Object.keys(diLayer).length > 0) recipeLayers.push(diLayer);
+  }
+  const agentOverrides = (selections as any).recipeOverrides;
+  if (agentOverrides) recipeLayers.push(agentOverrides);
+  const resolvedRecipe = mergeRecipes(baseRecipe, ...recipeLayers);
+
+  // Derive ResolvedStyle from recipe (for backward compat with functions still expecting it)
+  const { recipeToResolvedStyle } = require("./generator-config") as typeof import("./generator-config");
+  const styleConfig = recipeToResolvedStyle(resolvedRecipe);
 
   files["package.json"] = genPackageJson();
   files["next.config.ts"] = `import type { NextConfig } from "next";\nconst nextConfig: NextConfig = {};\nexport default nextConfig;\n`;
@@ -81,8 +115,8 @@ export function generateFileMap(
     ? `/* ==== DESIGN CONTEXT ====\n${customNotes.map(n => ` * ${n}`).join("\n")}\n * ======================== */\n\n`
     : "";
 
-  files["src/app/layout.tsx"] = genLayout(data, theme, features, styleConfig, spec);
-  files["src/app/globals.css"] = customHeader + genGlobalCSS(theme, layout, features, styleConfig);
+  files["src/app/layout.tsx"] = genLayout(data, theme, features, styleConfig, spec, resolvedRecipe);
+  files["src/app/globals.css"] = customHeader + genGlobalCSS(theme, layout, features, styleConfig, resolvedRecipe);
 
   // Inject visual asset CSS if a CompositionPlan with visualDirection exists
   const activePlan = selections.compositionPlan;
@@ -97,7 +131,7 @@ export function generateFileMap(
   }
 
   // ===== Page generation: multi-page aware =====
-  const ctx: SectionContext = { data, spec, theme, layout, styleConfig, features };
+  const ctx: SectionContext = { data, spec, theme, layout, styleConfig, features, recipe: resolvedRecipe };
 
   // Helper: build a CompositionPlan from SiteSpec sections
   function sectionsToPage(sections: Array<{ id?: string; kind?: string; type?: string; variant?: string; data?: Record<string, unknown>; enabled?: boolean }>, navStyle = "sticky", footerStyle = "standard"): import("./components/types").CompositionPlan {

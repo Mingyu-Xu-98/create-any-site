@@ -5,6 +5,7 @@
 import type { WorkspaceData, ThemeStyle, LayoutType, FeatureFlags } from "../types";
 import type { SiteSpec } from "../site-spec";
 import type { ResolvedStyle } from "../generator-config";
+import type { DesignRecipe } from "../recipes/loader";
 
 /** Context passed to every section variant function */
 export interface SectionContext {
@@ -16,6 +17,8 @@ export interface SectionContext {
   features: FeatureFlags;
   /** Per-section data from the plan (agent can pass arbitrary config) */
   sectionData?: Record<string, unknown>;
+  /** Full design recipe — when available, components should read semantics from here instead of theme string */
+  recipe?: DesignRecipe;
 }
 
 /** A section variant function — returns JSX string fragment */

@@ -103,7 +103,7 @@ export function useLanguage() {
   // page.tsx
   files["src/app/page.tsx"] = `"use client";
 import { useLanguage } from "@/components/LanguageProvider";
-import { LanguageProvider } from "@/components/LanguageProvider";
+import LanguageProvider from "@/components/LanguageProvider";
 import Image from "next/image";
 
 function PageContent() {

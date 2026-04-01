@@ -70,14 +70,14 @@ function getProviderConfig() {
 
 /** Get a stronger model config for advanced mode */
 function getAdvancedProviderConfig(): ProviderConfig | null {
-  // Advanced mode prefers OpenRouter with a strong model (Claude/GPT-4)
-  const advancedModel = process.env.ADVANCED_MODEL?.trim();
+  // Advanced mode prefers OpenRouter with Claude Sonnet 4.6
+  const advancedModel = process.env.ADVANCED_MODEL?.trim() || "anthropic/claude-sonnet-4-6";
   const orConfig = getOpenRouterConfig();
-  if (orConfig && advancedModel) {
+  if (orConfig) {
     return { ...orConfig, model: advancedModel };
   }
-  // Fallback: use OpenRouter with default model, or SiliconFlow
-  return orConfig || getSiliconFlowConfig();
+  // Fallback: SiliconFlow
+  return getSiliconFlowConfig();
 }
 
 /** Get provider config based on mode */

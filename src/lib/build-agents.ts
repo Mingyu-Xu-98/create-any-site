@@ -5,6 +5,8 @@ import { loadStageSkillBundle } from "./project-skill-bundles";
 import { chatCompletion } from "./llm";
 import { getCapabilityManifest } from "./capability-registry";
 import { getAssetManifest } from "./assets";
+import { getRecipeManifest } from "./recipes/loader";
+import { getVariantCatalog } from "./components";
 
 type ChatRole = "system" | "user" | "assistant";
 
@@ -192,11 +194,15 @@ export async function runBuildConversation(ctx: BuildConversationContext): Promi
         action: {
           type: "generate",
           siteType: designResult.action.siteMode || "portfolio",
-          theme: designResult.action.theme || "minimalist",
+          theme: designResult.action.theme || designResult.action.recipe || "minimalist",
           compositionPlan: designResult.action.compositionPlan || null,
           visualDirection: designResult.action.visualDirection || null,
           contentMapping: designResult.action.contentMapping || null,
           customTheme: designResult.action.customTheme || "",
+          // Recipe composition data (new)
+          recipe: designResult.action.recipe || null,
+          recipeLayers: designResult.action.layers || null,
+          recipeOverrides: designResult.action.overrides || null,
         },
       };
     }
@@ -331,7 +337,9 @@ ${JSON.stringify(ctx.currentSelections ?? {}, null, 2)}
 ## Conversation
 ${ctx.messages.map(m => `${m.role.toUpperCase()}: ${m.content}`).join("\n\n")}`;
 
-  return callSiliconFlow(ctx.requestId, "ideation-agent", prompt, userPrompt);
+  // Edit mode (existing site): use advanced model for higher quality code modifications
+  const isEditMode = Boolean(ctx.hasSiteCode && ctx.currentPrd);
+  return callSiliconFlow(ctx.requestId, "ideation-agent", prompt, userPrompt, [], isEditMode);
 }
 
 async function runPlanningAgent(
@@ -406,9 +414,15 @@ ${JSON.stringify(ctx.currentSelections ?? {}, null, 2)}
 export async function runDesignAgent(ctx: BuildConversationContext): Promise<AgentRunResult> {
   let prompt = await loadPrompt("design-agent.md");
 
-  // Inject asset manifest into prompt
+  // Inject dynamic catalogs into prompt
   const assetManifest = getAssetManifest();
   prompt = prompt.replace("ASSET_MANIFEST_PLACEHOLDER", assetManifest);
+
+  // Inject recipe manifest (base themes + layers) and component variant catalog
+  const recipeManifest = getRecipeManifest();
+  const variantCatalog = getVariantCatalog();
+  prompt = prompt.replace("RECIPE_MANIFEST_PLACEHOLDER", recipeManifest);
+  prompt = prompt.replace("VARIANT_CATALOG_PLACEHOLDER", variantCatalog);
 
   const userPrompt = `## User Request
 ${getLatestUserMessage(ctx.messages)}
@@ -461,7 +475,7 @@ ALL text content MUST come from \`t.*\`, never hardcoded. Key fields:
 - \`t.contact.email\`, \`t.contact.links[]\`
 
 ## Knowledge Content (the user's ACTUAL data — read this to understand what the site is about)
-${ctx.knowledgeContext?.slice(0, 10000) || "(Empty — generate a creative placeholder site)"}
+${ctx.knowledgeContext?.slice(0, 40000) || "(Empty — generate a creative placeholder site)"}
 
 ## Asset CSS (already resolved, use these classes)
 ${assetCss || "(No asset CSS)"}

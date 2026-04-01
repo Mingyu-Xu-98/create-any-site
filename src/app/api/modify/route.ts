@@ -7,8 +7,8 @@ import fs from "fs/promises";
 import path from "path";
 import { exec } from "child_process";
 import { logger } from "@/lib/logger";
-import { syncDraftPreview, hasPublishedPreviewDirectory, rewriteExportAssetPaths } from "@/lib/build-runtime";
-import { runCodeGuardrails } from "@/lib/code-guardrails";
+import { syncDraftPreview, hasPublishedPreviewDirectory, rewriteExportAssetPaths, ALLOWED_DEPENDENCIES } from "@/lib/build-runtime";
+import { runCodeGuardrails, runAdvancedModeGuardrails } from "@/lib/code-guardrails";
 
 const SITES_DIR = path.join(process.cwd(), "sites-data");
 const TRANSLATIONS_FILE = "src/i18n/translations.ts";
@@ -57,8 +57,10 @@ function summarizeBuildOutput(stdout: string, stderr: string): string[] {
 
 interface FileChange {
   file: string;
-  action: "replace" | "create" | "delete";
+  action: "replace" | "create" | "delete" | "search_replace";
   content?: string;
+  search?: string;
+  replace?: string;
 }
 
 async function runVerification(siteDir: string, spec?: { sections?: Array<{ id?: string; type?: string; enabled?: boolean }>; pages?: Array<{ route?: string; sections: Array<{ id?: string; type?: string; enabled?: boolean }> }> }) {
@@ -69,16 +71,24 @@ async function runVerification(siteDir: string, spec?: { sections?: Array<{ id?:
     const html = await fs.readFile(outIndex, "utf-8");
     checks.push({ label: "Static export index.html exists", ok: html.length > 0 });
 
-    // Check flat sections
+    // Check flat sections — use alias map for common id mismatches
+    const aliasMap: Record<string, string[]> = {
+      timeline: ["experience", "timeline", "milestones"],
+      projects: ["projects", "portfolio", "work", "showcase"],
+      blog: ["blog", "posts", "articles", "writing"],
+      contact: ["contact", "cta", "hire-me", "get-started"],
+      skills: ["skills", "tech-stack", "expertise"],
+      about: ["about", "intro", "bio"],
+    };
     const allSections = spec?.pages?.flatMap(p => p.sections) || spec?.sections || [];
     for (const section of allSections.filter(item => item.enabled !== false)) {
       const sectionId = section.id || section.type;
       if (!sectionId) continue;
-      const anchorId = sectionId === "timeline" ? "experience" : sectionId;
-      checks.push({
-        label: `Rendered section anchor: ${sectionId}`,
-        ok: html.includes(`id="${anchorId}"`) || html.includes(`id='${anchorId}'`) || html.includes(`#${anchorId}`),
-      });
+      const candidates = aliasMap[sectionId] || [sectionId];
+      const found = candidates.some(id =>
+        html.includes(`id="${id}"`) || html.includes(`id='${id}'`) || html.includes(`#${id}`)
+      );
+      checks.push({ label: `Rendered section anchor: ${sectionId}`, ok: found });
     }
 
     // Check multi-page routes
@@ -152,6 +162,30 @@ export async function POST(req: NextRequest) {
         delete fileMap[filePath];
         try { await fs.unlink(fullPath); } catch {}
         applied.push(`deleted: ${filePath}`);
+      } else if (change.action === "search_replace") {
+        if (!change.search || change.replace === undefined) continue;
+
+        // Read current content from fileMap or disk
+        let currentContent = fileMap[filePath];
+        if (!currentContent) {
+          try { currentContent = await fs.readFile(fullPath, "utf-8"); } catch {}
+        }
+        if (!currentContent) {
+          logger.warn("modify", `[${requestId}] search_replace skipped: ${filePath} not found`);
+          applied.push(`skipped: ${filePath} (file not found for search_replace)`);
+          continue;
+        }
+        if (!currentContent.includes(change.search)) {
+          logger.warn("modify", `[${requestId}] search_replace skipped: search string not found in ${filePath} (${change.search.length} chars)`);
+          applied.push(`skipped: ${filePath} (search string not found)`);
+          continue;
+        }
+
+        const newContent = currentContent.replace(change.search, change.replace);
+        fileMap[filePath] = newContent;
+        await fs.mkdir(path.dirname(fullPath), { recursive: true });
+        await fs.writeFile(fullPath, newContent, "utf-8");
+        applied.push(`search_replace: ${filePath}`);
       } else if (change.action === "replace" || change.action === "create") {
         if (!change.content) continue;
 
@@ -185,6 +219,17 @@ export async function POST(req: NextRequest) {
 
     logger.info("modify", `[${requestId}] Applied ${applied.length} changes, running guardrails...`, { applied });
 
+    // Ensure critical component files are in fileMap (may only exist on disk from initial build)
+    const criticalFiles = ["src/components/LanguageProvider.tsx", "src/app/layout.tsx", "src/app/page.tsx", "src/i18n/translations.ts"];
+    for (const cf of criticalFiles) {
+      if (!fileMap[cf]) {
+        try {
+          const content = await fs.readFile(path.join(siteDir, cf), "utf-8");
+          if (content) fileMap[cf] = content;
+        } catch {}
+      }
+    }
+
     // Run code guardrails on modified files (fixes translations exports, SharePoster, JSX issues, etc.)
     const previewBaseUrl = (process.env.PREVIEW_BASE_URL?.trim() || "http://localhost:3002").replace(/\/+$/, "");
     const guarded = runCodeGuardrails(fileMap, siteId, previewBaseUrl, logger);
@@ -197,6 +242,17 @@ export async function POST(req: NextRequest) {
       }
     }
     Object.assign(fileMap, guarded);
+
+    // Run advanced mode guardrails (type annotations, import resolution, translation keys)
+    const advFixes = runAdvancedModeGuardrails(fileMap, ALLOWED_DEPENDENCIES, logger);
+    if (advFixes.length > 0) {
+      logger.info("modify", `[${requestId}] Advanced guardrails applied ${advFixes.length} fixes`, { advFixes });
+      for (const [filePath, content] of Object.entries(fileMap)) {
+        const fullPath = path.join(siteDir, filePath);
+        await fs.mkdir(path.dirname(fullPath), { recursive: true });
+        await fs.writeFile(fullPath, content, "utf-8");
+      }
+    }
 
     // Rebuild static export after modification
     let buildSuccess = true;

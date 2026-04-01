@@ -59,6 +59,16 @@ function findRelevantChunks(question: string, chunks: KnowledgeChunk[]): string 
   return relevant.map(c => c.content).join("\n\n").slice(0, 6000);
 }
 
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
+};
+
+export async function OPTIONS() {
+  return new Response(null, { status: 204, headers: CORS_HEADERS });
+}
+
 export async function POST(req: NextRequest, { params }: { params: Promise<{ siteId: string }> }) {
   const { siteId } = await params;
   const { messages } = await req.json();
@@ -66,12 +76,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ sit
   // Verify the site exists (public chatbot — no user auth required, but site must exist)
   const site = await db.select({ id: sites.id }).from(sites).where(eq(sites.id, siteId)).get();
   if (!site) {
-    return new Response(JSON.stringify({ error: "Site not found" }), { status: 404, headers: { "Content-Type": "application/json" } });
+    return new Response(JSON.stringify({ error: "Site not found" }), { status: 404, headers: { "Content-Type": "application/json", ...CORS_HEADERS } });
   }
 
   const apiKey = process.env.SILICONFLOW_API_KEY;
   if (!apiKey) {
-    return new Response(JSON.stringify({ error: "API key not configured" }), { status: 500, headers: { "Content-Type": "application/json" } });
+    return new Response(JSON.stringify({ error: "API key not configured" }), { status: 500, headers: { "Content-Type": "application/json", ...CORS_HEADERS } });
   }
 
   // Load site knowledge
@@ -82,7 +92,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ sit
     const data = JSON.parse(raw);
     chunks = data.chunks || [];
   } catch {
-    return new Response(JSON.stringify({ error: "Site knowledge not found" }), { status: 404, headers: { "Content-Type": "application/json" } });
+    return new Response(JSON.stringify({ error: "Site knowledge not found" }), { status: 404, headers: { "Content-Type": "application/json", ...CORS_HEADERS } });
   }
 
   // Load site name from translations — try multiple key patterns
@@ -124,7 +134,7 @@ ${relevantKnowledge}`;
 
   if (!response.ok) {
     const err = await response.text();
-    return new Response(JSON.stringify({ error: err }), { status: response.status, headers: { "Content-Type": "application/json" } });
+    return new Response(JSON.stringify({ error: err }), { status: response.status, headers: { "Content-Type": "application/json", ...CORS_HEADERS } });
   }
 
   const encoder = new TextEncoder();
@@ -155,5 +165,5 @@ ${relevantKnowledge}`;
     },
   });
 
-  return new Response(stream, { headers: { "Content-Type": "text/plain; charset=utf-8" } });
+  return new Response(stream, { headers: { "Content-Type": "text/plain; charset=utf-8", ...CORS_HEADERS } });
 }

@@ -188,15 +188,29 @@ export async function queryDesignIntelligence(
 ): Promise<DesignIntelligence | null> {
   try {
     const query = customTheme || `${siteType} ${theme}`;
-    const [styleResults, typoResults] = await Promise.all([
+    const [styleResults, typoResults, colorResults] = await Promise.all([
       runSearch(query, "style", 1),
       runSearch(query, "typography", 1),
+      runSearch(query, "color", 1),
     ]);
 
     const s = styleResults[0];
     const t = typoResults[0];
+    const c = colorResults[0];
 
-    if (!s && !t) return null;
+    if (!s && !t && !c) return null;
+
+    // Build color overrides from BM25 search results
+    const colorOverrides: Record<string, string> = {};
+    if (c) {
+      if (c["Primary"]) colorOverrides.accent = c["Primary"];
+      if (c["Secondary"]) colorOverrides["accent-alt"] = c["Secondary"];
+      if (c["Background"]) colorOverrides.bg = c["Background"];
+      if (c["Foreground"]) colorOverrides.text = c["Foreground"];
+      if (c["Muted Foreground"]) colorOverrides["text-muted"] = c["Muted Foreground"];
+      if (c["Card"]) colorOverrides["bg-card"] = c["Card"];
+      if (c["Border"]) colorOverrides.line = c["Border"];
+    }
 
     return {
       style: s ? { category: s["Style Category"] || theme } : undefined,
@@ -205,8 +219,47 @@ export async function queryDesignIntelligence(
         headingFont: t["Heading Font"],
         cssImport: t["CSS Import"],
       } : undefined,
-    };
+      colorOverrides: Object.keys(colorOverrides).length > 0 ? colorOverrides : undefined,
+    } as DesignIntelligence & { colorOverrides?: Record<string, string> };
   } catch {
     return null;
   }
+}
+
+/**
+ * Convert DesignSystemData (from generateDesignSystem) into a recipe layer
+ * that can be merged with a base recipe via mergeRecipes().
+ */
+export function designSystemToRecipeLayer(ds: DesignSystemData): {
+  colors: Record<string, string>;
+  typography: { heading: string; body: string; import?: string };
+  semantics: Record<string, string>;
+} {
+  const colors: Record<string, string> = {};
+  if (ds.colors.primary) colors.accent = ds.colors.primary;
+  if (ds.colors.secondary) colors["accent-alt"] = ds.colors.secondary;
+  if (ds.colors.background) colors.bg = ds.colors.background;
+  if (ds.colors.foreground) colors.text = ds.colors.foreground;
+  if (ds.colors.mutedForeground) colors["text-muted"] = ds.colors.mutedForeground;
+  if (ds.colors.card) colors["bg-card"] = ds.colors.card;
+  if (ds.colors.border) colors.line = ds.colors.border;
+
+  const semantics: Record<string, string> = {};
+  if (ds.style.keywords) {
+    const kw = ds.style.keywords.toLowerCase();
+    if (kw.includes("minimal")) semantics.ornament = "none";
+    if (kw.includes("bold") || kw.includes("dramatic")) semantics.ornament = "rich";
+    if (kw.includes("luxury") || kw.includes("spacious")) semantics.density = "spacious";
+    if (kw.includes("compact") || kw.includes("dense")) semantics.density = "compact";
+  }
+
+  return {
+    colors,
+    typography: {
+      heading: ds.typography.headingFont || "",
+      body: ds.typography.bodyFont || "",
+      import: ds.typography.cssImport || undefined,
+    },
+    semantics,
+  };
 }

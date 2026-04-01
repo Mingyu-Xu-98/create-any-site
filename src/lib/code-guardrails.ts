@@ -40,11 +40,17 @@ export function runCodeGuardrails(
   // 7. Fix bare special chars in JSX text (>, <, {, })
   fixJsxBareSpecialChars(files, fixes);
 
+  // 7b. Fix texture-overlay and other fullscreen overlays blocking clicks
+  fixOverlayPointerEvents(files, fixes);
+
   // 8. Ensure SharePoster is imported and used
   fixMissingSharePoster(files, fixes);
 
   // 9. Ensure translations.ts exports Lang and Translations types
   fixTranslationsExports(files, fixes);
+
+  // 10. Fix named import of LanguageProvider → default import
+  fixLanguageProviderImport(files, fixes);
 
   if (fixes.length > 0) {
     logger.info("guardrails", `Applied ${fixes.length} auto-fixes for site ${siteId}`, { fixes });
@@ -53,11 +59,13 @@ export function runCodeGuardrails(
   return files;
 }
 
-/** Fix ChatBot / CartoonAssistant fetching /api/chat which doesn't work in static export */
+/** Fix ChatBot / CartoonAssistant chat API URL for static export.
+ *  Static exports can't use /api/chat — must proxy through the host app.
+ *  Replace with a runtime resolver that works in both dev (cross-port) and prod (same origin). */
 function fixChatBotApiUrl(
   files: Record<string, string>,
   siteId: string,
-  previewBaseUrl: string,
+  _previewBaseUrl: string,
   fixes: string[],
 ) {
   const targets = [
@@ -65,21 +73,51 @@ function fixChatBotApiUrl(
     "src/components/CartoonAssistant.tsx",
   ];
 
-  const mainHost = previewBaseUrl
-    ? new URL(previewBaseUrl).origin.replace(":3002", ":3001")
-    : "http://localhost:3001";
+  // Runtime resolver: in production (same origin via nginx), uses relative path.
+  // In dev (port 3002 preview), detects and proxies to port 3001.
+  const resolverCode = [
+    `const chatUrl = (() => {`,
+    `  const siteId = "${siteId}";`,
+    `  if (typeof window === "undefined") return "/api/site-chat/" + siteId;`,
+    `  const port = window.location.port;`,
+    `  if (port === "3002") return window.location.origin.replace(":3002", ":3001") + "/api/site-chat/" + siteId;`,
+    `  return "/api/site-chat/" + siteId;`,
+    `})();`,
+  ].join("\n      ");
 
-  for (const path of targets) {
-    const content = files[path];
+  for (const filePath of targets) {
+    const content = files[filePath];
     if (!content) continue;
 
-    // If it still has a hardcoded /api/chat, patch it to use the host project's proxy
-    if (content.includes('fetch("/api/chat"') && !content.includes("site-chat")) {
-      files[path] = content.replace(
-        /const res = await fetch\("\/api\/chat"/g,
-        `const res = await fetch("${mainHost}/api/site-chat/${siteId}"`,
+    let patched = content;
+    let changed = false;
+
+    // Pattern 1: dynamic URL resolution block (window.location.pathname...)
+    const dynamicUrlRe = /const\s+(?:pp|pathParts)\s*=\s*window\.location\.pathname[\s\S]*?const\s+chatUrl\s*=\s*[^;]+;/g;
+    if (dynamicUrlRe.test(patched)) {
+      patched = patched.replace(dynamicUrlRe, resolverCode);
+      changed = true;
+    }
+
+    // Pattern 2: previously hardcoded localhost URL
+    const localhostRe = /const\s+chatUrl\s*=\s*"http:\/\/localhost:\d+\/api\/site-chat\/[^"]+";/g;
+    if (localhostRe.test(patched)) {
+      patched = patched.replace(localhostRe, resolverCode);
+      changed = true;
+    }
+
+    // Pattern 3: hardcoded fetch("/api/chat", ...)
+    if (patched.includes('fetch("/api/chat"')) {
+      patched = patched.replace(
+        /fetch\("\/api\/chat"/g,
+        `fetch("/api/site-chat/${siteId}"`,
       );
-      fixes.push(`${path.split("/").pop()}: patched API URL to use host project proxy`);
+      changed = true;
+    }
+
+    if (changed) {
+      files[filePath] = patched;
+      fixes.push(`${filePath.split("/").pop()}: patched chat API URL (runtime resolver, siteId=${siteId})`);
     }
   }
 }
@@ -216,6 +254,17 @@ function fixJsxBareSpecialChars(
       "{'<'}"
     );
 
+    // Pattern 5: bare > or < in SVG <text> content only (safest scope)
+    // e.g., <text ...>=></text>  →  <text ...>=&gt;</text>
+    // Only targets <text> elements to avoid breaking JSX tags
+    for (const line of patched.split("\n")) {
+      const m = line.match(/^(\s*<text\b[^>]*>)(.*?)(<\/text>)/);
+      if (m && /[<>]/.test(m[2]) && !m[2].includes("&gt;") && !m[2].includes("{'")) {
+        const fixed = m[1] + m[2].replace(/>/g, "&gt;").replace(/</g, "&lt;") + m[3];
+        patched = patched.replace(line, fixed);
+      }
+    }
+
     if (patched !== content) {
       files[path] = patched;
       fixes.push(`${path.split("/").pop()}: escaped bare > / < in JSX text`);
@@ -284,6 +333,84 @@ function fixTranslationsExports(
     }
     files["src/i18n/translations.ts"] = patched;
     fixes.push("translations.ts: added missing Lang/Translations type exports");
+  }
+}
+
+/** Fix fullscreen overlays blocking clicks — ensure ::before/::after have pointer-events: none */
+function fixOverlayPointerEvents(files: Record<string, string>, fixes: string[]) {
+  const css = files["src/app/globals.css"];
+  if (!css) return;
+
+  let patched = css;
+
+  // Fix any ::after or ::before on overlay elements that lack pointer-events: none
+  // Pattern: .something-overlay::after { ... } without pointer-events: none
+  patched = patched.replace(
+    /(\.[\w-]*overlay[\w-]*::(?:after|before)\s*\{)([^}]*)\}/g,
+    (match, selector, body) => {
+      if (body.includes("pointer-events")) return match;
+      return `${selector}${body} pointer-events: none; }`;
+    },
+  );
+
+  // Also ensure any element with z-index >= 9000 and position: fixed has pointer-events: none on children
+  // More targeted: if .texture-overlay exists, ensure its pseudo-elements are safe
+  if (patched.includes("z-index: 9999") || patched.includes("z-index:9999")) {
+    // Add a blanket rule for overlay pseudo-elements
+    if (!patched.includes("[class*='overlay']::after") && !patched.includes("[class*=overlay]::after")) {
+      patched += "\n[class*='overlay']::before, [class*='overlay']::after { pointer-events: none !important; }\n";
+    }
+  }
+
+  if (patched !== css) {
+    files["src/app/globals.css"] = patched;
+    fixes.push("globals.css: added pointer-events: none to overlay pseudo-elements");
+  }
+}
+
+/** Fix LanguageProvider import/export consistency — ensure default export + default import */
+function fixLanguageProviderImport(files: Record<string, string>, fixes: string[]) {
+  // Fix import side: { LanguageProvider } → default import
+  const importRe = /import\s*\{\s*LanguageProvider\s*\}\s*from\s*["']@\/components\/LanguageProvider["']/g;
+  for (const [filePath, content] of Object.entries(files)) {
+    if (importRe.test(content)) {
+      files[filePath] = content.replace(importRe, 'import LanguageProvider from "@/components/LanguageProvider"');
+      fixes.push(`${filePath}: fixed LanguageProvider named→default import`);
+    }
+  }
+
+  // Fix export side: ensure LanguageProvider.tsx uses export default
+  const lpFile = files["src/components/LanguageProvider.tsx"];
+  if (lpFile && !lpFile.includes("export default") && lpFile.includes("export function LanguageProvider")) {
+    files["src/components/LanguageProvider.tsx"] = lpFile
+      .replace("export function LanguageProvider", "export default function LanguageProvider")
+      // Also fix useLanguage: if context is created with null, add safe default
+      .replace(
+        /const LanguageContext = createContext<LanguageContextType \| null>\(null\)/,
+        "const LanguageContext = createContext<LanguageContextType>({ lang: \"zh\" as Lang, t: translations.zh, toggle: () => {} })"
+      );
+    // Fix useLanguage to not throw if outside provider
+    if (lpFile.includes("if (!ctx) throw")) {
+      files["src/components/LanguageProvider.tsx"] = files["src/components/LanguageProvider.tsx"]
+        .replace(/export function useLanguage\(\)\s*\{[^}]*\}/, "export function useLanguage() {\n  return useContext(LanguageContext);\n}");
+    }
+    // Add localStorage persistence if missing
+    if (!lpFile.includes("localStorage")) {
+      files["src/components/LanguageProvider.tsx"] = files["src/components/LanguageProvider.tsx"]
+        .replace(
+          /import \{ createContext, useContext, useState, useCallback/,
+          "import { createContext, useContext, useState, useEffect, useCallback"
+        );
+      // Insert useEffect after useState
+      const setLangMatch = files["src/components/LanguageProvider.tsx"].match(/const \[lang, setLang\] = useState<Lang>\("zh"\);/);
+      if (setLangMatch) {
+        files["src/components/LanguageProvider.tsx"] = files["src/components/LanguageProvider.tsx"].replace(
+          setLangMatch[0],
+          setLangMatch[0] + '\n  useEffect(() => { const saved = localStorage.getItem("lang") as Lang | null; if (saved && translations[saved]) setLang(saved); }, []);'
+        );
+      }
+    }
+    fixes.push("LanguageProvider.tsx: upgraded to default export with localStorage persistence");
   }
 }
 

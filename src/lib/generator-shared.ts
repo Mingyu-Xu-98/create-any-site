@@ -194,7 +194,21 @@ export default function SharePoster() {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const share = t.share;
+
+  // Build share data with fallbacks from other translation fields
+  const rawShare = (t as any).share || {};
+  const share = {
+    button: rawShare.button || (lang === "zh" ? "分享" : "Share"),
+    title: rawShare.title || (lang === "zh" ? "分享海报" : "Share Poster"),
+    invite: rawShare.invite || (t as any).hero?.lines?.[0]?.replace("> ", "") || (lang === "zh" ? "欢迎访问我的主页" : "Welcome to my site"),
+    desc: rawShare.desc && rawShare.desc.length > 10 ? rawShare.desc : ((t as any).about?.text?.slice(0, 120) || (lang === "zh" ? "这是我的个人网站" : "My personal website")),
+    save: rawShare.save || (lang === "zh" ? "保存海报" : "Save Poster"),
+    copy: rawShare.copy || (lang === "zh" ? "复制链接" : "Copy Link"),
+    copied: rawShare.copied || (lang === "zh" ? "已复制！" : "Copied!"),
+    cta: rawShare.cta || "",
+    projectTags: rawShare.projectTags || ((t as any).projects || []).slice(0, 4).map((p: any) => p.title).filter(Boolean),
+    skillTags: rawShare.skillTags || ((t as any).skills || []).flatMap((g: any) => g.skills || []).slice(0, 6),
+  };
 
   const drawPoster = useCallback(() => {
     const canvas = canvasRef.current;
@@ -286,7 +300,7 @@ export default function SharePoster() {
     ctx.restore();
 
     // --- Draw rest after avatar loads ---
-    const drawContent = (avatarImg?: HTMLImageElement) => {
+    const drawContent = async (avatarImg?: HTMLImageElement) => {
       const avatarY = cardY + 50;
 
       if (avatarImg) {
@@ -387,29 +401,30 @@ export default function SharePoster() {
         nextY += 36;
       }
 
-      // --- QR Code ---
+      // --- QR Code (async, drawn before save) ---
       const qrY = nextY;
       const url = typeof window !== "undefined" ? window.location.href : "";
       if (url) {
-        QRCode.toDataURL(url, { width: 200, margin: 1, color: { dark: "#000000", light: "#ffffff" } })
-          .then((dataUrl: string) => {
-            const qrImg = new Image();
-            qrImg.onload = () => {
-              const qrSize = 90;
-              const qrX = cx - qrSize / 2;
-              ctx.fillStyle = "#ffffff";
-              roundRect(ctx, qrX - 8, qrY - 8, qrSize + 16, qrSize + 16, 12);
-              ctx.drawImage(qrImg, qrX, qrY, qrSize, qrSize);
-              ctx.fillStyle = mutedColor;
-              ctx.font = \`12px \${fontBase}\`;
-              ctx.textAlign = "center";
-              ctx.globalAlpha = 0.6;
-              ctx.fillText(lang === "zh" ? "扫码访问" : "Scan to visit", cx, qrY + qrSize + 20);
-              ctx.globalAlpha = 1;
-            };
-            qrImg.src = dataUrl;
-          })
-          .catch(() => {});
+        try {
+          const dataUrl = await QRCode.toDataURL(url, { width: 200, margin: 1, color: { dark: "#000000", light: "#ffffff" } });
+          const qrImg = await new Promise<HTMLImageElement>((resolve, reject) => {
+            const img = new Image();
+            img.onload = () => resolve(img);
+            img.onerror = reject;
+            img.src = dataUrl;
+          });
+          const qrSize = 90;
+          const qrX = cx - qrSize / 2;
+          ctx.fillStyle = "#ffffff";
+          roundRect(ctx, qrX - 8, qrY - 8, qrSize + 16, qrSize + 16, 12);
+          ctx.drawImage(qrImg, qrX, qrY, qrSize, qrSize);
+          ctx.fillStyle = mutedColor;
+          ctx.font = \`12px \${fontBase}\`;
+          ctx.textAlign = "center";
+          ctx.globalAlpha = 0.6;
+          ctx.fillText(lang === "zh" ? "扫码访问" : "Scan to visit", cx, qrY + qrSize + 20);
+          ctx.globalAlpha = 1;
+        } catch {}
       }
     };
 
@@ -529,22 +544,40 @@ function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: numbe
   ctx.quadraticCurveTo(x, y, x + r, y);
   ctx.closePath();
   ctx.fill();
+  if (ctx.lineWidth > 0 && ctx.strokeStyle && ctx.strokeStyle !== "rgba(0, 0, 0, 0)") ctx.stroke();
 }
 
 function wrapText(ctx: CanvasRenderingContext2D, text: string, maxW: number): string[] {
-  const words = text.split("");
   const lines: string[] = [];
-  let line = "";
-  for (const char of words) {
-    const test = line + char;
-    if (ctx.measureText(test).width > maxW && line) {
-      lines.push(line);
-      line = char;
-    } else {
-      line = test;
+  // Split by spaces for English; fall back to char-by-char for CJK or when no spaces
+  const hasSpaces = /\\s/.test(text);
+  if (hasSpaces) {
+    const words = text.split(/\\s+/);
+    let line = "";
+    for (const word of words) {
+      const test = line ? line + " " + word : word;
+      if (ctx.measureText(test).width > maxW && line) {
+        lines.push(line);
+        line = word;
+      } else {
+        line = test;
+      }
     }
+    if (line) lines.push(line);
+  } else {
+    // CJK text: wrap by character
+    let line = "";
+    for (const char of text) {
+      const test = line + char;
+      if (ctx.measureText(test).width > maxW && line) {
+        lines.push(line);
+        line = char;
+      } else {
+        line = test;
+      }
+    }
+    if (line) lines.push(line);
   }
-  if (line) lines.push(line);
   return lines;
 }
 
@@ -607,18 +640,21 @@ export default function ChatBot() {
       const chatUrl = origin && siteId ? \`\${origin}/api/site-chat/\${siteId}\` : "/api/chat";
       const res = await fetch(chatUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ messages: newMsgs }) });
       if (!res.ok) throw new Error();
-      const reader = res.body!.getReader();
+      if (!res.body) throw new Error("Empty response body");
+      const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let content = "";
-      setMessages([...newMsgs, { role: "assistant", content: "" }]);
+      setMessages(prev => [...prev, { role: "assistant", content: "" }]);
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         content += decoder.decode(value, { stream: true });
-        setMessages([...newMsgs, { role: "assistant", content }]);
+        setMessages(prev => [...prev.slice(0, -1), { role: "assistant", content }]);
       }
+      content += decoder.decode();
+      if (content) setMessages(prev => [...prev.slice(0, -1), { role: "assistant", content }]);
     } catch {
-      setMessages([...newMsgs, { role: "assistant", content: "Sorry, something went wrong." }]);
+      setMessages(prev => [...prev, { role: "assistant", content: "Sorry, something went wrong." }]);
     } finally { setLoading(false); }
   };
 

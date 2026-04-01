@@ -82,8 +82,9 @@ export function generateBaseFiles(options: {
   // ChatBot
   files["src/components/ChatBot.tsx"] = generateChatBot();
 
-  // SharePoster
-  files["src/components/SharePoster.tsx"] = generateSharePoster();
+  // SharePoster — use the full canvas+QR version from generator-shared
+  const { genSharePoster } = require("./generator-shared") as typeof import("./generator-shared");
+  files["src/components/SharePoster.tsx"] = genSharePoster();
 
   // CartoonAssistant — animated animal character + chat (alternative to ChatBot)
   files["src/components/CartoonAssistant.tsx"] = generateCartoonAssistant(options.theme);
@@ -247,17 +248,14 @@ function pickAnimalForTheme(theme?: string): string {
 }
 
 function getAnimalSvg(animal: string): string {
+  // Head-only SVGs — no body, arms, or tail. Uses CSS variables for theme-adaptive accent color.
+  const accent = "var(--color-accent,#6366f1)";
   const animals: Record<string, string> = {
-    cat: `<svg viewBox="0 0 120 150" fill="none" xmlns="http://www.w3.org/2000/svg">
-<g class="ca-body-g">
-  <ellipse cx="60" cy="120" rx="30" ry="28" fill="var(--color-accent,#6366f1)"/>
-  <g class="ca-arm-l"><ellipse cx="32" cy="125" rx="10" ry="7" fill="var(--color-accent,#6366f1)" transform="rotate(-15,32,125)"/></g>
-  <g class="ca-arm-r"><ellipse cx="88" cy="125" rx="10" ry="7" fill="var(--color-accent,#6366f1)" transform="rotate(15,88,125)"/></g>
-  <path d="M45,145 Q60,150 75,145" stroke="var(--color-accent,#6366f1)" stroke-width="4" stroke-linecap="round" fill="none"/>
-</g>
+    cat: `<svg viewBox="0 0 120 100" fill="none" xmlns="http://www.w3.org/2000/svg">
 <g class="ca-head-g">
-  <circle cx="60" cy="58" r="38" fill="#F5D5C0"/>
-  <path d="M24,42 L32,12 L48,35Z" fill="#F5D5C0"/><path d="M96,42 L88,12 L72,35Z" fill="#F5D5C0"/>
+  <circle cx="60" cy="58" r="38" fill="${accent}"/>
+  <circle cx="60" cy="60" r="32" fill="#F5D5C0"/>
+  <path d="M24,42 L32,12 L48,35Z" fill="${accent}"/><path d="M96,42 L88,12 L72,35Z" fill="${accent}"/>
   <path d="M27,38 L34,16 L46,34Z" fill="#FFB5C5" opacity="0.5"/><path d="M93,38 L86,16 L74,34Z" fill="#FFB5C5" opacity="0.5"/>
   <g class="ca-eyes">
     <ellipse cx="44" cy="55" rx="7" ry="8" fill="#fff"/><ellipse cx="45" cy="56" rx="4.5" ry="5" fill="#333"/><circle cx="47" cy="54" r="1.8" fill="#fff"/>
@@ -270,19 +268,9 @@ function getAnimalSvg(animal: string): string {
     <ellipse class="ca-m-open" cx="60" cy="76" rx="6" ry="4" fill="#333" opacity="0"/>
     <path class="ca-m-happy" d="M48,73 Q55,80 60,73 Q65,80 72,73" stroke="#333" stroke-width="2" fill="rgba(255,120,120,0.3)" stroke-linecap="round" opacity="0"/>
   </g>
-  <line x1="22" y1="60" x2="8" y2="56" stroke="#333" stroke-width="1.5" opacity="0.3"/>
-  <line x1="22" y1="65" x2="6" y2="66" stroke="#333" stroke-width="1.5" opacity="0.3"/>
-  <line x1="98" y1="60" x2="112" y2="56" stroke="#333" stroke-width="1.5" opacity="0.3"/>
-  <line x1="98" y1="65" x2="114" y2="66" stroke="#333" stroke-width="1.5" opacity="0.3"/>
 </g></svg>`,
 
-    shiba: `<svg viewBox="0 0 120 150" fill="none" xmlns="http://www.w3.org/2000/svg">
-<g class="ca-body-g">
-  <ellipse cx="60" cy="122" rx="28" ry="26" fill="#E8A64C"/>
-  <ellipse cx="60" cy="126" rx="18" ry="16" fill="#FFF3D6"/>
-  <g class="ca-arm-l"><ellipse cx="34" cy="122" rx="9" ry="7" fill="#E8A64C"/></g>
-  <g class="ca-arm-r"><ellipse cx="86" cy="122" rx="9" ry="7" fill="#E8A64C"/></g>
-</g>
+    shiba: `<svg viewBox="0 0 120 100" fill="none" xmlns="http://www.w3.org/2000/svg">
 <g class="ca-head-g">
   <circle cx="60" cy="56" r="38" fill="#E8A64C"/>
   <circle cx="60" cy="60" r="28" fill="#FFF3D6"/>
@@ -302,19 +290,14 @@ function getAnimalSvg(animal: string): string {
   <ellipse cx="84" cy="66" rx="8" ry="5" fill="rgba(255,150,150,0.3)"/>
 </g></svg>`,
 
-    bunny: `<svg viewBox="0 0 120 155" fill="none" xmlns="http://www.w3.org/2000/svg">
-<g class="ca-body-g">
-  <ellipse cx="60" cy="125" rx="26" ry="25" fill="#F0F0F0"/>
-  <g class="ca-arm-l"><ellipse cx="36" cy="122" rx="8" ry="6" fill="#F0F0F0"/></g>
-  <g class="ca-arm-r"><ellipse cx="84" cy="122" rx="8" ry="6" fill="#F0F0F0"/></g>
-</g>
+    bunny: `<svg viewBox="0 0 120 105" fill="none" xmlns="http://www.w3.org/2000/svg">
 <g class="ca-head-g">
   <circle cx="60" cy="68" r="32" fill="#F0F0F0"/>
-  <ellipse cx="44" cy="24" rx="10" ry="30" fill="#F0F0F0"/><ellipse cx="44" cy="24" rx="6" ry="22" fill="#FFB5C5" opacity="0.4"/>
-  <ellipse cx="76" cy="24" rx="10" ry="30" fill="#F0F0F0"/><ellipse cx="76" cy="24" rx="6" ry="22" fill="#FFB5C5" opacity="0.4"/>
+  <ellipse cx="44" cy="24" rx="10" ry="30" fill="#F0F0F0"/><ellipse cx="44" cy="24" rx="6" ry="22" fill="${accent}" opacity="0.35"/>
+  <ellipse cx="76" cy="24" rx="10" ry="30" fill="#F0F0F0"/><ellipse cx="76" cy="24" rx="6" ry="22" fill="${accent}" opacity="0.35"/>
   <g class="ca-eyes">
-    <circle cx="48" cy="64" r="5.5" fill="#FF6B8A"/><circle cx="49.5" cy="62.5" r="2" fill="#fff"/>
-    <circle cx="72" cy="64" r="5.5" fill="#FF6B8A"/><circle cx="73.5" cy="62.5" r="2" fill="#fff"/>
+    <circle cx="48" cy="64" r="5.5" fill="${accent}"/><circle cx="49.5" cy="62.5" r="2" fill="#fff"/>
+    <circle cx="72" cy="64" r="5.5" fill="${accent}"/><circle cx="73.5" cy="62.5" r="2" fill="#fff"/>
   </g>
   <g class="ca-blink"><rect x="40" y="59" width="16" height="12" rx="6" fill="#F0F0F0" opacity="0"/><rect x="64" y="59" width="16" height="12" rx="6" fill="#F0F0F0" opacity="0"/></g>
   <ellipse cx="60" cy="74" rx="3" ry="2" fill="#FFB5C5"/>
@@ -327,14 +310,7 @@ function getAnimalSvg(animal: string): string {
   <ellipse cx="82" cy="74" rx="7" ry="4" fill="rgba(255,180,197,0.35)"/>
 </g></svg>`,
 
-    fox: `<svg viewBox="0 0 120 150" fill="none" xmlns="http://www.w3.org/2000/svg">
-<g class="ca-body-g">
-  <ellipse cx="60" cy="122" rx="28" ry="26" fill="#E86C2C"/>
-  <ellipse cx="60" cy="128" rx="16" ry="14" fill="#FFF3E0"/>
-  <g class="ca-arm-l"><ellipse cx="34" cy="120" rx="9" ry="7" fill="#E86C2C"/></g>
-  <g class="ca-arm-r"><ellipse cx="86" cy="120" rx="9" ry="7" fill="#E86C2C"/></g>
-  <path d="M48,146 Q60,155 72,146" stroke="#FFF3E0" stroke-width="5" stroke-linecap="round" fill="none"/>
-</g>
+    fox: `<svg viewBox="0 0 120 100" fill="none" xmlns="http://www.w3.org/2000/svg">
 <g class="ca-head-g">
   <circle cx="60" cy="56" r="36" fill="#E86C2C"/>
   <ellipse cx="60" cy="65" rx="22" ry="18" fill="#FFF3E0"/>
@@ -353,22 +329,17 @@ function getAnimalSvg(animal: string): string {
   </g>
 </g></svg>`,
 
-    owl: `<svg viewBox="0 0 120 150" fill="none" xmlns="http://www.w3.org/2000/svg">
-<g class="ca-body-g">
-  <ellipse cx="60" cy="122" rx="30" ry="26" fill="#8B6C5C"/>
-  <ellipse cx="60" cy="126" rx="20" ry="18" fill="#D4B896"/>
-  <g class="ca-arm-l"><path d="M30,108 L12,96 L28,120Z" fill="#8B6C5C"/></g>
-  <g class="ca-arm-r"><path d="M90,108 L108,96 L92,120Z" fill="#8B6C5C"/></g>
-</g>
+    owl: `<svg viewBox="0 0 120 100" fill="none" xmlns="http://www.w3.org/2000/svg">
 <g class="ca-head-g">
-  <circle cx="60" cy="56" r="38" fill="#8B6C5C"/>
-  <path d="M24,34 L16,8 L40,28Z" fill="#8B6C5C"/><path d="M96,34 L104,8 L80,28Z" fill="#8B6C5C"/>
+  <circle cx="60" cy="56" r="38" fill="${accent}"/>
+  <circle cx="60" cy="58" r="30" fill="#D4B896"/>
+  <path d="M24,34 L16,8 L40,28Z" fill="${accent}"/><path d="M96,34 L104,8 L80,28Z" fill="${accent}"/>
   <g class="ca-eyes">
     <circle cx="42" cy="52" r="14" fill="#FFF3D6"/><circle cx="78" cy="52" r="14" fill="#FFF3D6"/>
     <circle cx="42" cy="52" r="7" fill="#E8A64C"/><circle cx="42" cy="52" r="4" fill="#333"/><circle cx="44" cy="50" r="1.5" fill="#fff"/>
     <circle cx="78" cy="52" r="7" fill="#E8A64C"/><circle cx="78" cy="52" r="4" fill="#333"/><circle cx="80" cy="50" r="1.5" fill="#fff"/>
   </g>
-  <g class="ca-blink"><rect x="28" y="42" width="28" height="22" rx="11" fill="#8B6C5C" opacity="0"/><rect x="64" y="42" width="28" height="22" rx="11" fill="#8B6C5C" opacity="0"/></g>
+  <g class="ca-blink"><rect x="28" y="42" width="28" height="22" rx="11" fill="#D4B896" opacity="0"/><rect x="64" y="42" width="28" height="22" rx="11" fill="#D4B896" opacity="0"/></g>
   <path d="M56,68 L60,74 L64,68Z" fill="#E8A64C"/>
   <g class="ca-mouth">
     <path class="ca-m-smile" d="M54,78 Q60,82 66,78" stroke="#6B4E3D" stroke-width="1.5" fill="none" stroke-linecap="round"/>
@@ -377,13 +348,7 @@ function getAnimalSvg(animal: string): string {
   </g>
 </g></svg>`,
 
-    panda: `<svg viewBox="0 0 120 150" fill="none" xmlns="http://www.w3.org/2000/svg">
-<g class="ca-body-g">
-  <ellipse cx="60" cy="122" rx="30" ry="26" fill="#F5F5F5"/>
-  <ellipse cx="60" cy="126" rx="20" ry="18" fill="#fff"/>
-  <g class="ca-arm-l"><ellipse cx="32" cy="118" rx="11" ry="9" fill="#333"/></g>
-  <g class="ca-arm-r"><ellipse cx="88" cy="118" rx="11" ry="9" fill="#333"/></g>
-</g>
+    panda: `<svg viewBox="0 0 120 100" fill="none" xmlns="http://www.w3.org/2000/svg">
 <g class="ca-head-g">
   <circle cx="60" cy="56" r="38" fill="#F5F5F5"/>
   <ellipse cx="38" cy="48" rx="16" ry="14" fill="#333"/><ellipse cx="82" cy="48" rx="16" ry="14" fill="#333"/>
@@ -402,14 +367,7 @@ function getAnimalSvg(animal: string): string {
   <ellipse cx="84" cy="68" rx="6" ry="4" fill="rgba(255,150,150,0.25)"/>
 </g></svg>`,
 
-    penguin: `<svg viewBox="0 0 120 150" fill="none" xmlns="http://www.w3.org/2000/svg">
-<g class="ca-body-g">
-  <ellipse cx="60" cy="110" rx="32" ry="38" fill="#2C3E50"/>
-  <ellipse cx="60" cy="118" rx="20" ry="26" fill="#F5F5F5"/>
-  <g class="ca-arm-l"><path d="M28,100 Q14,110 18,130" stroke="#2C3E50" stroke-width="12" stroke-linecap="round" fill="none"/></g>
-  <g class="ca-arm-r"><path d="M92,100 Q106,110 102,130" stroke="#2C3E50" stroke-width="12" stroke-linecap="round" fill="none"/></g>
-  <ellipse cx="48" cy="146" rx="10" ry="5" fill="#E8A64C"/><ellipse cx="72" cy="146" rx="10" ry="5" fill="#E8A64C"/>
-</g>
+    penguin: `<svg viewBox="0 0 120 90" fill="none" xmlns="http://www.w3.org/2000/svg">
 <g class="ca-head-g">
   <circle cx="60" cy="48" r="32" fill="#2C3E50"/>
   <ellipse cx="60" cy="52" rx="24" ry="22" fill="#F5F5F5"/>
@@ -446,8 +404,8 @@ const SVG_CHAR = \`${svgContent}\`;
 const CA_CSS = \`
 .ca-wrap{position:fixed;bottom:16px;right:16px;z-index:50;display:flex;align-items:flex-end;gap:10px;pointer-events:none}
 .ca-wrap>*{pointer-events:auto}
-.ca-char{position:relative;width:100px;cursor:pointer;transition:transform .3s;flex-shrink:0}
-.ca-char:hover{transform:scale(1.06)}
+.ca-char{position:relative;width:64px;cursor:pointer;transition:transform .3s;flex-shrink:0;filter:drop-shadow(0 2px 8px rgba(0,0,0,0.15))}
+.ca-char:hover{transform:scale(1.1)}
 .ca-char svg{width:100%;height:auto;display:block}
 .ca-hint{position:absolute;bottom:85%;right:50%;transform:translateX(50%);background:var(--color-bg-card,#fff);color:var(--color-text,#333);padding:6px 14px;border-radius:14px;font-size:12px;white-space:nowrap;box-shadow:0 2px 14px rgba(0,0,0,.1);animation:ca-pop .3s}
 .ca-hint::after{content:'';position:absolute;top:100%;left:50%;transform:translateX(-50%);border:6px solid transparent;border-top-color:var(--color-bg-card,#fff)}
@@ -475,22 +433,20 @@ const CA_CSS = \`
 .ca-inp button:disabled{opacity:.3;cursor:default}
 [data-state] svg{animation:ca-breathe 3s ease-in-out infinite}
 [data-state] .ca-blink rect{animation:ca-blk 4s ease-in-out infinite}
-[data-state] .ca-arm-r{transform-origin:92px 118px}
-[data-state="waving"] .ca-arm-r{animation:ca-wave .5s ease-in-out 4 alternate}
+[data-state="waving"] .ca-head-g{animation:ca-tilt 1s ease-in-out 2}
 [data-state="talking"] .ca-m-smile{opacity:0}[data-state="talking"] .ca-m-open{animation:ca-talk .35s ease-in-out infinite alternate}
 [data-state="happy"] .ca-m-smile{opacity:0}[data-state="happy"] .ca-m-happy{opacity:1}
 [data-state="happy"] svg{animation:ca-bounce .5s ease-out}
 [data-state="thinking"] svg{animation:ca-tilt 2s ease-in-out infinite}
-@keyframes ca-breathe{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
+@keyframes ca-breathe{0%,100%{transform:translateY(0)}50%{transform:translateY(-2px)}}
 @keyframes ca-blk{0%,92%,100%{opacity:0}94%,96%{opacity:1}}
-@keyframes ca-wave{from{transform:rotate(0)}to{transform:rotate(-40deg)}}
 @keyframes ca-talk{from{opacity:.3;transform:scaleY(.5)}to{opacity:1;transform:scaleY(1)}}
-@keyframes ca-bounce{0%{transform:translateY(0)}40%{transform:translateY(-8px)}100%{transform:translateY(0)}}
-@keyframes ca-tilt{0%,100%{transform:rotate(0) translateY(0)}50%{transform:rotate(3deg) translateY(-2px)}}
+@keyframes ca-bounce{0%{transform:translateY(0)}40%{transform:translateY(-6px)}100%{transform:translateY(0)}}
+@keyframes ca-tilt{0%,100%{transform:rotate(0) translateY(0)}50%{transform:rotate(5deg) translateY(-2px)}}
 @keyframes ca-pop{from{opacity:0;transform:translateX(50%) translateY(6px)}to{opacity:1;transform:translateX(50%) translateY(0)}}
 @keyframes ca-slideup{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
 @keyframes ca-dbounce{0%,80%,100%{transform:scale(.6);opacity:.4}40%{transform:scale(1);opacity:1}}
-@media(max-width:640px){.ca-wrap{right:8px;bottom:8px;gap:6px}.ca-char{width:72px}.ca-panel{width:calc(100vw - 100px);max-height:380px}}
+@media(max-width:640px){.ca-wrap{right:8px;bottom:8px;gap:6px}.ca-char{width:52px}.ca-panel{width:calc(100vw - 80px);max-height:380px}}
 \`;
 
 export default function CartoonAssistant() {

@@ -50,10 +50,16 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
     if (body?.action === "publish") {
       if (!site.draftBuildId) {
-        return NextResponse.json({ error: "No draft build is ready to publish" }, { status: 400 });
+        return NextResponse.json({ error: "No draft build is ready to publish. Please generate or rebuild first." }, { status: 400 });
       }
 
-      const publishedUrl = await publishDraftPreview(id);
+      let publishedUrl: string;
+      try {
+        publishedUrl = await publishDraftPreview(id);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Failed to publish";
+        return NextResponse.json({ error: msg }, { status: 500 });
+      }
       await db
         .update(sites)
         .set({

@@ -14,9 +14,9 @@ import { timelineBlog } from "./blog";
 import { timelineReveal } from "./reveal";
 import { timelineMinimal } from "./minimal";
 
-registerTimeline("vertical", timelineVertical);
-registerTimeline("compact", timelineCompact);
-registerTimeline("parchment", timelineParchment);
-registerTimeline("blog", timelineBlog);
-registerTimeline("reveal", timelineReveal);
-registerTimeline("minimal", timelineMinimal);
+registerTimeline("vertical", timelineVertical, { description: "Standard vertical line with dot indicators", bestFor: ["any", "light-clean"], dataShape: "timeline[]{date, title, desc}" });
+registerTimeline("compact", timelineCompact, { description: "Dense compressed timeline, minimal spacing", bestFor: ["dark-tech", "compact"], dataShape: "timeline[]" });
+registerTimeline("parchment", timelineParchment, { description: "Vintage parchment-style timeline", bestFor: ["warm-organic", "ghibli", "ink-wash"], dataShape: "timeline[]" });
+registerTimeline("blog", timelineBlog, { description: "Blog-style date + title + excerpt", bestFor: ["editorial-refined", "blog"], dataShape: "timeline[]" });
+registerTimeline("reveal", timelineReveal, { description: "Scroll-triggered reveal animation", bestFor: ["bold-creative", "cinematic"], dataShape: "timeline[]" });
+registerTimeline("minimal", timelineMinimal, { description: "Clean dots-only minimal timeline", bestFor: ["light-clean", "minimalist"], dataShape: "timeline[]" });

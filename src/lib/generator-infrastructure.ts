@@ -1,7 +1,8 @@
 import type { WorkspaceData, ThemeStyle, LayoutType, FeatureFlags } from "./types";
 import type { SiteSpec } from "./site-spec";
 import { getInstalledNextVersion } from "./next-version";
-import { type ResolvedStyle, STYLE_CONFIG, LAYOUT_FAMILY, applyDesignIntelligence } from "./generator-config";
+import { type ResolvedStyle, STYLE_CONFIG, LAYOUT_FAMILY, applyDesignIntelligence, recipeExtraCSS } from "./generator-config";
+import type { DesignRecipe } from "./recipes/loader";
 import { getSpecTitle, getSpecName, getSectionTitles, getAvailableSections, findSpecSection, readStringArray, readProjectItems, readTimelineItems, buildHeroLines } from "./generator-utils";
 
 export function genPackageJson(): string {
@@ -44,41 +45,22 @@ export function genTsConfig(): string {
   }, null, 2);
 }
 
-export function genLayout(data: WorkspaceData, theme: ThemeStyle, features: FeatureFlags, resolved?: ResolvedStyle, spec?: SiteSpec | null): string {
+export function genLayout(data: WorkspaceData, theme: ThemeStyle, features: FeatureFlags, resolved?: ResolvedStyle, spec?: SiteSpec | null, recipe?: DesignRecipe | null): string {
   const bgThemes = ["ghibli", "nature", "cinematic"];
   const bodyClassMap: Partial<Record<ThemeStyle, string>> = { ghibli: "ghibli-bg", nature: "nature-bg", cinematic: "cinematic-page-bg" };
   const bodyClass = bgThemes.includes(theme) ? (bodyClassMap[theme] || "") : "";
   const darkScript = "";
 
-  // External fonts - prefer design intelligence fonts, fall back to defaults
+  // External fonts — read from recipe first, then resolved (DI), then nothing
   let fontLinks = "";
-  if (resolved?.fontImport) {
-    // Design intelligence provided a CSS @import, convert to <link> for <head>
-    // Extract the URL from: @import url('...');
-    const urlMatch = resolved.fontImport.match(/url\(['"]?([^'"]+)['"]?\)/);
-    if (urlMatch) {
-      fontLinks = `\n        <link href="${urlMatch[1]}" rel="stylesheet" />`;
-    }
-  }
-  if (!fontLinks) {
-    const fontMap: Partial<Record<ThemeStyle, string>> = {
-      brutalist: "https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&display=swap",
-      cyberpunk: "https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap",
-      ghibli: "https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500;700&display=swap",
-      glassmorphism: "https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Cormorant+Garamond:wght@500;600;700&display=swap",
-      minimalist: "https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap",
-      cinematic: "https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;700&family=Playfair+Display:wght@300;400;700&display=swap",
-      retro: "https://fonts.googleapis.com/css2?family=IBM+Plex+Serif:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap",
-      "bold-creative": "https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700;900&display=swap",
-      editorial: "https://fonts.googleapis.com/css2?family=Libre+Baskerville:wght@400;700&family=Playfair+Display:ital,wght@0,400;0,700;1,400&display=swap",
-      nature: "https://fonts.googleapis.com/css2?family=Nunito:wght@300;400;500;600;700&display=swap",
-      "gradient-mesh": "https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap",
-      "neo-tokyo": "https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500;700&family=JetBrains+Mono:wght@400;500&display=swap",
-      "tpl-resume-bold": "https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=Manrope:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap",
-      "tpl-resume-dark": "https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap",
-      "tpl-blog": "https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,700;9..144,900&family=Inter:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap",
-    };
-    const url = fontMap[theme];
+  const fontUrl = recipe?.typography?.import || (() => {
+    // Extract URL from @import url('...')
+    const m = resolved?.fontImport?.match(/url\(['"]?([^'"]+)['"]?\)/);
+    return m ? m[1] : null;
+  })();
+  if (fontUrl) {
+    // If it looks like a full URL, use as <link href>; if it's an @import statement, extract URL
+    const url = fontUrl.startsWith("http") ? fontUrl : fontUrl.match(/url\(['"]?([^'"]+)['"]?\)/)?.[1];
     if (url) fontLinks = `\n        <link href="${url}" rel="stylesheet" />`;
   }
 
@@ -107,18 +89,22 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 
 // ---- CSS Generation ----
 
-export function genGlobalCSS(theme: ThemeStyle, layout: LayoutType, features: FeatureFlags, resolved?: ResolvedStyle): string {
-  const config = resolved || applyDesignIntelligence(theme);
+export function genGlobalCSS(theme: ThemeStyle, layout: LayoutType, features: FeatureFlags, resolved: ResolvedStyle, recipe: DesignRecipe): string {
+  const config = resolved;
   // Font @import must come BEFORE @import "tailwindcss" (CSS spec: @import must precede all rules)
   const fontImportLine = config.fontImport ? `${config.fontImport}\n` : "";
+
+  // Recipe extra tokens (radius levels, shadows, type scale, spacing scale, mono font)
+  const extraTokens = "\n" + recipeExtraCSS(recipe);
+
   const base = `${fontImportLine}@import "tailwindcss";
 
 @theme {
 ${Object.entries(config.colors).map(([k, v]) => `  --color-${k}: ${v};`).join("\n")}
   --font-sans: ${config.fontSans};
   --font-heading: ${config.fontHeading};
-  --font-mono: "SF Mono", "Fira Code", Menlo, Consolas, monospace;
-  --radius-card: ${config.borderRadius};
+  --font-mono: ${recipe.typography.mono || '"SF Mono", "Fira Code", Menlo, Consolas, monospace'};
+  --radius-card: ${config.borderRadius};${extraTokens}
 }
 `;
 
@@ -162,7 +148,7 @@ html { scroll-behavior: smooth; }
 }
 `;
 
-  const cardStyle = genCardStyle(theme);
+  const cardStyle = recipe.cardCSS ? `\n${recipe.cardCSS}\n` : genCardStyle(theme);
   const layoutCSS = genLayoutCSS(layout, theme);
   const animationCSS = genAnimationCSS(theme);
   const chatCSS = genChatCSS();
@@ -3066,11 +3052,12 @@ export function genTranslations(data: WorkspaceData, spec?: SiteSpec | null): st
     availableSections,
     links: (data.links || []).map(l => ({ label: l.label, url: l.url, icon: l.icon || "other" })),
   };
+  const heroTagsEn = data.tagsEn?.length ? data.tagsEn : heroTags;
   const en = {
     nav: { projects: "Projects", timeline: "Experience", skills: "Skills", education: "Education", contact: "Contact" },
     hero: {
       lines: buildHeroLines(data, spec, true),
-      tags: heroTags,
+      tags: heroTagsEn,
     },
     sections: {
       about: sectionTitles.about || "About Me",
@@ -3092,11 +3079,11 @@ export function genTranslations(data: WorkspaceData, spec?: SiteSpec | null): st
       gallery: sectionTitles.gallery || "Gallery",
       blog: sectionTitles.blog || "Blog",
     },
-    about: { text: aboutText || data.bioEn, tags: aboutTags.length > 0 ? aboutTags : data.bioTagsEn },
-    projects: specProjectsEn.map((p, i) => ({ title: p.title, org: p.org, desc: p.desc, tags: p.tags, image: p.image || "", link: p.link || "", badge: p.badge || "" })),
-    timeline: specTimelineEn,
-    skills: data.skillsEn || data.skills,
-    education: data.educationEn || data.education,
+    about: { text: data.bioEn || aboutText, tags: data.bioTagsEn?.length ? data.bioTagsEn : aboutTags },
+    projects: (data.projectsEn?.length ? data.projectsEn : specProjectsEn).map((p, i) => ({ title: p.title, org: p.org, desc: p.desc, tags: p.tags, image: p.image || "", link: p.link || "", badge: p.badge || "" })),
+    timeline: data.timelineEn?.length ? data.timelineEn : specTimelineEn,
+    skills: data.skillsEn?.length ? data.skillsEn : data.skills,
+    education: data.educationEn?.length ? data.educationEn : data.education,
     footer: `\u00A9 ${new Date().getFullYear()} ${data.nameEn || data.name}. All rights reserved.`,
     chatbot: {
       title: `${data.nameEn || data.name} AI`,

@@ -126,7 +126,20 @@ export async function publishDraftPreview(siteId: string): Promise<string> {
     return getLocalPreviewUrl(siteId);
   }
   const draftDir = getDraftPublishDir(siteId);
-  await fs.access(draftDir);
+
+  // If draft preview directory doesn't exist, try to re-sync from site build output
+  try {
+    await fs.access(draftDir);
+  } catch {
+    const siteOutDir = path.join(SITES_DIR, siteId, "out");
+    try {
+      await fs.access(siteOutDir);
+      await syncDraftPreview(siteId, path.join(SITES_DIR, siteId));
+    } catch {
+      throw new Error(`Draft preview not found for site ${siteId}. Please rebuild first.`);
+    }
+  }
+
   const publishedDir = getPublishedPublishDir(siteId);
   await copyDirectory(draftDir, publishedDir);
   const draftPathname = new URL(getDraftPreviewUrl(siteId)).pathname;
@@ -403,14 +416,22 @@ async function runVerification(siteDir: string, files: Record<string, string>, s
     const html = await fs.readFile(outIndex, "utf-8");
     checks.push({ label: "Static export index.html exists", ok: html.length > 0 });
     if (Array.isArray(spec?.sections)) {
+      const aliasMap: Record<string, string[]> = {
+        timeline: ["experience", "timeline", "milestones"],
+        projects: ["projects", "portfolio", "work", "showcase"],
+        blog: ["blog", "posts", "articles", "writing"],
+        contact: ["contact", "cta", "hire-me", "get-started"],
+        skills: ["skills", "tech-stack", "expertise"],
+        about: ["about", "intro", "bio"],
+      };
       for (const section of spec.sections.filter(item => item.enabled !== false)) {
         const sectionId = section.id || section.type;
         if (!sectionId) continue;
-        const anchorId = sectionId === "timeline" ? "experience" : sectionId;
-        checks.push({
-          label: `Rendered section anchor: ${sectionId}`,
-          ok: html.includes(`id="${anchorId}"`) || html.includes(`id='${anchorId}'`) || html.includes(`#${anchorId}`),
-        });
+        const candidates = aliasMap[sectionId] || [sectionId];
+        const found = candidates.some(id =>
+          html.includes(`id="${id}"`) || html.includes(`id='${id}'`) || html.includes(`#${id}`)
+        );
+        checks.push({ label: `Rendered section anchor: ${sectionId}`, ok: found });
       }
     }
   } catch {
@@ -488,7 +509,7 @@ async function assertPreviewArtifacts(siteDir: string, siteId: string): Promise<
 }
 
 /** Dependency whitelist — only these npm packages are allowed in generated sites */
-const ALLOWED_DEPENDENCIES = new Set([
+export const ALLOWED_DEPENDENCIES = new Set([
   "next", "react", "react-dom", "tailwindcss", "@tailwindcss/postcss", "postcss",
   "typescript", "@types/react", "@types/node",
   "qrcode", "@types/qrcode", "dijkstrajs", "pngjs",
@@ -640,7 +661,7 @@ export interface RunSiteBuildResult {
  * Falls back to regex if AI call fails.
  */
 async function enrichWorkspaceDataFromKB(data: WorkspaceData, kbContent: string): Promise<Partial<WorkspaceData>> {
-  const text = kbContent.slice(0, 15000);
+  const text = kbContent.slice(0, 40000);
 
   // Try AI extraction first
   try {
@@ -801,7 +822,7 @@ function generateAdvancedLayout(theme: string): string {
 
   return `import type { Metadata } from "next";
 import "./globals.css";
-import { LanguageProvider } from "@/components/LanguageProvider";
+import LanguageProvider from "@/components/LanguageProvider";
 
 export const metadata: Metadata = { title: "My Site", description: "Generated with CreateAnySite" };
 
@@ -887,6 +908,40 @@ export async function runSiteBuild(input: RunSiteBuildInput): Promise<RunSiteBui
 
     // Generate infrastructure files (package.json, tsconfig, shared components)
     files = generateBaseFiles({ siteName: data.name, chatbotContext: data.chatbotContext, theme: selections.theme || undefined });
+
+    // Resolve recipe if Design Agent provided one (recipe + layers + overrides)
+    let resolvedRecipe = null;
+    const recipeId = (selections as any).recipe;
+    if (recipeId) {
+      try {
+        const { resolveDesignPlan } = await import("./recipes/loader");
+        resolvedRecipe = resolveDesignPlan({
+          recipe: recipeId,
+          layers: (selections as any).recipeLayers || [],
+          overrides: (selections as any).recipeOverrides || undefined,
+        });
+        if (resolvedRecipe) {
+          // Apply recipe extra CSS tokens to globals.css
+          const { recipeExtraCSS, recipeToResolvedStyle } = await import("./generator-config");
+          const recipeCSS = recipeExtraCSS(resolvedRecipe);
+          const resolvedStyle = recipeToResolvedStyle(resolvedRecipe);
+          // Inject recipe CSS variables into globals.css
+          if (files["src/app/globals.css"]) {
+            files["src/app/globals.css"] = files["src/app/globals.css"].replace(
+              "}",
+              `\n${recipeCSS}\n}`,
+            );
+          }
+          // Use recipe card CSS if available
+          if (resolvedRecipe.cardCSS) {
+            files["src/app/globals.css"] += "\n\n/* === Recipe Card Style === */\n" + resolvedRecipe.cardCSS;
+          }
+          logger.info("generate", `[${requestId}] Resolved recipe: ${recipeId} + ${(selections as any).recipeLayers?.length || 0} layers`);
+        }
+      } catch (err) {
+        logger.warn("generate", `[${requestId}] Recipe resolution failed: ${err instanceof Error ? err.message : "unknown"}`);
+      }
+    }
 
     // Resolve asset CSS
     const assetCss = getVisualAssetCSS(selections.compositionPlan);
