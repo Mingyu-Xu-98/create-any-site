@@ -154,6 +154,17 @@ export async function POST(req: NextRequest) {
         applied.push(`deleted: ${filePath}`);
       } else if (change.action === "replace" || change.action === "create") {
         if (!change.content) continue;
+
+        // Validate critical files — reject truncated/partial content that would break the build
+        if (filePath === "src/app/page.tsx" && change.action === "replace") {
+          const c = change.content;
+          if (!c.includes("export default") || !c.includes("return")) {
+            logger.warn("modify", `[${requestId}] Rejected truncated page.tsx replacement (missing export default or return). Keeping original.`);
+            applied.push(`rejected: ${filePath} (truncated content)`);
+            continue;
+          }
+        }
+
         const nextContent = filePath === TRANSLATIONS_FILE
           ? normalizeTranslationsModule(change.content, fileMap[filePath] || "")
           : change.content;
