@@ -149,9 +149,46 @@ export default function KnowledgeBaseDetail() {
           </div>
 
           {/* Index tab */}
-          {detailTab === "index" && base?.indexMd && (
-            <div className="rounded-xl border border-gray-200 bg-white p-5">
-              <pre className="text-xs text-gray-600 whitespace-pre-wrap font-mono leading-relaxed">{base.indexMd}</pre>
+          {detailTab === "index" && (
+            <div className="space-y-4">
+              {/* Category summary cards */}
+              {files.length > 0 && (() => {
+                const docCount = files.filter(f => f.type !== "image" && f.type !== "link").length;
+                const linkCount = files.filter(f => f.type === "link").length;
+                const imgCount = files.filter(f => f.type === "image").length;
+                const totalChars = files.reduce((sum, f) => sum + (f.contentLength || 0), 0);
+                return (
+                  <div className="grid grid-cols-4 gap-3">
+                    <div className="rounded-xl border border-gray-200 bg-white p-3 text-center">
+                      <div className="text-lg font-bold text-gray-800">{files.length}</div>
+                      <div className="text-[10px] text-gray-500">{zh ? "总文件" : "Total"}</div>
+                    </div>
+                    <div className="rounded-xl border border-blue-100 bg-blue-50/50 p-3 text-center">
+                      <div className="text-lg font-bold text-blue-600">{docCount}</div>
+                      <div className="text-[10px] text-blue-500">{zh ? "文档" : "Docs"}</div>
+                    </div>
+                    <div className="rounded-xl border border-emerald-100 bg-emerald-50/50 p-3 text-center">
+                      <div className="text-lg font-bold text-emerald-600">{linkCount}</div>
+                      <div className="text-[10px] text-emerald-500">{zh ? "链接" : "Links"}</div>
+                    </div>
+                    <div className="rounded-xl border border-purple-100 bg-purple-50/50 p-3 text-center">
+                      <div className="text-lg font-bold text-purple-600">{imgCount}</div>
+                      <div className="text-[10px] text-purple-500">{zh ? "图片" : "Images"}</div>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Auto-generated index content */}
+              {base?.indexMd ? (
+                <div className="rounded-xl border border-gray-200 bg-white p-5">
+                  <pre className="text-xs text-gray-600 whitespace-pre-wrap font-mono leading-relaxed">{base.indexMd}</pre>
+                </div>
+              ) : (
+                <div className="text-center py-10">
+                  <p className="text-sm text-gray-400">{zh ? "索引将在文件上传后自动生成" : "Index will be generated after uploading files"}</p>
+                </div>
+              )}
             </div>
           )}
 
@@ -165,7 +202,8 @@ export default function KnowledgeBaseDetail() {
 
           {/* File list tab — grouped by type */}
           {detailTab === "files" && (() => {
-            const docs = files.filter(f => f.type !== "image");
+            const docs = files.filter(f => f.type !== "image" && f.type !== "link");
+            const links = files.filter(f => f.type === "link");
             const images = files.filter(f => f.type === "image");
             if (files.length === 0) return (
               <div className="text-center py-20">
@@ -204,6 +242,51 @@ export default function KnowledgeBaseDetail() {
                                   </div>
                                 )}
                                 {f.originalUrl && <p className="text-[10px] text-accent mt-1 truncate">{f.originalUrl}</p>}
+                              </div>
+                              <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-all shrink-0">
+                                <button onClick={() => viewFileContent(f.id, f.name)} className="px-2.5 py-1 rounded-lg text-[10px] text-gray-500 hover:bg-gray-100 transition-colors">{zh ? "查看" : "View"}</button>
+                                <button onClick={() => deleteFile(f.id)} className="px-2.5 py-1 rounded-lg text-[10px] text-red-500 hover:bg-red-50 transition-colors">{zh ? "删除" : "Delete"}</button>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Links section */}
+                {links.length > 0 && (
+                  <div>
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className="w-6 h-6 rounded-lg bg-emerald-50 flex items-center justify-center"><svg className="w-3.5 h-3.5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg></div>
+                      <h3 className="text-sm font-semibold text-gray-700">{zh ? "链接" : "Links"} <span className="text-gray-400 font-normal">({links.length})</span></h3>
+                    </div>
+                    <div className="space-y-2">
+                      {links.map(f => {
+                        const kw: string[] = f.keywords ? JSON.parse(f.keywords) : [];
+                        const domain = f.originalUrl ? (() => { try { return new URL(f.originalUrl).hostname; } catch { return ""; } })() : "";
+                        return (
+                          <div key={f.id} className="rounded-xl border border-gray-200 bg-white p-4 hover:border-emerald-200 hover:shadow-sm transition-all group">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 mb-1">
+                                  <span className="text-sm">🔗</span>
+                                  <h3 className="text-sm font-medium text-gray-800 truncate">{f.name}</h3>
+                                  {domain && <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-600 shrink-0">{domain}</span>}
+                                </div>
+                                <p className="text-xs text-gray-500 line-clamp-2">{f.description}</p>
+                                {f.originalUrl && (
+                                  <a href={f.originalUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-[10px] text-accent hover:underline mt-1.5">
+                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                                    {f.originalUrl.length > 60 ? f.originalUrl.slice(0, 60) + "..." : f.originalUrl}
+                                  </a>
+                                )}
+                                {kw.length > 0 && (
+                                  <div className="flex flex-wrap gap-1 mt-2">
+                                    {kw.slice(0, 6).map(k => <span key={k} className="text-[9px] px-1.5 py-0.5 rounded-full bg-gray-50 text-gray-500 border border-gray-100">{k}</span>)}
+                                  </div>
+                                )}
                               </div>
                               <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-all shrink-0">
                                 <button onClick={() => viewFileContent(f.id, f.name)} className="px-2.5 py-1 rounded-lg text-[10px] text-gray-500 hover:bg-gray-100 transition-colors">{zh ? "查看" : "View"}</button>
