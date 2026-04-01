@@ -1,3 +1,26 @@
+/**
+ * LLM Provider — unified, env-driven.
+ *
+ * All configuration in .env.local:
+ *
+ *   # Provider fallback chain (comma-separated, tried in order)
+ *   LLM_PROVIDER_CHAIN=anthropic,openrouter,siliconflow
+ *
+ *   # Provider credentials & models
+ *   ANTHROPIC_API_KEY=sk-ant-...
+ *   ANTHROPIC_MODEL=claude-sonnet-4-20250514
+ *
+ *   OPENROUTER_API_KEY=sk-or-v1-...
+ *   OPENROUTER_MODEL=anthropic/claude-sonnet-4.6
+ *
+ *   SILICONFLOW_API_KEY=sk-...
+ *   SILICONFLOW_MODEL=Pro/zai-org/GLM-5
+ *
+ *   # Image generation
+ *   IMAGE_PROVIDER=siliconflow
+ *   IMAGE_MODEL=Kwai-Kolors/Kolors
+ */
+
 type ChatRole = "system" | "user" | "assistant";
 
 export interface ChatMessage {
@@ -13,134 +36,111 @@ interface ChatCompletionInput {
   history?: Array<{ role: Exclude<ChatRole, "system">; content: string }>;
   temperature?: number;
   maxTokens?: number;
-  /** Use advanced model (for Design Agent / high-quality generation) */
   useAdvancedModel?: boolean;
 }
 
 interface ChatCompletionResult {
   content: string;
   usage?: unknown;
-  provider: "anthropic" | "openrouter" | "siliconflow";
+  provider: string;
   model: string;
 }
 
-type ProviderConfig =
-  | {
-      provider: "anthropic";
-      apiKey: string;
-      baseUrl: string;
-      model: string;
-    }
-  | {
-      provider: "openrouter";
-      apiKey: string;
-      baseUrl: string;
-      model: string;
-      referer: string;
-      title: string;
-    }
-  | {
-      provider: "siliconflow";
-      apiKey: string;
-      baseUrl: string;
-      model: string;
-    };
+// ---- Provider configs ----
 
-// ---- Model defaults: change here or override via env vars ----
-const DEFAULTS = {
-  ANTHROPIC_MODEL: "claude-opus-4-20250514",
-  ANTHROPIC_BASE_URL: "https://api.anthropic.com",
-  OPENROUTER_MODEL: "anthropic/claude-sonnet-4.6",
-  OPENROUTER_BASE_URL: "https://openrouter.ai/api/v1",
-  SILICONFLOW_MODEL: "Pro/zai-org/GLM-5",
-  SILICONFLOW_BASE_URL: "https://api.siliconflow.cn/v1",
-  ADVANCED_MODEL_ANTHROPIC: "claude-opus-4-20250514",
-  ADVANCED_MODEL_OPENROUTER: "anthropic/claude-sonnet-4.6",
+interface ProviderConfig {
+  name: string;
+  apiKey: string;
+  baseUrl: string;
+  model: string;
+  style: "anthropic" | "openai";  // API format
+  extraHeaders?: Record<string, string>;
+}
+
+const DEFAULTS: Record<string, { baseUrl: string; model: string; style: "anthropic" | "openai" }> = {
+  anthropic: { baseUrl: "https://api.anthropic.com", model: "claude-sonnet-4-20250514", style: "anthropic" },
+  openrouter: { baseUrl: "https://openrouter.ai/api/v1", model: "anthropic/claude-sonnet-4.6", style: "openai" },
+  siliconflow: { baseUrl: "https://api.siliconflow.cn/v1", model: "Pro/zai-org/GLM-5", style: "openai" },
 };
 
-function env(key: string, fallback?: string): string {
-  return process.env[key]?.trim() || fallback || "";
+function env(key: string, fallback = ""): string {
+  return process.env[key]?.trim() || fallback;
 }
 
-function getAnthropicConfig(): ProviderConfig | null {
-  const apiKey = env("ANTHROPIC_API_KEY");
+function buildProviderConfig(name: string): ProviderConfig | null {
+  const prefix = name.toUpperCase();
+  const apiKey = env(`${prefix}_API_KEY`);
   if (!apiKey) return null;
-  return {
-    provider: "anthropic",
+
+  const defaults = DEFAULTS[name];
+  if (!defaults) return null;
+
+  const config: ProviderConfig = {
+    name,
     apiKey,
-    baseUrl: env("ANTHROPIC_BASE_URL", DEFAULTS.ANTHROPIC_BASE_URL).replace(/\/+$/, ""),
-    model: env("ANTHROPIC_MODEL", DEFAULTS.ANTHROPIC_MODEL),
+    baseUrl: env(`${prefix}_BASE_URL`, defaults.baseUrl).replace(/\/+$/, ""),
+    model: env(`${prefix}_MODEL`, defaults.model),
+    style: defaults.style,
   };
-}
 
-function getOpenRouterConfig(): ProviderConfig | null {
-  const apiKey = env("OPENROUTER_API_KEY");
-  if (!apiKey) return null;
-  return {
-    provider: "openrouter",
-    apiKey,
-    baseUrl: env("OPENROUTER_BASE_URL", DEFAULTS.OPENROUTER_BASE_URL).replace(/\/+$/, ""),
-    model: env("OPENROUTER_MODEL", DEFAULTS.OPENROUTER_MODEL),
-    referer: env("OPENROUTER_HTTP_REFERER") || env("NEXTAUTH_URL") || "http://localhost:3000",
-    title: env("OPENROUTER_APP_NAME") || "CreateAnySite",
-  };
-}
-
-function getSiliconFlowConfig(): ProviderConfig | null {
-  const apiKey = env("SILICONFLOW_API_KEY");
-  if (!apiKey) return null;
-  return {
-    provider: "siliconflow",
-    apiKey,
-    baseUrl: DEFAULTS.SILICONFLOW_BASE_URL,
-    model: env("SILICONFLOW_MODEL", DEFAULTS.SILICONFLOW_MODEL),
-  };
-}
-
-/** Provider priority: Anthropic > OpenRouter > SiliconFlow */
-function getProviderConfig() {
-  return getAnthropicConfig() || getOpenRouterConfig() || getSiliconFlowConfig();
-}
-
-/** Get a stronger model config for advanced mode */
-function getAdvancedProviderConfig(): ProviderConfig | null {
-  const advancedModel = env("ADVANCED_MODEL");
-  // Priority 1: Anthropic
-  const anthropicConfig = getAnthropicConfig();
-  if (anthropicConfig) {
-    return { ...anthropicConfig, model: advancedModel || DEFAULTS.ADVANCED_MODEL_ANTHROPIC };
+  // OpenRouter needs extra headers
+  if (name === "openrouter") {
+    config.extraHeaders = {
+      "HTTP-Referer": env("OPENROUTER_HTTP_REFERER") || env("NEXTAUTH_URL") || "http://localhost:3000",
+      "X-Title": env("OPENROUTER_APP_NAME") || "CreateAnySite",
+    };
   }
-  // Priority 2: OpenRouter
-  const orConfig = getOpenRouterConfig();
-  if (orConfig) {
-    return { ...orConfig, model: advancedModel || DEFAULTS.ADVANCED_MODEL_OPENROUTER };
-  }
-  return getSiliconFlowConfig();
+
+  return config;
 }
 
-/** Get provider config based on mode */
-export function getProviderForMode(mode: "default" | "advanced" = "default"): ProviderConfig | null {
-  return mode === "advanced" ? getAdvancedProviderConfig() : getProviderConfig();
+/** Read provider chain from env, default: anthropic,openrouter,siliconflow */
+function getProviderChain(): ProviderConfig[] {
+  const chainStr = env("LLM_PROVIDER_CHAIN", "anthropic,openrouter,siliconflow");
+  const names = chainStr.split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
+  const configs: ProviderConfig[] = [];
+  for (const name of names) {
+    const config = buildProviderConfig(name);
+    if (config) configs.push(config);
+  }
+  return configs;
+}
+
+// ---- Public helpers ----
+
+export function hasChatProvider(): boolean {
+  return getProviderChain().length > 0;
 }
 
 export function getChatProviderSummary(): string {
-  const config = getProviderConfig();
-  if (!config) return "No LLM provider configured";
-  return `${config.provider}:${config.model}`;
+  const chain = getProviderChain();
+  if (chain.length === 0) return "No LLM provider configured";
+  return chain.map(c => `${c.name}:${c.model}`).join(" → ");
 }
 
-export function hasChatProvider(): boolean {
-  return Boolean(getProviderConfig());
+export function getProviderForMode(_mode: "default" | "advanced" = "default"): ProviderConfig | null {
+  const chain = getProviderChain();
+  return chain[0] || null;
 }
 
-function shouldRetryNetworkError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return /terminated|fetch failed|socket|econnreset|timeout|timed out|network|aborted|aborterror|this operation was aborted/i.test(message);
+/** Image generation config */
+export function getImageProviderConfig(): { provider: string; apiKey: string; baseUrl: string; model: string } | null {
+  const provider = env("IMAGE_PROVIDER", "siliconflow");
+  const prefix = provider.toUpperCase();
+  const apiKey = env(`${prefix}_API_KEY`);
+  if (!apiKey) return null;
+  const defaults = DEFAULTS[provider];
+  return {
+    provider,
+    apiKey,
+    baseUrl: env(`${prefix}_BASE_URL`, defaults?.baseUrl || ""),
+    model: env("IMAGE_MODEL") || env("SILICONFLOW_IMAGE_MODELS") || "Kwai-Kolors/Kolors",
+  };
 }
 
-/** Call Anthropic Messages API (different format from OpenAI-compatible) */
-async function callAnthropicProvider(config: ProviderConfig & { provider: "anthropic" }, input: ChatCompletionInput, messages: ChatMessage[]): Promise<ChatCompletionResult> {
-  // Separate system message from conversation messages
+// ---- API callers ----
+
+async function callAnthropic(config: ProviderConfig, input: ChatCompletionInput, messages: ChatMessage[]): Promise<ChatCompletionResult> {
   const systemContent = messages.filter(m => m.role === "system").map(m => m.content).join("\n\n");
   const conversationMessages = messages.filter(m => m.role !== "system").map(m => ({ role: m.role, content: m.content }));
 
@@ -166,33 +166,23 @@ async function callAnthropicProvider(config: ProviderConfig & { provider: "anthr
 
     if (!response.ok) {
       const text = await response.text();
-      throw new Error(`${input.label} AI error (anthropic/${config.model}): ${response.status} ${text}`);
+      throw new Error(`${input.label} error (${config.name}/${config.model}): ${response.status} ${text}`);
     }
 
     const result = await response.json();
     const content = result.content?.map((c: { type: string; text?: string }) => c.type === "text" ? c.text : "").join("") || "";
-    return {
-      content,
-      usage: result.usage,
-      provider: "anthropic",
-      model: config.model,
-    };
+    return { content, usage: result.usage, provider: config.name, model: config.model };
   } finally {
     clearTimeout(timeout);
   }
 }
 
-/** Call OpenAI-compatible provider (OpenRouter / SiliconFlow) */
-async function callOpenAICompatibleProvider(config: ProviderConfig, input: ChatCompletionInput, messages: ChatMessage[]): Promise<ChatCompletionResult> {
+async function callOpenAICompatible(config: ProviderConfig, input: ChatCompletionInput, messages: ChatMessage[]): Promise<ChatCompletionResult> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     Authorization: `Bearer ${config.apiKey}`,
+    ...config.extraHeaders,
   };
-
-  if (config.provider === "openrouter") {
-    headers["HTTP-Referer"] = (config as { referer: string }).referer;
-    headers["X-Title"] = (config as { title: string }).title;
-  }
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 240_000);
@@ -211,14 +201,14 @@ async function callOpenAICompatibleProvider(config: ProviderConfig, input: ChatC
 
     if (!response.ok) {
       const text = await response.text();
-      throw new Error(`${input.label} AI error (${config.provider}/${config.model}): ${response.status} ${text}`);
+      throw new Error(`${input.label} error (${config.name}/${config.model}): ${response.status} ${text}`);
     }
 
     const result = await response.json();
     return {
       content: result.choices?.[0]?.message?.content || "",
       usage: result.usage,
-      provider: config.provider,
+      provider: config.name,
       model: config.model,
     };
   } finally {
@@ -227,16 +217,21 @@ async function callOpenAICompatibleProvider(config: ProviderConfig, input: ChatC
 }
 
 async function callProvider(config: ProviderConfig, input: ChatCompletionInput, messages: ChatMessage[]): Promise<ChatCompletionResult> {
-  if (config.provider === "anthropic") {
-    return callAnthropicProvider(config as ProviderConfig & { provider: "anthropic" }, input, messages);
-  }
-  return callOpenAICompatibleProvider(config, input, messages);
+  if (config.style === "anthropic") return callAnthropic(config, input, messages);
+  return callOpenAICompatible(config, input, messages);
 }
 
+function isNetworkError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /terminated|fetch failed|socket|econnreset|timeout|timed out|network|aborted|aborterror|this operation was aborted/i.test(message);
+}
+
+// ---- Main entry point ----
+
 export async function chatCompletion(input: ChatCompletionInput): Promise<ChatCompletionResult> {
-  const config = input.useAdvancedModel ? (getAdvancedProviderConfig() || getProviderConfig()) : getProviderConfig();
-  if (!config) {
-    throw new Error("No LLM provider configured. Set ANTHROPIC_API_KEY, OPENROUTER_API_KEY, or SILICONFLOW_API_KEY.");
+  const chain = getProviderChain();
+  if (chain.length === 0) {
+    throw new Error("No LLM provider configured. Set ANTHROPIC_API_KEY, OPENROUTER_API_KEY, or SILICONFLOW_API_KEY in .env.local, and optionally LLM_PROVIDER_CHAIN to control fallback order.");
   }
 
   const history = input.history || [];
@@ -246,23 +241,21 @@ export async function chatCompletion(input: ChatCompletionInput): Promise<ChatCo
     { role: "user", content: input.userPrompt },
   ];
 
-  try {
-    return await callProvider(config, input, messages);
-  } catch (error) {
-    if (!shouldRetryNetworkError(error)) throw error;
+  // Try each provider in chain order
+  let lastError: Error | null = null;
+  for (const config of chain) {
+    try {
+      return await callProvider(config, input, messages);
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      // Only fallback on network errors; API errors (auth, rate limit) fall through too
+      // so the user gets a clear error from the first provider that responds
+      if (!isNetworkError(error) && chain.indexOf(config) === 0) {
+        throw lastError;
+      }
+      // Log and try next provider
+    }
   }
 
-  try {
-    return await callProvider(config, input, messages);
-  } catch (retryError) {
-    if (!shouldRetryNetworkError(retryError)) throw retryError;
-    // Fallback chain: try next available provider
-    const fallback = config.provider === "anthropic"
-      ? (getOpenRouterConfig() || getSiliconFlowConfig())
-      : config.provider === "openrouter"
-        ? getSiliconFlowConfig()
-        : null;
-    if (!fallback) throw retryError;
-    return callProvider(fallback, input, messages);
-  }
+  throw lastError || new Error("All LLM providers failed");
 }
