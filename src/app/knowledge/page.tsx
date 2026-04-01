@@ -129,18 +129,24 @@ export default function KnowledgePage() {
     } catch {}
   }, []);
 
-  // Poll for active tasks
+  // Track whether there are active tasks
+  const hasActiveTasks = uploadingFiles.some(f => f.status === "uploading" || f.status === "extracting");
+
+  // Load tasks on mount (restores in-progress tasks after page navigation)
   useEffect(() => {
     loadTasks();
-    const hasActive = uploadingFiles.some(f => f.status === "uploading" || f.status === "extracting");
-    if (!hasActive) return;
+  }, [loadTasks]);
+
+  // Poll while tasks are active
+  useEffect(() => {
+    if (!hasActiveTasks) return;
     const interval = setInterval(async () => {
       await loadTasks();
       await loadGroups();
       await loadItems();
-    }, 3000);
+    }, 2000);
     return () => clearInterval(interval);
-  }, [uploadingFiles.some(f => f.status === "uploading" || f.status === "extracting")]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [hasActiveTasks, loadTasks, loadGroups, loadItems]);
 
   // Upload handler — submits to server, doesn't block
   const uploadFile = async (file: File) => {
@@ -317,7 +323,7 @@ export default function KnowledgePage() {
           )}
 
           {/* Legacy: Processing status bar — always visible when files are uploading */}
-          {uploadingFiles.some(f => f.status === "uploading" || f.status === "extracting") && (
+          {hasActiveTasks && (
             <div className="mb-4 rounded-xl border border-accent/20 bg-accent/5 px-4 py-3">
               <div className="flex items-center gap-2 mb-2">
                 <span className="w-4 h-4 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />
@@ -336,7 +342,7 @@ export default function KnowledgePage() {
           )}
 
           {/* Recently completed uploads */}
-          {uploadingFiles.some(f => f.status === "done") && !uploadingFiles.some(f => f.status === "uploading" || f.status === "extracting") && (
+          {uploadingFiles.some(f => f.status === "done") && !hasActiveTasks && (
             <div className="mb-4 rounded-xl border border-gray-200 bg-white px-4 py-3 flex items-center justify-between">
               <div className="flex items-center gap-2 text-xs text-gray-500">
                 <span className="text-green-500">✓</span>
