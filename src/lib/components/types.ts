@@ -75,6 +75,8 @@ export interface CompositionPlan {
   }>;
   effects: string[];
   footer: string;           // footer variant name
+  /** Visual direction — resolved by asset system into CSS/SVG/components */
+  visualDirection?: import("../assets/registry").VisualDirection;
   /** Optional extension slots */
   extensions?: Array<{
     slot: string;
@@ -82,4 +84,6 @@ export interface CompositionPlan {
     sectionId: string;
     config: Record<string, unknown>;
   }>;
+  /** Chat assistant style — "cartoon" renders animated SVG character, "classic" renders floating bubble */
+  chatMode?: "cartoon" | "classic";
 }

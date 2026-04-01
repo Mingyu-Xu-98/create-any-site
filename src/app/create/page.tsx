@@ -17,7 +17,7 @@ import { TEMPLATE_CASES } from "@/lib/template-showcase";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-const THEME_POOL = ["cyberpunk", "minimalist", "ghibli", "glassmorphism", "retro", "brutalist", "cinematic", "bold-creative", "editorial", "nature", "gradient-mesh", "neo-tokyo"] as const;
+const THEME_POOL = ["cyberpunk", "minimalist", "ghibli", "glassmorphism", "retro", "brutalist", "cinematic", "bold-creative", "editorial", "nature", "gradient-mesh", "neo-tokyo", "watercolor", "terminal-green", "vaporwave", "craft-paper", "aurora", "ink-wash"] as const;
 function pickRandomTheme(): typeof THEME_POOL[number] { return THEME_POOL[Math.floor(Math.random() * THEME_POOL.length)]; }
 
 type View = "build" | "sources" | "knowledge";
@@ -134,6 +134,12 @@ function CreatePageInner() {
   const [itemsLoaded, setItemsLoaded] = useState(false);
   const [knowledgeSearch, setKnowledgeSearch] = useState("");
   const [knowledgeViewMode, setKnowledgeViewMode] = useState<"list" | "graph">("list");
+  const genMode = "advanced" as const;
+
+  // Knowledge Bases (new KB system)
+  interface KBBase { id: string; name: string; description: string | null; fileCount: number | null; totalChars: number | null }
+  const [kbBases, setKbBases] = useState<KBBase[]>([]);
+  const [selectedBaseId, setSelectedBaseId] = useState<string | null>(null);
 
   // Knowledge Groups
   interface KGGroup { id: string; name: string; description: string | null; tags: string[]; sourceFile: string | null; sourceType: string | null; indexMd: string | null; itemCount: number; selectedCount: number; categoryCounts: Record<string, number> }
@@ -206,7 +212,11 @@ function CreatePageInner() {
     try { const r = await fetch("/api/knowledge-groups"); if (r.ok) { const d = await r.json(); setKGroups(d.groups || []); } } catch {}
   }, []);
 
-  useEffect(() => { if (session?.user) { loadKnowledge(); loadGroups(); } }, [session, loadKnowledge, loadGroups]);
+  const loadKnowledgeBases = useCallback(async () => {
+    try { const r = await fetch("/api/kb"); if (r.ok) { const d = await r.json(); setKbBases(d.bases || []); } } catch {}
+  }, []);
+
+  useEffect(() => { if (session?.user) { loadKnowledge(); loadGroups(); loadKnowledgeBases(); } }, [session, loadKnowledge, loadGroups, loadKnowledgeBases]);
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [chatMessages, pendingOptions, prdData]);
 
   // Conv list
@@ -602,10 +612,12 @@ function CreatePageInner() {
         body: JSON.stringify({
           messages: newMsgs.map(m => ({ role: m.role, content: m.content })),
           knowledge: items.filter(i => i.selected),
+          knowledgeBaseId: selectedBaseId,
           currentSelections: {},
           loadedSkills: loadedSkillIds,
           siteId: siteIdRef.current,
           currentPrd: prdData,
+          useDesignAgent: true,
         }),
       });
       const d = await readJsonResponse<{
@@ -707,15 +719,32 @@ function CreatePageInner() {
         });
       } else if (d.action?.type === "generate") {
         if (!prdData) {
-          // AI skipped PRD — create minimal PRD and auto-trigger build
           const autoPrd: PRDData = { version: 1, siteType: d.action.siteType || "portfolio", theme: d.action.theme || pickRandomTheme(), markdown: `# Auto-generated PRD\n\nSite: ${d.action.siteType || "portfolio"}\nTheme: ${d.action.theme || pickRandomTheme()}\nLayout: ${d.action.layout || "auto"}\n\n${cleanContent}`, createdAt: new Date().toISOString() };
           setPrdData(autoPrd);
           setShowPreview(true); setPreviewTab("preview");
-          // Auto-trigger build since user intent is clear
           handleGenerate({ ...d.action, skillIds: [...new Set([...loadedSkillIds, ...(Array.isArray(d.action.skillIds) ? d.action.skillIds : [])])], prd: autoPrd });
         } else {
           handleGenerate({ ...d.action, skillIds: [...new Set([...loadedSkillIds, ...(Array.isArray(d.action.skillIds) ? d.action.skillIds : [])])] });
         }
+      } else if (d.action?.type === "orchestrate") {
+        // Orchestrator decision — mostly informational
+        const act = d.action as Record<string, unknown>;
+        const intent = act.site_intent as Record<string, unknown> | undefined;
+        if (intent?.type) {
+          setWorkingStatus(locale === "zh" ? `网站类型: ${intent.type}` : `Site type: ${intent.type}`);
+        }
+      } else if (d.action?.type === "suggest_capability") {
+        const act = d.action as Record<string, unknown>;
+        const capName = (act.capability as string) || "";
+        const reason = (act.reason as string) || "";
+        setPendingOptions({
+          question: locale === "zh" ? "建议安装能力" : "Suggested Capability",
+          options: [
+            { id: "install", icon: "🔧", label: locale === "zh" ? `安装 ${capName}` : `Install ${capName}`, desc: reason },
+            { id: "skip", icon: "⏭️", label: locale === "zh" ? "跳过" : "Skip", desc: locale === "zh" ? "不安装，继续" : "Continue without it" },
+          ],
+          multiSelect: false,
+        });
       }
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : "Unknown error";
@@ -733,8 +762,16 @@ function CreatePageInner() {
       const sel = items.filter(i => i.selected);
       const theme = (config.theme as string) || pickRandomTheme();
       const skillIds = Array.isArray(config.skillIds) ? config.skillIds : [];
-      // If agent provided a compositionPlan, pass it through to activate the component assembler
+      // ===== ADVANCED MODE: AI pipeline =====
       const agentPlan = config.compositionPlan as UserSelections["compositionPlan"] | undefined;
+      const visualDir = config.visualDirection as Record<string, unknown> | undefined;
+
+      // Merge visualDirection into compositionPlan if both exist
+      const enrichedPlan = agentPlan ? {
+        ...agentPlan,
+        ...(visualDir ? { visualDirection: visualDir } : {}),
+      } : undefined;
+
       const baseSelections: UserSelections = {
         siteType: ((config.siteType as UserSelections["siteType"]) || "portfolio"),
         theme: ((theme as UserSelections["theme"]) || pickRandomTheme()),
@@ -743,116 +780,44 @@ function CreatePageInner() {
         customTheme: (config.customTheme as string) || "",
         customLayout: "",
         features: { chatbot: true, i18n: true, animations: true, share: true },
-        compositionPlan: agentPlan,
+        mode: "advanced",
+        compositionPlan: enrichedPlan,
       };
 
-      setThinkingSteps(p => [...p, zh ? "🧠 编译 Site Spec..." : "🧠 Compiling site spec..."]);
-      const spec = await compileSiteSpec({
-        siteType: String(config.siteType || effectivePrd?.siteType || "portfolio"),
-        theme,
-        layout: String(config.layout || effectivePrd?.layout || baseSelections.layout),
-        customTheme: String(config.customTheme || ""),
-        conversationSummary: effectivePrd?.markdown || chatMessages.slice(-6).map(m => `${m.role}: ${m.content}`).join("\n"),
-        techStackHints: Array.isArray(config.techStackHints) ? (config.techStackHints as string[]) : [],
-        assetIdeas: Array.isArray(config.assetGenerationPlan) ? (config.assetGenerationPlan as string[]) : [],
-      });
+      // Skip compileSiteSpec if Design Agent already provided a compositionPlan
+      let spec = null;
+      let data: WorkspaceData;
+      let selections: UserSelections;
 
-      const data = spec ? buildWorkspaceDataFromSpec(spec, sel) : buildWorkspaceDataFromKnowledge(sel);
-      const selections = spec ? deriveSelectionsFromSpec(spec, baseSelections) : baseSelections;
+      if (enrichedPlan) {
+        // Design Agent path: plan already complete, just build WorkspaceData from knowledge
+        setThinkingSteps(p => [...p, zh ? "🎨 Design Agent 已完成设计" : "🎨 Design Agent plan ready"]);
+        data = buildWorkspaceDataFromKnowledge(sel);
+        selections = baseSelections;
+      } else {
+        // Legacy advanced path: compile spec
+        setThinkingSteps(p => [...p, zh ? "🧠 编译 Site Spec..." : "🧠 Compiling site spec..."]);
+        spec = await compileSiteSpec({
+          siteType: String(config.siteType || effectivePrd?.siteType || "portfolio"),
+          theme,
+          layout: String(config.layout || effectivePrd?.layout || baseSelections.layout),
+          customTheme: String(config.customTheme || ""),
+          conversationSummary: effectivePrd?.markdown || chatMessages.slice(-6).map(m => `${m.role}: ${m.content}`).join("\n"),
+          techStackHints: Array.isArray(config.techStackHints) ? (config.techStackHints as string[]) : [],
+          assetIdeas: Array.isArray(config.assetGenerationPlan) ? (config.assetGenerationPlan as string[]) : [],
+        });
+        data = spec ? buildWorkspaceDataFromSpec(spec, sel) : buildWorkspaceDataFromKnowledge(sel);
+        selections = spec ? deriveSelectionsFromSpec(spec, baseSelections) : baseSelections;
+      }
 
-      setThinkingSteps(p => [...p, zh ? `🎨 主题: ${theme} | 布局: ${selections.layout}` : `🎨 Theme: ${theme} | Layout: ${selections.layout}`]);
       setThinkingSteps(p => [...p, zh ? "📦 创建构建任务..." : "📦 Creating build job..."]);
 
       const r = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ data, selections, skillIds, siteId: siteIdRef.current, prd: effectivePrd, spec, knowledgeRefs: getSelectedResourceRefs() }),
+        body: JSON.stringify({ data, selections, skillIds, siteId: siteIdRef.current, prd: effectivePrd, spec, knowledgeRefs: getSelectedResourceRefs(), knowledgeBaseId: selectedBaseId }),
       });
-      const genResult = await readJsonResponse<{
-        error?: string;
-        logs?: string[];
-        jobId?: string;
-        siteId?: string;
-        status?: string;
-      }>(r);
-      if (!r.ok) {
-        const logText = Array.isArray(genResult?.logs) && genResult.logs.length > 0 ? `\n\n${genResult.logs.join("\n")}` : "";
-        throw new Error(`${genResult?.error || "Generation failed"}${logText}`);
-      }
-      if (!genResult.jobId) throw new Error("Generation response missing job ID");
-      if (genResult.siteId) {
-        siteIdRef.current = genResult.siteId;
-        setSiteId(genResult.siteId);
-      }
-
-      const cid = await saveConv(chatMessages, previewUrl);
-      if (cid && genResult.siteId) {
-        await fetch(`/api/conversations/${cid}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ siteId: genResult.siteId }) });
-      }
-
-      setThinkingSteps(p => [...p, zh ? "⏳ 任务已入队，等待 worker 构建..." : "⏳ Job queued, waiting for worker build..."]);
-
-      const pollStart = Date.now();
-      let finished = false;
-      while (!finished && Date.now() - pollStart < 300000) {
-        await new Promise(resolve => setTimeout(resolve, 1500));
-        const jobRes = await fetch(`/api/builds/${genResult.jobId}`, { cache: "no-store" });
-        const jobResult = await readJsonResponse<{
-          error?: string;
-          job?: {
-            status: string;
-            previewUrl?: string | null;
-            error?: string | null;
-            logs?: string[];
-          };
-        }>(jobRes);
-        if (!jobRes.ok) throw new Error(jobResult.error || `HTTP ${jobRes.status} ${jobRes.statusText}`);
-        const job = jobResult.job;
-        if (!job) throw new Error("Build job not found");
-
-        if (job.status === "building") {
-          setThinkingSteps([zh ? "🏗️ Worker 正在构建站点..." : "🏗️ Worker is building the site..."]);
-          continue;
-        }
-
-        if (job.status === "ready") {
-          const url = job.previewUrl;
-          if (!url) throw new Error("Build completed without preview URL");
-          setThinkingSteps([zh ? "✅ 构建完成，正在生成配图并载入预览..." : "✅ Build completed, generating images and loading preview..."]);
-          let imageSummary: { attempted: number; succeeded: number; failed: number; errors: string[] } | null = null;
-          if (genResult.siteId) {
-            imageSummary = await generateImagesForSite({ siteId: genResult.siteId, theme, data });
-          }
-          setPreviewUrl(url);
-          setGenStatus("ready");
-          setShowPreview(true);
-          setPreviewTab("preview");
-          setPreviewKey(k => k + 1);
-          await saveConv(chatMessages, url);
-          if (imageSummary && imageSummary.attempted > 0) {
-            setChatMessages((prev) => [...prev, {
-              role: "assistant",
-              content: zh
-                ? imageSummary.failed > 0
-                  ? `⚠️ 配图生成完成：成功 ${imageSummary.succeeded} 张，失败 ${imageSummary.failed} 张。\n\n${imageSummary.errors.join("\n")}`
-                  : `✅ 配图生成完成：共生成 ${imageSummary.succeeded} 张图片。`
-                : imageSummary.failed > 0
-                  ? `⚠️ Image generation finished: ${imageSummary.succeeded} succeeded, ${imageSummary.failed} failed.\n\n${imageSummary.errors.join("\n")}`
-                  : `✅ Image generation finished: ${imageSummary.succeeded} images generated.`,
-            }]);
-          }
-          finished = true;
-          break;
-        }
-
-        if (job.status === "failed") {
-          const logText = Array.isArray(job.logs) && job.logs.length > 0 ? `\n\n${job.logs.join("\n")}` : "";
-          throw new Error(`${job.error || "Build failed"}${logText}`);
-        }
-      }
-
-      if (!finished) throw new Error(zh ? "构建任务超时，请稍后在工作台查看状态" : "Build job timed out, check the dashboard status later");
-      setThinkingSteps([]);
+      await handleGenerateResult(r, zh, theme, data);
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : "Unknown error";
       setGenStatus("idle"); setThinkingSteps([]);
@@ -860,6 +825,63 @@ function CreatePageInner() {
         ? `❌ 生成失败：${errMsg}\n\n请根据上面的真实错误信息调整后重试。`
         : `❌ Generation failed: ${errMsg}\n\nPlease retry after addressing the specific error above.` }]);
     }
+  };
+
+  /** Shared: parse generate response, poll build status, update preview */
+  const handleGenerateResult = async (r: Response, zh: boolean, theme: string, data: WorkspaceData | null) => {
+    const genResult = await readJsonResponse<{ error?: string; logs?: string[]; jobId?: string; siteId?: string; status?: string }>(r);
+    if (!r.ok) {
+      const logText = Array.isArray(genResult?.logs) && genResult.logs.length > 0 ? `\n\n${genResult.logs.join("\n")}` : "";
+      throw new Error(`${genResult?.error || "Generation failed"}${logText}`);
+    }
+    if (!genResult.jobId) throw new Error("Generation response missing job ID");
+    if (genResult.siteId) { siteIdRef.current = genResult.siteId; setSiteId(genResult.siteId); }
+
+    const cid = await saveConv(chatMessages, previewUrl);
+    if (cid && genResult.siteId) {
+      await fetch(`/api/conversations/${cid}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ siteId: genResult.siteId }) });
+    }
+
+    setThinkingSteps(p => [...p, zh ? "⏳ 任务已入队，等待构建..." : "⏳ Queued, waiting for build..."]);
+
+    const pollStart = Date.now();
+    let finished = false;
+    while (!finished && Date.now() - pollStart < 300000) {
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      const jobRes = await fetch(`/api/builds/${genResult.jobId}`, { cache: "no-store" });
+      const jobResult = await readJsonResponse<{ error?: string; job?: { status: string; previewUrl?: string | null; error?: string | null; logs?: string[] } }>(jobRes);
+      if (!jobRes.ok) throw new Error(jobResult.error || `HTTP ${jobRes.status}`);
+      const job = jobResult.job;
+      if (!job) throw new Error("Build job not found");
+
+      if (job.status === "building") {
+        const steps = Array.isArray(job.logs) && job.logs.length > 0
+          ? job.logs as string[]
+          : [zh ? "🏗️ 正在构建..." : "🏗️ Building..."];
+        setThinkingSteps(steps);
+        continue;
+      }
+      if (job.status === "ready") {
+        const url = job.previewUrl;
+        if (!url) throw new Error("Build completed without preview URL");
+        setThinkingSteps([zh ? "✅ 构建完成" : "✅ Build completed"]);
+        if (genResult.siteId && data) {
+          const imageSummary = await generateImagesForSite({ siteId: genResult.siteId, theme, data });
+          if (imageSummary?.attempted > 0) {
+            setChatMessages(prev => [...prev, { role: "assistant", content: zh ? `✅ 配图生成完成：${imageSummary.succeeded} 张` : `✅ ${imageSummary.succeeded} images generated` }]);
+          }
+        }
+        setPreviewUrl(url); setGenStatus("ready"); setShowPreview(true); setPreviewTab("preview"); setPreviewKey(k => k + 1);
+        await saveConv(chatMessages, url);
+        finished = true; break;
+      }
+      if (job.status === "failed") {
+        const logText = Array.isArray(job.logs) && job.logs.length > 0 ? `\n\n${job.logs.join("\n")}` : "";
+        throw new Error(`${job.error || "Build failed"}${logText}`);
+      }
+    }
+    if (!finished) throw new Error(zh ? "构建超时" : "Build timed out");
+    setThinkingSteps([]);
   };
 
   // Handle incremental code modification
@@ -891,7 +913,7 @@ function CreatePageInner() {
       const r = await fetch("/api/modify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ siteId: siteIdRef.current, changes: action.changes, spec, prd: nextPrd || prdData, knowledgeRefs: getSelectedResourceRefs() }),
+        body: JSON.stringify({ siteId: siteIdRef.current, changes: action.changes, spec, prd: nextPrd || prdData, knowledgeRefs: getSelectedResourceRefs(), knowledgeBaseId: selectedBaseId }),
       });
       const d = await readJsonResponse<{
         ok?: boolean;
@@ -1189,34 +1211,63 @@ function CreatePageInner() {
                 <div className="relative">
                   <button onClick={() => setShowKnowledgeSelector(!showKnowledgeSelector)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-100 text-[10px] text-gray-400 hover:bg-gray-200/50 transition-all">
                     <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg>
-                    {locale === "zh" ? `知识库 (${selectedCount}/${items.length})` : `Knowledge (${selectedCount}/${items.length})`}
+                    {selectedBaseId
+                      ? (kbBases.find(b => b.id === selectedBaseId)?.name || (locale === "zh" ? "知识库" : "KB"))
+                      : (locale === "zh" ? `知识库 (${selectedCount}/${items.length})` : `Knowledge (${selectedCount}/${items.length})`)}
                     <svg className={`w-2.5 h-2.5 transition-transform ${showKnowledgeSelector ? "rotate-180" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
                   </button>
                   {/* Knowledge dropdown */}
                   {showKnowledgeSelector && (
-                    <div className="absolute top-full left-0 mt-1 w-72 max-h-80 rounded-xl bg-white border border-gray-200 shadow-2xl z-50 overflow-hidden">
+                    <div className="absolute top-full left-0 mt-1 w-80 max-h-96 rounded-xl bg-white border border-gray-200 shadow-2xl z-50 overflow-hidden">
                       <div className="p-3 border-b border-gray-200/60">
                         <p className="text-[10px] text-gray-400">{locale === "zh" ? "选择构建时使用的知识来源" : "Select knowledge sources for building"}</p>
                       </div>
-                      <div className="overflow-y-auto max-h-60 p-2 space-y-1">
-                        {sourceGroups.map(g => {
-                          const allSel = g.items.every(i => i.selected);
-                          const someSel = g.items.some(i => i.selected);
-                          return (
-                            <button key={g.sourceId} onClick={() => toggleSourceGroup(g.sourceId)} className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-left transition-all ${allSel ? "bg-accent/10" : "hover:bg-gray-100"}`}>
-                              <div className={`w-4 h-4 rounded border shrink-0 flex items-center justify-center ${allSel ? "bg-accent border-accent" : someSel ? "bg-accent/40 border-accent/60" : "border-gray-300"}`}>
-                                {(allSel || someSel) && <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d={allSel ? "M5 13l4 4L19 7" : "M5 12h14"} /></svg>}
+                      {/* Knowledge Bases section */}
+                      {kbBases.length > 0 && (
+                        <div className="p-2 border-b border-gray-100">
+                          <p className="text-[9px] text-gray-400 px-2 mb-1">{locale === "zh" ? "知识库" : "Knowledge Bases"}</p>
+                          {kbBases.map(kb => (
+                            <button key={kb.id} onClick={() => setSelectedBaseId(selectedBaseId === kb.id ? null : kb.id)} className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-left transition-all ${selectedBaseId === kb.id ? "bg-accent/10" : "hover:bg-gray-100"}`}>
+                              <div className={`w-4 h-4 rounded border shrink-0 flex items-center justify-center ${selectedBaseId === kb.id ? "bg-accent border-accent" : "border-gray-300"}`}>
+                                {selectedBaseId === kb.id && <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
                               </div>
-                              <span className="text-sm">{SOURCE_TYPE_META[g.sourceType as SourceType]?.icon || "📎"}</span>
+                              <span className="text-sm">📚</span>
                               <div className="flex-1 min-w-0">
-                                <p className="text-[10px] text-gray-600 truncate">{g.sourceName}</p>
-                                <p className="text-[8px] text-gray-500">{g.items.filter(i => i.selected).length}/{g.items.length} {locale === "zh" ? "条" : "items"}</p>
+                                <p className="text-[10px] text-gray-600 truncate">{kb.name}</p>
+                                <p className="text-[8px] text-gray-500">{kb.fileCount || 0} {locale === "zh" ? "个文件" : "files"} · {(kb.totalChars || 0).toLocaleString()} {locale === "zh" ? "字" : "chars"}</p>
                               </div>
                             </button>
-                          );
-                        })}
-                        {sourceGroups.length === 0 && <p className="text-[9px] text-gray-500 text-center py-4">{locale === "zh" ? "暂无知识库数据" : "No knowledge"}</p>}
-                      </div>
+                          ))}
+                        </div>
+                      )}
+                      {/* Legacy knowledge items section */}
+                      {sourceGroups.length > 0 && (
+                        <div className="p-2">
+                          <p className="text-[9px] text-gray-400 px-2 mb-1">{locale === "zh" ? "知识条目" : "Knowledge Items"}</p>
+                          {sourceGroups.map(g => {
+                            const allSel = g.items.every(i => i.selected);
+                            const someSel = g.items.some(i => i.selected);
+                            return (
+                              <button key={g.sourceId} onClick={() => toggleSourceGroup(g.sourceId)} className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-left transition-all ${allSel ? "bg-accent/10" : "hover:bg-gray-100"}`}>
+                                <div className={`w-4 h-4 rounded border shrink-0 flex items-center justify-center ${allSel ? "bg-accent border-accent" : someSel ? "bg-accent/40 border-accent/60" : "border-gray-300"}`}>
+                                  {(allSel || someSel) && <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d={allSel ? "M5 13l4 4L19 7" : "M5 12h14"} /></svg>}
+                                </div>
+                                <span className="text-sm">{SOURCE_TYPE_META[g.sourceType as SourceType]?.icon || "📎"}</span>
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-[10px] text-gray-600 truncate">{g.sourceName}</p>
+                                  <p className="text-[8px] text-gray-500">{g.items.filter(i => i.selected).length}/{g.items.length} {locale === "zh" ? "条" : "items"}</p>
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                      {kbBases.length === 0 && sourceGroups.length === 0 && (
+                        <div className="p-4 text-center">
+                          <p className="text-[9px] text-gray-500">{locale === "zh" ? "暂无知识库数据" : "No knowledge"}</p>
+                          <button onClick={() => router.push("/knowledge")} className="mt-2 text-[10px] text-accent hover:underline">{locale === "zh" ? "去创建知识库" : "Create knowledge base"}</button>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1242,84 +1293,21 @@ function CreatePageInner() {
                     <svg className="w-5 h-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
                   </div>
                   <p className="text-base text-gray-800 font-medium mb-1">
-                    {selectedTemplate
-                      ? (locale === "zh" ? "模板已载入" : "Template loaded")
-                      : (locale === "zh" ? "创建你的网站" : "Create your website")}
+                    {locale === "zh" ? "创建你的网站" : "Create your website"}
                   </p>
-
-                  {/* Two action buttons: upload materials or start chatting directly */}
-                  {!selectedTemplate && (
-                    <div className="mb-6 flex items-center gap-3">
-                      <button onClick={() => router.push("/knowledge")} className="flex items-center gap-2 px-5 py-2.5 rounded-xl border border-gray-200 bg-white text-sm text-gray-600 hover:border-accent/30 hover:text-accent transition-all shadow-sm">
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
-                        {locale === "zh" ? "上传资料" : "Upload materials"}
-                      </button>
-                      <button onClick={() => { setChatInput(locale === "zh" ? "帮我做一个网站" : "Build me a website"); }} className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-accent text-white text-sm font-medium hover:bg-accent/90 transition-all shadow-sm shadow-accent/20">
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
-                        {locale === "zh" ? "直接对话" : "Start chatting"}
-                      </button>
-                    </div>
-                  )}
-                  {selectedTemplate && (
-                    <p className="text-xs text-gray-500 mb-6 max-w-sm">
-                      {locale === "zh" ? `当前模板为 ${selectedTemplate.nameCn}，补充你的内容或直接修改。` : `${selectedTemplate.name} template loaded. Add your content or start editing.`}
-                    </p>
-                  )}
-                  {selectedCount > 0 && !selectedTemplate && (
+                  <div className="mb-6 flex items-center gap-3">
+                    <button onClick={() => router.push("/knowledge")} className="flex items-center gap-2 px-5 py-2.5 rounded-xl border border-gray-200 bg-white text-sm text-gray-600 hover:border-accent/30 hover:text-accent transition-all shadow-sm">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
+                      {locale === "zh" ? "上传资料" : "Upload materials"}
+                    </button>
+                    <button onClick={() => { setChatInput(locale === "zh" ? "帮我做一个网站" : "Build me a website"); }} className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-accent text-white text-sm font-medium hover:bg-accent/90 transition-all shadow-sm shadow-accent/20">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
+                      {locale === "zh" ? "直接对话" : "Start chatting"}
+                    </button>
+                  </div>
+                  {selectedCount > 0 && (
                     <p className="text-xs text-gray-400 mb-4">{locale === "zh" ? `已关联 ${selectedCount} 条知识` : `${selectedCount} knowledge items linked`}</p>
                   )}
-
-                  <div className="space-y-2 w-full">
-                    {((): string[] => {
-                      if (selectedTemplate) {
-                        return [
-                          locale === "zh" ? selectedTemplate.starterPromptCn : selectedTemplate.starterPrompt,
-                          locale === "zh" ? "把首页标题和核心卖点改成我的版本" : "Rewrite the hero and value proposition around me",
-                          locale === "zh" ? "根据我的资料替换当前案例内容" : "Replace the current mock content with my real data",
-                          locale === "zh" ? "保留这个结构，但改成更适合我的品牌语气" : "Keep the structure but adapt the tone to my brand",
-                        ].filter(Boolean) as string[];
-                      }
-                      // Dynamic suggestions based on loaded knowledge
-                      const suggestions: string[] = [];
-                      const selItems = items.filter((k: KnowledgeItem) => k.selected);
-                      const hasExperience = selItems.some((k: KnowledgeItem) => k.category === "experience");
-                      const hasSkills = selItems.some((k: KnowledgeItem) => k.category === "skills");
-                      const hasFactual = selItems.some((k: KnowledgeItem) => k.category === "factual");
-                      const hasMedia = selItems.some((k: KnowledgeItem) => k.category === "media");
-
-                      if (hasExperience) {
-                        suggestions.push(locale === "zh" ? "根据我的经历生成一个个人作品集网站" : "Build a portfolio site from my experience");
-                      }
-                      if (hasSkills) {
-                        suggestions.push(locale === "zh" ? "重点展示我的技能，用更有视觉冲击力的布局" : "Highlight my skills with a visually striking layout");
-                      }
-                      if (hasFactual) {
-                        suggestions.push(locale === "zh" ? "做一个能体现我个人风格的品牌页面" : "Create a personal brand page that reflects my style");
-                      }
-                      if (hasMedia) {
-                        suggestions.push(locale === "zh" ? "多展示我的作品和媒体资源" : "Feature my work and media content prominently");
-                      }
-                      if (selItems.length > 0 && suggestions.length < 3) {
-                        suggestions.push(locale === "zh" ? "根据我的资料推荐最合适的网站类型和风格" : "Recommend the best site type and style for my content");
-                      }
-                      // Generic fallbacks
-                      if (suggestions.length === 0) {
-                        suggestions.push(
-                          locale === "zh" ? "帮我搭建一个个人作品集网站" : "Build me a personal portfolio",
-                          locale === "zh" ? "创建一个有设计感的品牌官网" : "Create a stylish brand website",
-                        );
-                      }
-                      if (suggestions.length < 4) {
-                        suggestions.push(locale === "zh" ? "我想要加入动画效果和交互设计" : "I want animations and interactive design");
-                      }
-                      if (suggestions.length < 4) {
-                        suggestions.push(locale === "zh" ? "做一个暗色系科技风格的网站" : "Build a dark-themed tech-style site");
-                      }
-                      return suggestions.slice(0, 4);
-                    })().map(p => (
-                      <button key={p} onClick={() => sendChat(p)} className="w-full px-4 py-3 rounded-xl border border-gray-200 text-[13px] text-gray-500 hover:text-gray-800 hover:border-gray-300 hover:bg-gray-50/50 transition-all text-left">{p}</button>
-                    ))}
-                  </div>
                 </div>
               )}
               {chatMessages.map((msg, i) => {
@@ -1562,13 +1550,9 @@ function CreatePageInner() {
                     <button onClick={() => setPreviewTab("preview")} className={`px-2.5 py-1 rounded-lg text-[10px] transition-all ${previewTab === "preview" ? "bg-accent/10 text-accent font-medium" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
                       {locale === "zh" ? "预览" : "Preview"}
                     </button>
-                    <button onClick={() => setPreviewTab("prd")} className={`px-2.5 py-1 rounded-lg text-[10px] transition-all ${previewTab === "prd" ? "bg-accent/10 text-accent font-medium" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
-                      {locale === "zh" ? "PRD" : "PRD"}
-                      {prdData && previewTab !== "prd" && <span className="ml-1 w-1.5 h-1.5 rounded-full bg-accent inline-block" />}
-                    </button>
                     <button onClick={() => setPreviewTab("resources")} className={`px-2.5 py-1 rounded-lg text-[10px] transition-all ${previewTab === "resources" ? "bg-accent/10 text-accent font-medium" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
                       {locale === "zh" ? "资源" : "Resources"}
-                      {siteResources.length > 0 && previewTab !== "resources" && <span className="ml-1 w-1.5 h-1.5 rounded-full bg-accent inline-block" />}
+                      {(siteResources.length > 0 || selectedBaseId) && previewTab !== "resources" && <span className="ml-1 w-1.5 h-1.5 rounded-full bg-accent inline-block" />}
                     </button>
                     <span className="border-l border-gray-200 mx-0.5" />
                     {siteStatus === "published" ? (
@@ -1626,84 +1610,73 @@ function CreatePageInner() {
                 )
               )}
 
-              {/* PRD tab */}
-              {previewTab === "prd" && (
-                prdData ? (
-                  <div className="flex-1 flex flex-col overflow-hidden">
-                    {/* PRD content */}
-                    <div className="flex-1 overflow-y-auto bg-white">
-                      <div className="p-5 max-w-none prose prose-sm prose-gray prose-headings:text-gray-800 prose-p:text-gray-600 prose-li:text-gray-600 prose-strong:text-gray-800 prose-code:text-accent prose-code:bg-accent/5 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:before:content-none prose-code:after:content-none">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                          {prdData.markdown || JSON.stringify(prdData, null, 2)}
-                        </ReactMarkdown>
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex-1 flex items-center justify-center">
-                    <div className="text-center">
-                      <p className="text-xs text-gray-500 mb-2">{locale === "zh" ? "尚未生成 PRD" : "No PRD yet"}</p>
-                      <p className="text-[10px] text-gray-400">{locale === "zh" ? "在对话中描述需求，AI 将生成 PRD 文档" : "Describe your needs in chat to generate PRD"}</p>
-                    </div>
-                  </div>
-                )
-              )}
-
               {previewTab === "resources" && (
                 <div className="flex-1 overflow-y-auto bg-white">
                   <div className="p-5 border-b border-gray-200/60">
                     <h3 className="text-sm font-medium text-gray-800">{locale === "zh" ? "项目资源" : "Project Resources"}</h3>
                     <p className="mt-1 text-[11px] text-gray-500">
                       {locale === "zh"
-                        ? "这里保留本次网站生成关联的 PRD 与知识引用，方便后续修改时回看。"
-                        : "This keeps the PRD and referenced knowledge linked to the current site for later review."}
+                        ? "本次网站生成使用的知识库和内容来源。"
+                        : "Knowledge bases and content sources used for this site build."}
                     </p>
                   </div>
                   <div className="p-5 space-y-4">
-                    <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
-                      <div className="flex items-center justify-between gap-3">
-                        <div>
-                          <p className="text-xs font-medium text-gray-700">PRD</p>
-                          <p className="mt-1 text-[11px] text-gray-500">
-                            {prdData
-                              ? (locale === "zh" ? "当前预览对应的需求设计文档" : "The requirements document tied to this preview")
-                              : (locale === "zh" ? "当前还没有 PRD 文档" : "No PRD available yet")}
-                          </p>
+                    {/* Knowledge Base source */}
+                    {selectedBaseId && (
+                      <div className="rounded-xl border border-accent/20 bg-accent/5 p-4">
+                        <div className="flex items-center gap-2 mb-2">
+                          <span className="text-sm">📚</span>
+                          <p className="text-xs font-medium text-gray-800">{locale === "zh" ? "知识库" : "Knowledge Base"}</p>
                         </div>
-                        {prdData && (
-                          <button onClick={() => setPreviewTab("prd")} className="px-3 py-1.5 rounded-lg bg-white border border-gray-200 text-[10px] text-gray-600 hover:bg-gray-100 transition-all">
-                            {locale === "zh" ? "查看 PRD" : "Open PRD"}
-                          </button>
-                        )}
+                        <p className="text-[11px] text-gray-600">
+                          {kbBases.find(b => b.id === selectedBaseId)?.name || selectedBaseId}
+                        </p>
+                        <p className="mt-1 text-[10px] text-gray-500">
+                          {kbBases.find(b => b.id === selectedBaseId)?.fileCount || 0} {locale === "zh" ? "个文件" : "files"}
+                          {" · "}
+                          {((kbBases.find(b => b.id === selectedBaseId)?.totalChars || 0)).toLocaleString()} {locale === "zh" ? "字" : "chars"}
+                        </p>
+                        <a href={`/knowledge/${selectedBaseId}`} target="_blank" rel="noopener noreferrer" className="mt-2 inline-block text-[10px] text-accent hover:underline">
+                          {locale === "zh" ? "管理知识库 →" : "Manage KB →"}
+                        </a>
                       </div>
-                    </div>
-                    <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
-                      <div className="flex items-center justify-between gap-3">
-                        <div>
-                          <p className="text-xs font-medium text-gray-700">{locale === "zh" ? "知识引用" : "Knowledge References"}</p>
-                          <p className="mt-1 text-[11px] text-gray-500">
-                            {locale === "zh"
-                              ? `${siteResources.length} 条被用于本次网站构建和后续修改`
-                              : `${siteResources.length} references were used for this site build and future edits`}
-                          </p>
+                    )}
+                    {/* Legacy knowledge items */}
+                    {siteResources.length > 0 && (
+                      <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                        <div className="flex items-center gap-2 mb-2">
+                          <span className="text-sm">📋</span>
+                          <p className="text-xs font-medium text-gray-700">{locale === "zh" ? "知识条目" : "Knowledge Items"}</p>
                         </div>
-                      </div>
-                      <div className="mt-4 space-y-2">
-                        {siteResources.length > 0 ? siteResources.map((resource) => (
-                          <div key={resource.id} className="rounded-lg bg-white border border-gray-200 px-3 py-2">
-                            <div className="flex items-center justify-between gap-3">
-                              <p className="text-[11px] font-medium text-gray-700 truncate">{resource.title}</p>
-                              <span className="shrink-0 rounded-full bg-gray-100 px-2 py-0.5 text-[9px] text-gray-500">{resource.category}</span>
+                        <p className="mt-1 text-[11px] text-gray-500">
+                          {locale === "zh"
+                            ? `${siteResources.length} 条用于本次构建`
+                            : `${siteResources.length} items used for this build`}
+                        </p>
+                        <div className="mt-3 space-y-2">
+                          {siteResources.map((resource) => (
+                            <div key={resource.id} className="rounded-lg bg-white border border-gray-200 px-3 py-2">
+                              <div className="flex items-center justify-between gap-3">
+                                <p className="text-[11px] font-medium text-gray-700 truncate">{resource.title}</p>
+                                <span className="shrink-0 rounded-full bg-gray-100 px-2 py-0.5 text-[9px] text-gray-500">{resource.category}</span>
+                              </div>
+                              <p className="mt-1 text-[10px] text-gray-500">{resource.sourceName} · {resource.sourceType}</p>
                             </div>
-                            <p className="mt-1 text-[10px] text-gray-500">{resource.sourceName} · {resource.sourceType}</p>
-                          </div>
-                        )) : (
-                          <p className="text-[11px] text-gray-500">
-                            {locale === "zh" ? "当前还没有记录知识引用。选中知识条目并生成后会显示在这里。" : "No knowledge references recorded yet. They appear here after you build with selected knowledge."}
-                          </p>
-                        )}
+                          ))}
+                        </div>
                       </div>
-                    </div>
+                    )}
+                    {!selectedBaseId && siteResources.length === 0 && (
+                      <div className="text-center py-8">
+                        <p className="text-3xl mb-2">📭</p>
+                        <p className="text-[11px] text-gray-500">
+                          {locale === "zh" ? "没有关联的知识库或内容来源。" : "No linked knowledge base or content sources."}
+                        </p>
+                        <a href="/knowledge" className="mt-2 inline-block text-[10px] text-accent hover:underline">
+                          {locale === "zh" ? "去创建知识库" : "Create knowledge base"}
+                        </a>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}

@@ -2,14 +2,17 @@ import fs from "fs/promises";
 import path from "path";
 import { exec } from "child_process";
 import http from "http";
-import { generateFileMap } from "@/lib/generator";
-import { queryDesignIntelligence } from "@/lib/design-intelligence";
-import { isTemplateStyle, generateFromTemplate } from "@/lib/template-generator";
 import type { WorkspaceData, UserSelections } from "@/lib/types";
 import { logger } from "@/lib/logger";
 import { getInstalledNextVersion } from "@/lib/next-version";
-import { runCodeGuardrails } from "@/lib/code-guardrails";
+import { runCodeGuardrails, runAdvancedModeGuardrails } from "@/lib/code-guardrails";
 import { copyUserImagesToSite } from "@/lib/asset-store";
+import { routeKnowledge, buildRoutedChatbotContext } from "@/lib/knowledge-router";
+import { knowledgeItems as knowledgeItemsTable } from "@/lib/db/schema";
+import { db } from "@/lib/db";
+import { eq } from "drizzle-orm";
+import type { KnowledgeItem } from "@/lib/knowledge";
+import { getSpecSections } from "@/lib/site-spec";
 
 const SITES_DIR = path.join(process.cwd(), "sites-data");
 const RUNTIME_BASE_DIR = (process.env.RUNTIME_BASE_DIR?.trim() || path.join(SITES_DIR, "_runtime_base")).replace(/\/+$/, "");
@@ -50,7 +53,7 @@ async function copyDirectory(sourceDir: string, targetDir: string): Promise<void
   await fs.cp(sourceDir, targetDir, { recursive: true, force: true });
 }
 
-async function rewriteExportAssetPaths(dir: string, fromPrefix: string, toPrefix: string): Promise<void> {
+export async function rewriteExportAssetPaths(dir: string, fromPrefix: string, toPrefix: string): Promise<void> {
   const normalizedFrom = fromPrefix.replace(/\/+$/, "");
   const normalizedTo = toPrefix.replace(/\/+$/, "");
   const exts = new Set([".html", ".js", ".txt"]);
@@ -462,9 +465,52 @@ async function assertPreviewArtifacts(siteDir: string, siteId: string): Promise<
     warnings.push("HTML contains error markers — possible build-time rendering issue");
   }
 
+  // Check multi-page routes exist (if spec has pages[])
+  // Look for additional route directories in out/
+  try {
+    const outEntries = await fs.readdir(outDir, { withFileTypes: true });
+    const routeDirs = outEntries.filter(e => e.isDirectory() && !e.name.startsWith("_") && e.name !== "images");
+    if (routeDirs.length > 0) {
+      for (const dir of routeDirs) {
+        const routeIndex = path.join(outDir, dir.name, "index.html");
+        try {
+          await fs.access(routeIndex);
+        } catch {
+          warnings.push(`Multi-page route missing index: /${dir.name}/`);
+        }
+      }
+    }
+  } catch {}
+
   if (warnings.length > 0) {
     logger.warn("generate", `[${siteId}] Post-build warnings: ${warnings.join("; ")}`);
   }
+}
+
+/** Dependency whitelist — only these npm packages are allowed in generated sites */
+const ALLOWED_DEPENDENCIES = new Set([
+  "next", "react", "react-dom", "tailwindcss", "@tailwindcss/postcss", "postcss",
+  "typescript", "@types/react", "@types/node",
+  "qrcode", "@types/qrcode", "dijkstrajs", "pngjs",
+  // Extensions (installed on demand)
+  "three", "@react-three/fiber", "@react-three/drei",
+  "@lottiefiles/react-lottie-player", "lottie-web",
+  "framer-motion",
+]);
+
+/** Validate generated package.json dependencies against whitelist */
+export function validateDependencies(files: Record<string, string>): string[] {
+  const violations: string[] = [];
+  try {
+    const pkg = JSON.parse(files["package.json"] || "{}");
+    const deps = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
+    for (const dep of Object.keys(deps)) {
+      if (!ALLOWED_DEPENDENCIES.has(dep)) {
+        violations.push(dep);
+      }
+    }
+  } catch {}
+  return violations;
 }
 
 async function probePreviewUrl(url: string): Promise<boolean> {
@@ -575,7 +621,9 @@ export interface RunSiteBuildInput {
   selections: UserSelections;
   spec?: import("./site-spec").SiteSpec | null;
   previewBaseUrl: string;
+  knowledgeBaseId?: string;
   requestId: string;
+  onProgress?: (step: string) => Promise<void>;
 }
 
 export interface RunSiteBuildResult {
@@ -585,8 +633,243 @@ export interface RunSiteBuildResult {
   previewReachable: boolean;
 }
 
+// ---- KB → WorkspaceData enrichment (AI-powered) ----
+
+/**
+ * Use lightweight AI to extract structured data from KB content.
+ * Falls back to regex if AI call fails.
+ */
+async function enrichWorkspaceDataFromKB(data: WorkspaceData, kbContent: string): Promise<Partial<WorkspaceData>> {
+  const text = kbContent.slice(0, 15000);
+
+  // Try AI extraction first
+  try {
+    const { chatCompletion } = await import("./llm");
+    const result = await chatCompletion({
+      requestId: "kb-extract",
+      label: "kb-content-extract",
+      systemPrompt: `You extract structured personal/portfolio data from text. Output ONLY valid JSON, no markdown fences. The JSON must match this exact schema:
+{
+  "name": "person's full name (original language)",
+  "nameEn": "person's name in English (transliterate if Chinese)",
+  "title": "job title (original language)",
+  "titleEn": "job title in English",
+  "email": "email address or empty string",
+  "bio": "1-3 sentence personal introduction (original language)",
+  "bioEn": "same bio translated to English",
+  "tags": ["3-5 skill/role tags in English"],
+  "skills": [{"title": "category name", "skills": ["skill1", "skill2"]}],
+  "projects": [{"title": "project name", "desc": "1-2 sentence description", "tags": ["tech tags"], "org": "company/org", "link": "", "role": "role in project", "period": "time period", "highlights": ["achievement 1", "achievement 2"], "detail": "full project description"}],
+  "experience": [{"title": "job title", "org": "company", "period": "date range", "desc": "role description", "highlights": ["responsibility or achievement"], "current": false}],
+  "education": [{"school": "school name", "degree": "degree", "period": "years", "highlights": []}],
+  "awards": [{"title": "award name", "org": "awarding body", "year": "year", "description": "what for"}],
+  "links": [{"label": "display text", "url": "full URL"}]
+}
+Include ONLY fields that exist in the source text. Keep arrays empty if no data found.
+IMPORTANT: For "name", "title", "bio" — provide BOTH original language AND English versions (nameEn, titleEn, bioEn). If source is already English, both versions can be the same.`,
+      userPrompt: text,
+      temperature: 0.1,
+      maxTokens: 4096,
+    });
+
+    const jsonStr = result.content.replace(/```json\s*\n?|\n?```/g, "").trim();
+    const parsed = JSON.parse(jsonStr);
+
+    const enriched: Partial<WorkspaceData> = {};
+    if (parsed.name && parsed.name !== data.name) { enriched.name = parsed.name; enriched.nameEn = parsed.nameEn || parsed.name; }
+    if (parsed.title) { enriched.title = parsed.title; enriched.titleEn = parsed.titleEn || parsed.title; }
+    if (parsed.email) enriched.email = parsed.email;
+    if (parsed.bio) { enriched.bio = parsed.bio; enriched.bioEn = parsed.bioEn || parsed.bio; }
+    if (Array.isArray(parsed.tags) && parsed.tags.length > 0) enriched.tags = parsed.tags;
+    if (Array.isArray(parsed.skills) && parsed.skills.length > 0) {
+      enriched.skills = parsed.skills.map((g: { title?: string; skills?: string[] }) => ({
+        title: g.title || "Skills",
+        skills: Array.isArray(g.skills) ? g.skills : [],
+      }));
+    }
+    if (Array.isArray(parsed.projects) && parsed.projects.length > 0) {
+      enriched.projects = parsed.projects.map((p: Record<string, unknown>) => ({
+        title: String(p.title || ""),
+        desc: String(p.desc || ""),
+        tags: Array.isArray(p.tags) ? p.tags : [],
+        org: String(p.org || ""),
+        link: String(p.link || ""),
+        image: "",
+        badge: "",
+      }));
+      // Also create timeline entries from projects with role/period
+      enriched.timeline = parsed.projects
+        .filter((p: Record<string, unknown>) => p.role || p.period)
+        .map((p: Record<string, unknown>) => ({
+          title: String(p.role || p.title || ""),
+          desc: String(p.desc || ""),
+          date: String(p.period || ""),
+          active: false,
+        }));
+    }
+    if (Array.isArray(parsed.experience) && parsed.experience.length > 0) {
+      enriched.timeline = parsed.experience.map((e: Record<string, unknown>) => ({
+        title: String(e.title || ""),
+        desc: String(e.desc || ""),
+        date: String(e.period || ""),
+        active: Boolean(e.current),
+      }));
+    }
+    if (Array.isArray(parsed.education) && parsed.education.length > 0) {
+      enriched.education = parsed.education.map((e: Record<string, unknown>) => ({
+        school: String(e.school || ""),
+        degree: String(e.degree || ""),
+        highlights: Array.isArray(e.highlights) ? e.highlights : [],
+      }));
+    }
+    if (Array.isArray(parsed.links) && parsed.links.length > 0) {
+      enriched.links = parsed.links.map((l: Record<string, unknown>) => ({
+        label: String(l.label || ""),
+        url: String(l.url || ""),
+        icon: "other",
+      }));
+    }
+
+    return enriched;
+  } catch (err) {
+    logger.warn("generate", `AI KB extraction failed, using regex fallback: ${err instanceof Error ? err.message : "unknown"}`);
+  }
+
+  // Regex fallback
+  return regexEnrichWorkspaceData(text);
+}
+
+/** Regex-based fallback for KB extraction when AI is unavailable */
+function regexEnrichWorkspaceData(text: string): Partial<WorkspaceData> {
+  const result: Partial<WorkspaceData> = {};
+
+  const namePatterns = [
+    /(?:姓名|名字|Name)[：:\s]*([^\n,，。.]{2,20})/i,
+    /^#\s+(.{2,20})$/m,
+    /(?:我是|I am|I'm)\s+([^\n,，。.]{2,20})/i,
+  ];
+  for (const p of namePatterns) {
+    const m = text.match(p);
+    if (m && m[1].trim().length >= 2) { result.name = m[1].trim(); result.nameEn = result.name; break; }
+  }
+
+  const titlePatterns = [/(?:职位|职业|Title|Role|Position)[：:\s]*([^\n,，]{2,40})/i];
+  for (const p of titlePatterns) {
+    const m = text.match(p);
+    if (m) { result.title = m[1].trim(); result.titleEn = result.title; break; }
+  }
+
+  const emailMatch = text.match(/[\w.-]+@[\w.-]+\.\w{2,}/);
+  if (emailMatch) result.email = emailMatch[0];
+
+  const paragraphs = text.split(/\n{2,}/).filter(p => p.trim().length > 50 && !p.trim().startsWith("#"));
+  if (paragraphs.length > 0) { result.bio = paragraphs[0].trim().slice(0, 500); result.bioEn = result.bio; }
+
+  return result;
+}
+
+// ---- Advanced mode helpers ----
+
+function generateMinimalThemeCSS(theme: string): string {
+  const { STYLE_CONFIG } = require("./generator-config") as { STYLE_CONFIG: Record<string, { colors: Record<string, string>; fontSans: string; fontHeading: string; borderRadius: string }> };
+  const config = STYLE_CONFIG[theme] || STYLE_CONFIG.minimalist;
+  const colorVars = Object.entries(config.colors).map(([k, v]) => `  --color-${k}: ${v};`).join("\n");
+  return `@import "tailwindcss";
+
+@theme {
+${colorVars}
+  --font-sans: ${config.fontSans};
+  --font-heading: ${config.fontHeading};
+}
+
+body { background-color: var(--color-bg); color: var(--color-text); font-family: var(--font-sans); line-height: 1.6; -webkit-font-smoothing: antialiased; }
+::selection { background-color: var(--color-accent); color: white; }
+html { scroll-behavior: smooth; }
+`;
+}
+
+function generateAdvancedLayout(theme: string): string {
+  const { STYLE_CONFIG } = require("./generator-config") as { STYLE_CONFIG: Record<string, { fontSans: string; fontHeading: string }> };
+  const config = STYLE_CONFIG[theme] || STYLE_CONFIG.minimalist;
+  const fontFamilies = new Set<string>();
+  for (const f of [config.fontSans, config.fontHeading]) {
+    const match = f.match(/"([^"]+)"/);
+    if (match) fontFamilies.add(match[1]);
+  }
+  const googleFonts = [...fontFamilies].map(f => f.replace(/ /g, "+")).join("&family=");
+  const fontLink = googleFonts ? `<link href="https://fonts.googleapis.com/css2?family=${googleFonts}:wght@300;400;500;600;700&display=swap" rel="stylesheet" />` : "";
+
+  return `import type { Metadata } from "next";
+import "./globals.css";
+import { LanguageProvider } from "@/components/LanguageProvider";
+
+export const metadata: Metadata = { title: "My Site", description: "Generated with CreateAnySite" };
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="zh" suppressHydrationWarning>
+      <head>${fontLink ? `\n        ${fontLink}` : ""}</head>
+      <body><LanguageProvider>{children}</LanguageProvider></body>
+    </html>
+  );
+}
+`;
+}
+
+function generateAdvancedTranslations(data: WorkspaceData): string {
+  const p = data;
+  const t = {
+    nav: { projects: "项目", experience: "经历", skills: "技能", education: "教育", contact: "联系", posts: "文章", awards: "荣誉", publications: "论文" },
+    hero: { name: p.name, title: p.title, subtitle: "", tags: p.tags || [] },
+    about: { text: p.bio || "", tags: p.bioTags || [] },
+    projects: (p.projects || []).map(pr => {
+      const extra = pr as unknown as Record<string, unknown>;
+      return { title: pr.title, org: pr.org || "", desc: pr.desc, tags: pr.tags || [], image: pr.image || "", link: pr.link || "", badge: pr.badge || "", detail: String(extra.detail || extra.desc || ""), highlights: Array.isArray(extra.highlights) ? extra.highlights : [], role: String(extra.role || ""), period: String(extra.period || "") };
+    }),
+    experience: (p.timeline || []).map(e => {
+      const extra = e as unknown as Record<string, unknown>;
+      return { title: e.title, org: String(extra.org || ""), period: e.date || "", desc: e.desc, highlights: Array.isArray(extra.highlights) ? extra.highlights : [], current: e.active || false };
+    }),
+    skills: (p.skills || []).map(g => ({ title: g.title, skills: g.skills })),
+    education: (p.education || []).map(e => ({ school: e.school, degree: e.degree, period: "", highlights: e.highlights || [] })),
+    testimonials: [] as Array<{ quote: string; author: string; role: string; company: string }>,
+    awards: [] as Array<{ title: string; org: string; year: string; description: string }>,
+    publications: [] as Array<{ title: string; authors: string; venue: string; year: string; abstract: string; url: string }>,
+    media: [] as Array<{ type: string; title: string; platform: string; url: string; date: string; description: string }>,
+    demos: [] as Array<{ title: string; description: string; url: string; screenshot: string; techStack: string[] }>,
+    contact: { email: p.email || "", links: (p.links || []).map(l => ({ type: "website", label: l.label, url: l.url, icon: l.icon || "other" })) },
+    footer: `© ${new Date().getFullYear()} ${p.name}`,
+    chatbot: { title: `${p.name} AI`, subtitle: "有什么想问的？", welcome: `你好！可以问我关于${p.name}的经历和技能。`, placeholder: "输入你的问题...", send: "发送", tooltip: "AI 对话", suggestions: p.projects.length > 0 ? [`介绍一下「${p.projects[0].title}」`, "你有哪些核心技能？", "你现在接受合作吗？"] : ["你是做什么的？", "介绍一下你的经历", "你有哪些技能？"] },
+    share: { button: "分享", title: "分享", invite: `欢迎了解 ${p.name}`, desc: "个人网站", save: "保存", copy: "复制链接", copied: "已复制！" },
+    availableSections: ["about", ...(p.projects.length > 0 ? ["projects"] : []), ...(p.timeline.length > 0 ? ["experience"] : []), ...(p.skills.length > 0 ? ["skills"] : []), ...(p.education.length > 0 ? ["education"] : []), "contact"],
+    posts: [] as Array<{ title: string; slug: string; excerpt: string; content: string; category: string; tags: string[]; image: string; publishedAt: string; readingTime: string }>,
+    links: (p.links || []).map(l => ({ label: l.label, url: l.url, icon: l.icon || "other" })),
+  };
+  const en = {
+    ...JSON.parse(JSON.stringify(t)),
+    nav: { projects: "Projects", experience: "Experience", skills: "Skills", education: "Education", contact: "Contact", posts: "Posts", awards: "Awards", publications: "Publications" },
+    hero: { name: p.nameEn || p.name, title: p.titleEn || p.title, subtitle: "", tags: t.hero.tags },
+    about: { text: p.bioEn || p.bio || "", tags: t.about.tags },
+    footer: `© ${new Date().getFullYear()} ${p.nameEn || p.name}`,
+    chatbot: { title: `${p.nameEn || p.name} AI`, subtitle: "Ask me anything", welcome: `Hi! Ask me about ${p.nameEn || p.name}'s experience and skills.`, placeholder: "Type your question...", send: "Send", tooltip: "AI Chat", suggestions: p.projects.length > 0 ? [`Tell me about "${p.projects[0].title}"`, "What are your core skills?", "Are you open to collaboration?"] : ["What do you do?", "Tell me about your experience", "What are your skills?"] },
+    share: { button: "Share", title: "Share", invite: `Learn about ${p.nameEn || p.name}`, desc: "Personal website", save: "Save", copy: "Copy Link", copied: "Copied!" },
+  };
+
+  // Use the same typed TranslationData from template-renderer approach
+  return `/* eslint-disable @typescript-eslint/no-explicit-any */
+interface TData { [key: string]: any; }
+export const translations: { zh: TData; en: TData } = {
+  zh: ${JSON.stringify(t, null, 2)} as TData,
+  en: ${JSON.stringify(en, null, 2)} as TData,
+};
+export type Lang = keyof typeof translations;
+export type Translations = TData;
+`;
+}
+
 export async function runSiteBuild(input: RunSiteBuildInput): Promise<RunSiteBuildResult> {
-  const { siteId, data, selections, spec, previewBaseUrl, requestId } = input;
+  const { siteId, data, selections, spec, previewBaseUrl, requestId, onProgress } = input;
+  const progress = async (step: string) => { if (onProgress) await onProgress(step).catch(() => {}); };
 
   logger.info("generate", `[${requestId}] Generate for site ${siteId}`, {
     name: data.name,
@@ -595,15 +878,89 @@ export async function runSiteBuild(input: RunSiteBuildInput): Promise<RunSiteBui
   });
 
   let files: Record<string, string>;
-  if (isTemplateStyle(selections.theme)) {
-    files = await generateFromTemplate(data, selections);
-  } else {
-    const designIntel = await queryDesignIntelligence(
-      selections.siteType || "portfolio",
-      selections.theme || "cyberpunk",
-      selections.customTheme || undefined,
+
+  // Advanced mode — Code Agent writes ALL code from scratch
+  if (selections.compositionPlan) {
+    const { generateBaseFiles } = await import("./shared-components");
+    const { runCodeAgent } = await import("./build-agents");
+    const { getVisualAssetCSS } = await import("./components");
+
+    // Generate infrastructure files (package.json, tsconfig, shared components)
+    files = generateBaseFiles({ siteName: data.name, chatbotContext: data.chatbotContext, theme: selections.theme || undefined });
+
+    // Resolve asset CSS
+    const assetCss = getVisualAssetCSS(selections.compositionPlan);
+
+    const designPlan = {
+      compositionPlan: selections.compositionPlan,
+      theme: selections.theme,
+      customTheme: selections.customTheme,
+      siteType: selections.siteType,
+    };
+
+    // Load knowledge base content (raw files, not just summaries)
+    let kbContent = data.chatbotContext || "";
+    if (input.userId) {
+      try {
+        const { loadFullKBContext, formatFilesForPrompt } = await import("./kb-loader");
+        const kbCtx = await loadFullKBContext(input.userId, input.knowledgeBaseId);
+        if (kbCtx.fileCount > 0) {
+          kbContent = `## Knowledge Base Index\n${kbCtx.indexContent}\n\n## File Contents\n${formatFilesForPrompt(kbCtx.fileContents)}`;
+          logger.info("generate", `[${requestId}] Loaded ${kbCtx.fileCount} KB files for Code Agent`);
+        }
+      } catch (err) {
+        logger.warn("generate", `[${requestId}] KB load failed: ${err instanceof Error ? err.message : "unknown"}`);
+      }
+    }
+
+    logger.info("generate", `[${requestId}] Advanced mode: running Code Agent (${kbContent.length} chars knowledge)...`);
+    const codeResult = await runCodeAgent(
+      { requestId, messages: [], knowledgeContext: kbContent, knowledgeSummary: "", knowledgeGroupIndex: "", skillCatalog: "", activatedContext: "", codeContext: "", hasSiteCode: false, currentPrd: "", currentSelections: selections },
+      designPlan,
+      assetCss,
     );
-    files = generateFileMap(data, selections, designIntel, spec || undefined);
+
+    // Enrich WorkspaceData from KB content when legacy items are empty
+    if (kbContent && (!data.name || data.name === "Your Name" || data.name === "")) {
+      const enriched = await enrichWorkspaceDataFromKB(data, kbContent);
+      Object.assign(data, enriched);
+      logger.info("generate", `[${requestId}] Enriched WorkspaceData from KB: name="${data.name}", bio=${data.bio?.length || 0} chars, projects=${data.projects?.length || 0}`);
+    }
+
+    // Always generate these regardless of Code Agent result
+    files["src/i18n/translations.ts"] = generateAdvancedTranslations(data);
+    files["src/app/layout.tsx"] = generateAdvancedLayout(selections.theme || "minimalist");
+    files["src/app/globals.css"] = generateMinimalThemeCSS(selections.theme || "minimalist") + (assetCss ? "\n\n/* === Visual Assets === */\n" + assetCss : "");
+
+    if (codeResult.valid && codeResult.pageTsx) {
+      let pageSrc = codeResult.pageTsx;
+
+      // Enforce chatMode: if "cartoon" (or unset), ensure CartoonAssistant is used instead of ChatBot
+      const chatMode = selections.compositionPlan?.chatMode || "cartoon";
+      if (chatMode === "cartoon" && pageSrc.includes("ChatBot") && !pageSrc.includes("CartoonAssistant")) {
+        pageSrc = pageSrc
+          .replace(/import\s+ChatBot\s+from\s+["'][^"']+["']/g, 'import CartoonAssistant from "@/components/CartoonAssistant"')
+          .replace(/<ChatBot\s*\/>/g, "<CartoonAssistant />");
+        logger.info("generate", `[${requestId}] chatMode=cartoon: auto-replaced ChatBot → CartoonAssistant`);
+      }
+
+      files["src/app/page.tsx"] = pageSrc;
+      if (codeResult.globalsCssExtra) {
+        files["src/app/globals.css"] += "\n\n/* === Code Agent Custom Styles === */\n" + codeResult.globalsCssExtra;
+      }
+      logger.info("generate", `[${requestId}] Code Agent succeeded — custom code (${pageSrc.length} chars)`);
+    } else {
+      // No fallback — report the error
+      const errMsg = codeResult.errors.join(", ") || "Code Agent produced empty output";
+      logger.error("generate", `[${requestId}] Code Agent failed: ${errMsg}`);
+      throw new Error(`Advanced mode Code Agent failed: ${errMsg}. Please try again.`);
+    }
+  }
+  // Fallback — no compositionPlan available, generate basic files
+  else {
+    const { generateBaseFiles } = await import("./shared-components");
+    files = generateBaseFiles({ siteName: data.name, chatbotContext: data.chatbotContext, theme: selections.theme || undefined });
+    logger.warn("generate", `[${requestId}] No compositionPlan found — generated base files only`);
   }
 
   if (files["tsconfig.json"]) {
@@ -611,13 +968,118 @@ export async function runSiteBuild(input: RunSiteBuildInput): Promise<RunSiteBui
       const tsconfig = JSON.parse(files["tsconfig.json"]);
       tsconfig.compilerOptions = tsconfig.compilerOptions || {};
       tsconfig.compilerOptions.skipLibCheck = true;
+      tsconfig.compilerOptions.noImplicitAny = false; // Code Agent rarely adds type annotations
       files["tsconfig.json"] = JSON.stringify(tsconfig, null, 2);
+    } catch {}
+  }
+
+  // Knowledge routing: route knowledge items to sections for richer chatbot context
+  if (input.userId && spec) {
+    try {
+      const userItems = await db
+        .select()
+        .from(knowledgeItemsTable)
+        .where(eq(knowledgeItemsTable.userId, input.userId));
+
+      const items: KnowledgeItem[] = userItems
+        .filter(i => i.selected === 1)
+        .map(i => ({
+          id: i.id,
+          category: i.category as KnowledgeItem["category"],
+          title: i.title,
+          content: i.content,
+          sourceId: i.sourceId || "",
+          sourceName: i.sourceName || undefined,
+          sourceType: i.sourceType || undefined,
+          selected: true,
+          tags: i.tags ? JSON.parse(i.tags) : [],
+          useCase: i.useCase || undefined,
+        }));
+
+      if (items.length > 0) {
+        const specSections = getSpecSections(spec);
+        const routing = routeKnowledge(items, specSections);
+        logger.info("generate", `[${requestId}] Knowledge routing: ${routing.summary}`);
+
+        // Enrich knowledge.json with section-aware context
+        const routedContext = buildRoutedChatbotContext(routing);
+        if (routedContext && files["src/data/knowledge.json"]) {
+          try {
+            const existing = JSON.parse(files["src/data/knowledge.json"]);
+            // Append routed sections as additional chunks
+            for (const [sectionId, sectionItems] of Object.entries(routing.sections)) {
+              if (sectionItems.length === 0) continue;
+              existing.chunks.push({
+                topic: sectionId,
+                content: sectionItems.map(i => `${i.title}: ${i.content}`).join("\n"),
+              });
+            }
+            // Append unrouted items as general knowledge (not silently dropped)
+            if (routing.unrouted.length > 0) {
+              existing.chunks.push({
+                topic: "general",
+                content: routing.unrouted.map(i => `${i.title}: ${i.content}`).join("\n"),
+              });
+            }
+            files["src/data/knowledge.json"] = JSON.stringify(existing, null, 2);
+          } catch {}
+        }
+      }
+    } catch (err) {
+      logger.warn("generate", `[${requestId}] Knowledge routing failed: ${err instanceof Error ? err.message : "unknown"}`);
+    }
+  }
+
+  // Enrich knowledge.json with KB file contents for chatbot (uses new knowledge_bases system)
+  if (input.knowledgeBaseId && files["src/data/knowledge.json"]) {
+    try {
+      const { loadFullKBContext: loadKB, formatFilesForPrompt: fmtFiles } = await import("./kb-loader");
+      const kbCtx = await loadKB(input.userId || "", input.knowledgeBaseId);
+      if (kbCtx.fileCount > 0) {
+        const existing = JSON.parse(files["src/data/knowledge.json"]);
+        for (const [, file] of kbCtx.fileContents) {
+          if (file.type === "image" || !file.content || file.content.length < 10) continue;
+          existing.chunks.push({
+            topic: file.name.replace(/\.[^.]+$/, ""),
+            content: file.content.slice(0, 5000),
+          });
+        }
+        files["src/data/knowledge.json"] = JSON.stringify(existing, null, 2);
+        logger.info("generate", `[${requestId}] Injected ${kbCtx.fileCount} KB files into knowledge.json for chatbot`);
+      }
+    } catch (err) {
+      logger.warn("generate", `[${requestId}] KB chatbot enrichment failed: ${err instanceof Error ? err.message : "unknown"}`);
+    }
+  }
+
+  // Validate dependencies against whitelist
+  const depViolations = validateDependencies(files);
+  if (depViolations.length > 0) {
+    logger.warn("generate", `[${requestId}] Removing non-whitelisted dependencies: ${depViolations.join(", ")}`);
+    try {
+      const pkg = JSON.parse(files["package.json"]);
+      for (const dep of depViolations) {
+        delete pkg.dependencies?.[dep];
+        delete pkg.devDependencies?.[dep];
+      }
+      files["package.json"] = JSON.stringify(pkg, null, 2);
     } catch {}
   }
 
   // Auto-fix common issues in generated code before writing to disk
   files = runCodeGuardrails(files, siteId, previewBaseUrl, logger);
 
+  // Advanced mode deep validation: type annotations, import resolution, translation keys
+  await progress("🔍 验证生成代码...");
+  const advancedFixes = runAdvancedModeGuardrails(files, ALLOWED_DEPENDENCIES, logger);
+  if (advancedFixes.length > 0) {
+    await progress(`✅ 代码验证：${advancedFixes.length} 项自动修复`);
+  } else {
+    await progress("✅ 代码验证通过");
+  }
+
+  const fileCount = Object.keys(files).length;
+  await progress(`📄 写入 ${fileCount} 个文件`);
   const siteDir = await ensureSiteDir(siteId);
   await writeFilesToSiteDir(siteDir, files);
 
@@ -627,13 +1089,19 @@ export async function runSiteBuild(input: RunSiteBuildInput): Promise<RunSiteBui
     if (imgCount > 0) logger.info("generate", `[${requestId}] Copied ${imgCount} user images to site`);
   }
 
+  await progress("📦 准备依赖...");
   await ensureNodeModules(siteDir);
+
+  await progress("🔨 编译项目...");
   await staticBuild(siteDir);
   if (!PREVIEW_PUBLISH_DIR) {
     await rewriteExportAssetPaths(path.join(siteDir, "out"), "", `/${siteId}`);
   }
+
+  await progress("📋 检查构建产物...");
   await assertPreviewArtifacts(siteDir, siteId);
 
+  await progress("🚀 发布预览...");
   if (PREVIEW_PUBLISH_DIR) {
     await syncDraftPreview(siteId, siteDir);
   } else {

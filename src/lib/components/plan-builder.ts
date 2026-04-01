@@ -1,9 +1,11 @@
 /**
- * Builds a fallback CompositionPlan from theme/layout selections.
- * Used ONLY when the execution agent doesn't provide a compositionPlan.
- * The agent path is preferred — this is the legacy compatibility bridge.
+ * Builds a CompositionPlan. Tries multiple strategies:
+ * 1. From SiteSpec sections with kind info (best — spec-driven)
+ * 2. From theme/layout dedicated plans (legacy theme matching)
+ * 3. From layout family defaults (generic fallback)
  */
 import type { ThemeStyle, LayoutType } from "../types";
+import type { SiteSpec, SiteSpecSection } from "../site-spec";
 import type { CompositionPlan, SectionKind } from "./types";
 import { LAYOUT_FAMILY } from "../generator-config";
 
@@ -12,26 +14,78 @@ function s(id: string, kind: SectionKind, variant: string, type?: string): Compo
   return { id, kind, variant, type: type || id };
 }
 
+/** Infer kind from section id/type when kind is not explicitly set */
+function inferKind(id: string): SectionKind {
+  const map: Record<string, SectionKind> = {
+    hero: "hero", about: "content", services: "content", features: "content",
+    "how-it-works": "content", team: "content", story: "content",
+    projects: "showcase", portfolio: "showcase", "case-studies": "showcase", work: "showcase",
+    skills: "skills", "tech-stack": "skills",
+    timeline: "timeline", experience: "timeline", milestones: "timeline",
+    testimonials: "proof", reviews: "proof", clients: "proof", stats: "proof",
+    gallery: "gallery", photos: "gallery", media: "gallery",
+    contact: "cta", "get-started": "cta", newsletter: "cta", "hire-me": "cta",
+    pricing: "pricing", plans: "pricing",
+    faq: "faq",
+    education: "content",
+  };
+  return map[id] || "content";
+}
+
 /**
- * Build a fallback composition plan for a given theme + layout combination.
- * For dedicated themes, returns a fixed plan matching the original page generator.
- * For layout-family themes, maps dynamically.
+ * Build a composition plan. Prefers spec-driven approach.
  */
 export function buildCompositionPlan(
   theme: ThemeStyle,
   layout: LayoutType,
   availableSections?: string[],
+  spec?: SiteSpec | null,
 ): CompositionPlan {
-  const sections = availableSections || ["about", "projects", "timeline", "skills", "education", "contact"];
+  // Strategy 1: Build from spec sections with kind info
+  if (spec) {
+    const allSections = spec.pages?.flatMap(p => p.sections) || spec.sections || [];
+    const enabled = allSections.filter(sec => sec.enabled !== false && sec.id);
+    if (enabled.length > 0 && enabled.some(sec => sec.kind)) {
+      return buildFromSpecSections(enabled, spec.navigation?.style);
+    }
+    // Even without kind, if spec has sections, use them with inferred kinds
+    if (enabled.length > 0) {
+      return buildFromSpecSections(enabled.map(sec => ({ ...sec, kind: sec.kind || inferKind(sec.id || sec.type || "") })), spec.navigation?.style);
+    }
+  }
 
+  // Strategy 2: Dedicated theme plans
+  const sections = availableSections || ["about", "projects", "timeline", "skills", "education", "contact"];
   const dedicatedPlan = DEDICATED_THEME_PLANS[theme];
   if (dedicatedPlan) {
     return filterSections(dedicatedPlan, sections);
   }
 
+  // Strategy 3: Layout family fallback
   const family = LAYOUT_FAMILY[layout] || "single";
   const familyPlan = LAYOUT_FAMILY_PLANS[family](theme, layout);
   return filterSections(familyPlan, sections);
+}
+
+/** Build a plan directly from spec sections — no hardcoded skeleton */
+function buildFromSpecSections(sections: SiteSpecSection[], navStyle?: string): CompositionPlan {
+  const heroSection = sections.find(sec => sec.kind === "hero");
+  const nonHero = sections.filter(sec => sec.kind !== "hero");
+
+  return {
+    layout: "single",
+    nav: navStyle || "sticky",
+    hero: heroSection?.variant || "centered",
+    sections: nonHero.map(sec => ({
+      id: sec.id || sec.type || "section",
+      kind: (sec.kind || "content") as SectionKind,
+      type: sec.type,
+      variant: sec.variant,
+      data: sec.data,
+    })),
+    effects: [],
+    footer: "standard",
+  };
 }
 
 function filterSections(plan: CompositionPlan, available: string[]): CompositionPlan {

@@ -4,6 +4,7 @@ import { logger } from "@/lib/logger";
 import { loadStageSkillBundle } from "./project-skill-bundles";
 import { chatCompletion } from "./llm";
 import { getCapabilityManifest } from "./capability-registry";
+import { getAssetManifest } from "./assets";
 
 type ChatRole = "system" | "user" | "assistant";
 
@@ -24,6 +25,8 @@ export interface BuildConversationContext {
   hasSiteCode: boolean;
   currentPrd: string;
   currentSelections: unknown;
+  /** When true, use streamlined Design Agent (one-step) instead of multi-step pipeline */
+  useDesignAgent?: boolean;
 }
 
 interface AgentRunResult {
@@ -35,32 +38,39 @@ const PROMPTS_DIR = path.join(process.cwd(), "src/prompts/agents");
 const EXECUTION_CONFIRM_RE = /\b(confirm build|build it|go ahead|ship it|start build|开始构建|确认构建|开始生成|确认生成|开始开发)\b/i;
 const MAX_IDEATION_USER_TURNS = 3;
 
+/** All recognized action types — old + new */
+const ACTION_TYPES = [
+  // Legacy
+  "options", "prd", "generate", "modify", "activate_skills", "update_prd", "handoff_to_planner",
+  // New: orchestrator + capability + build plan
+  "orchestrate", "build_plan", "activate_capabilities", "suggest_capability",
+].join("|");
+
+const ACTION_RE = new RegExp(`"type"\\s*:\\s*"(?:${ACTION_TYPES})"`, "");
+
 function extractAction(content: string): Record<string, unknown> | null {
-  const patterns = [
-    /```action\s*([\s\S]*?)```/,
-    /```json\s*(\{[\s\S]*?"type"\s*:\s*"(?:options|prd|generate|modify|activate_skills|update_prd|handoff_to_planner)"[\s\S]*?\})\s*```/,
-    /```\s*(\{[\s\S]*?"type"\s*:\s*"(?:options|prd|generate|modify|activate_skills|update_prd|handoff_to_planner)"[\s\S]*?\})\s*```/,
-  ];
+  // Priority 1: ```action ... ```
+  const actionBlock = content.match(/```action\s*([\s\S]*?)```/);
+  if (actionBlock) {
+    try { return JSON.parse(actionBlock[1].trim()) as Record<string, unknown>; } catch {}
+  }
 
-  for (const pattern of patterns) {
-    const match = content.match(pattern);
-    if (!match) continue;
-
+  // Priority 2: ```json { "type": "..." } ```
+  const jsonBlock = content.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
+  if (jsonBlock) {
     try {
-      return JSON.parse(match[1].trim()) as Record<string, unknown>;
-    } catch {
-      continue;
-    }
+      const parsed = JSON.parse(jsonBlock[1].trim()) as Record<string, unknown>;
+      if (typeof parsed.type === "string" && ACTION_RE.test(JSON.stringify(parsed))) return parsed;
+    } catch {}
   }
 
-  const fallback = content.match(/\{[\s\S]*?"type"\s*:\s*"(options|prd|generate|modify|activate_skills|update_prd|handoff_to_planner)"[\s\S]*?\}/);
-  if (!fallback) return null;
-
-  try {
-    return JSON.parse(fallback[0]) as Record<string, unknown>;
-  } catch {
-    return null;
+  // Priority 3: bare JSON object with type field
+  const bare = content.match(new RegExp(`\\{[\\s\\S]*?${ACTION_RE.source}[\\s\\S]*?\\}`));
+  if (bare) {
+    try { return JSON.parse(bare[0]) as Record<string, unknown>; } catch {}
   }
+
+  return null;
 }
 
 async function loadPrompt(name: string): Promise<string> {
@@ -73,8 +83,9 @@ async function callSiliconFlow(
   systemPrompt: string,
   userPrompt: string,
   history: BuildChatMessage[] = [],
+  useAdvancedModel = false,
 ): Promise<AgentRunResult> {
-  logger.info("build-agents", `[${requestId}] ${label}: prompt ${systemPrompt.length + userPrompt.length} chars`);
+  logger.info("build-agents", `[${requestId}] ${label}: prompt ${systemPrompt.length + userPrompt.length} chars${useAdvancedModel ? " (advanced model)" : ""}`);
 
   const result = await chatCompletion({
     requestId,
@@ -83,7 +94,8 @@ async function callSiliconFlow(
     userPrompt,
     history,
     temperature: 0.35,
-    maxTokens: 8192,
+    maxTokens: useAdvancedModel ? 16384 : 8192,
+    useAdvancedModel,
   });
   const content = result.content;
   return { content, action: extractAction(content) };
@@ -152,7 +164,92 @@ export async function runBuildConversation(ctx: BuildConversationContext): Promi
     ].filter(Boolean).join(""),
   };
 
-  // Fast path: if site already has code and user is requesting a modification
+  // ===== Streamlined path: Design Agent (advanced mode, one-step) =====
+  if (ctx.useDesignAgent) {
+    // Edit existing site: go to ideation for modify
+    if (enrichedCtx.hasSiteCode && currentPrd) {
+      if (EXECUTION_CONFIRM_RE.test(latestUserMessage)) {
+        return runExecutionAgent(enrichedCtx, latestUserMessage);
+      }
+      const result = await runIdeationAgent(enrichedCtx);
+      if (result.action?.type === "modify") return result;
+      if (result.action?.type === "handoff_to_planner") {
+        return runPlanningAgent(enrichedCtx, result.content, result.action);
+      }
+      return result;
+    }
+
+    // New build: one-step Design Agent
+    const designResult = await runDesignAgent(enrichedCtx);
+
+    // If Design Agent asks a question (rare: only when knowledge is empty)
+    if (designResult.action?.type === "options") return designResult;
+
+    // If Design Agent outputs a design_plan, convert to generate action format
+    if (designResult.action?.type === "design_plan") {
+      return {
+        content: designResult.content,
+        action: {
+          type: "generate",
+          siteType: designResult.action.siteMode || "portfolio",
+          theme: designResult.action.theme || "minimalist",
+          compositionPlan: designResult.action.compositionPlan || null,
+          visualDirection: designResult.action.visualDirection || null,
+          contentMapping: designResult.action.contentMapping || null,
+          customTheme: designResult.action.customTheme || "",
+        },
+      };
+    }
+
+    // Fallback: treat as regular content
+    return designResult;
+  }
+
+  // ===== Step 1: Orchestrator decides mode (first message only) =====
+  // On first user message with no PRD yet, run orchestrator to determine strategy
+  if (!currentPrd && userTurnCount <= 1 && ctx.messages.length <= 2) {
+    const orchResult = await runOrchestratorAgent(enrichedCtx);
+
+    // If orchestrator says skip ideation and go straight to planning
+    if (orchResult.action?.type === "orchestrate") {
+      const decision = orchResult.action as Record<string, unknown>;
+      const flow = decision.flow as Record<string, unknown> | undefined;
+
+      // Quick-draft mode: skip ideation entirely, build immediately
+      if (decision.mode === "quick-draft" || flow?.skipIdeation === true || flow?.skip_ideation === true) {
+        logger.info("build-agents", `Orchestrator: mode=${decision.mode}, skipping ideation → planning`);
+        const handoff = {
+          type: "handoff_to_planner",
+          siteType: (decision.site_intent as Record<string, unknown>)?.type || "portfolio",
+          coreGoal: (decision.site_intent as Record<string, unknown>)?.primary_goal || latestUserMessage,
+          themeDirection: "auto",
+          layoutDirection: "auto",
+          featurePriorities: ["hero", "about", "contact"],
+          reasoning: orchResult.content,
+          ...(decision.capabilities ? { capabilities: decision.capabilities } : {}),
+        };
+        return runPlanningAgent(enrichedCtx, orchResult.content, handoff);
+      }
+
+      // If orchestrator returned suggest_capability, pass it through
+      if (decision.mode === "edit-existing" && enrichedCtx.hasSiteCode) {
+        // Fall through to edit path below
+      }
+
+      // Otherwise, orchestrator is just providing context — continue to ideation
+      // but inject the orchestrator's analysis into the context
+      if (decision.agent_instructions) {
+        enrichedCtx.activatedContext += `\n\n## Orchestrator Instructions\n${decision.agent_instructions}`;
+      }
+    }
+
+    // If orchestrator suggests installing capabilities, return that to frontend
+    if (orchResult.action?.type === "suggest_capability") {
+      return orchResult;
+    }
+  }
+
+  // ===== Step 2: Edit mode (existing site) =====
   if (enrichedCtx.hasSiteCode && currentPrd) {
     if (EXECUTION_CONFIRM_RE.test(latestUserMessage)) {
       return runExecutionAgent(enrichedCtx, latestUserMessage);
@@ -165,11 +262,12 @@ export async function runBuildConversation(ctx: BuildConversationContext): Promi
     return result;
   }
 
-  // Normal path: new site generation
+  // ===== Step 3: Execution confirmation =====
   if (currentPrd && EXECUTION_CONFIRM_RE.test(latestUserMessage)) {
     return runExecutionAgent(enrichedCtx, latestUserMessage);
   }
 
+  // ===== Step 4: Ideation → Planning chain =====
   const conceptResult = await runIdeationAgent(enrichedCtx);
   if (conceptResult.action?.type === "handoff_to_planner") {
     return runPlanningAgent(enrichedCtx, conceptResult.content, conceptResult.action);
@@ -180,6 +278,28 @@ export async function runBuildConversation(ctx: BuildConversationContext): Promi
   }
 
   return conceptResult;
+}
+
+// ---- Orchestrator Agent ----
+
+async function runOrchestratorAgent(ctx: BuildConversationContext): Promise<AgentRunResult> {
+  const prompt = await loadPrompt("orchestrator-agent.md");
+  const userPrompt = `## User Message
+${getLatestUserMessage(ctx.messages)}
+
+## Knowledge Summary
+${ctx.knowledgeSummary || "None"}
+
+## Current Site Code
+${ctx.hasSiteCode ? "Yes (existing site)" : "No (new build)"}
+
+## Current PRD
+${ctx.currentPrd || "None"}
+
+## Capability Manifest
+${getCapabilityManifest()}`;
+
+  return callSiliconFlow(ctx.requestId, "orchestrator-agent", prompt, userPrompt);
 }
 
 async function runIdeationAgent(ctx: BuildConversationContext): Promise<AgentRunResult> {
@@ -279,4 +399,243 @@ ${JSON.stringify(ctx.currentSelections ?? {}, null, 2)}
 - use customTheme to preserve nuanced brand guidance from the PRD`;
 
   return callSiliconFlow(ctx.requestId, "execution-agent", prompt, userPrompt);
+}
+
+// ---- Design Agent (streamlined advanced mode: one-step design) ----
+
+export async function runDesignAgent(ctx: BuildConversationContext): Promise<AgentRunResult> {
+  let prompt = await loadPrompt("design-agent.md");
+
+  // Inject asset manifest into prompt
+  const assetManifest = getAssetManifest();
+  prompt = prompt.replace("ASSET_MANIFEST_PLACEHOLDER", assetManifest);
+
+  const userPrompt = `## User Request
+${getLatestUserMessage(ctx.messages)}
+
+## Knowledge Summary
+${ctx.knowledgeSummary || "None"}
+
+## Knowledge Content
+${ctx.knowledgeContext || "(Empty)"}
+
+## Current Selections
+${JSON.stringify(ctx.currentSelections ?? {}, null, 2)}
+
+## Conversation History
+${ctx.messages.slice(-4).map(m => `${m.role.toUpperCase()}: ${m.content}`).join("\n\n")}`;
+
+  return callSiliconFlow(ctx.requestId, "design-agent", prompt, userPrompt, [], true);
+}
+
+// ---- Code Agent (writes actual page code from DesignPlan) ----
+
+export interface CodeAgentResult {
+  pageTsx: string;
+  globalsCssExtra: string;
+  valid: boolean;
+  errors: string[];
+}
+
+export async function runCodeAgent(
+  ctx: BuildConversationContext,
+  designPlan: Record<string, unknown>,
+  assetCss: string,
+): Promise<CodeAgentResult> {
+  const prompt = await loadPrompt("code-agent.md");
+
+  const userPrompt = `## Design Plan
+${JSON.stringify(designPlan, null, 2)}
+
+## Content Data (translations object structure)
+The site data is accessed via \`t.*\` from useLanguage(). Here's what's available:
+ALL text content MUST come from \`t.*\`, never hardcoded. Key fields:
+- \`t.hero.name\` — the person's REAL name (MUST display prominently in hero)
+- \`t.hero.title\` — professional title / tagline
+- \`t.hero.tags[]\` — skill/role tags
+- \`t.about.text\` — bio / introduction
+- \`t.projects[]\` — each with: title, org, desc, tags[], highlights[], detail, link, role, period
+- \`t.experience[]\` — each with: title, org, period, desc, highlights[]
+- \`t.skills[]\` — each with: title, skills[]
+- \`t.education[]\`, \`t.awards[]\`, \`t.publications[]\`, \`t.demos[]\`
+- \`t.contact.email\`, \`t.contact.links[]\`
+
+## Knowledge Content (the user's ACTUAL data — read this to understand what the site is about)
+${ctx.knowledgeContext?.slice(0, 10000) || "(Empty — generate a creative placeholder site)"}
+
+## Asset CSS (already resolved, use these classes)
+${assetCss || "(No asset CSS)"}
+
+## Available CSS Variables
+--color-bg, --color-text, --color-accent, --color-text-muted, --color-bg-card, --color-bg-card-solid, --color-line, --color-accent-soft, --color-green
+
+## Pre-generated Components (just import, do NOT rewrite)
+- \`@/components/LanguageProvider\` — useLanguage() hook
+- \`@/components/CartoonAssistant\` — animated SVG character + chat (use when chatMode is "cartoon" or unspecified)
+- \`@/components/ChatBot\` — classic floating chat bubble (use when chatMode is "classic")
+- \`@/components/SharePoster\` — share feature
+- \`@/components/ProjectDemo\` — embed Bilibili/YouTube/GitHub/StackBlitz (props: url, title?, type?)
+
+## Instructions
+1. Write the complete page.tsx and additional globals.css based on the Design Plan above.
+2. Make it visually distinctive — this should NOT look like a generic template.
+3. Check the Design Plan's compositionPlan.chatMode to decide which chat component to use.
+4. The hero MUST display \`t.hero.name\` prominently. Do NOT skip the user's name.
+5. If the Knowledge Content has projects/skills/experience, ensure the page has sections for them.
+6. Do NOT put SVG illustrations inside each project card. Instead, create ONE themed SVG animation in the hero or about section.
+7. For project cards with \`t.projects[].detail\` or \`highlights\`, add a modal/overlay detail view (use useState to toggle).`;
+
+  const result = await callSiliconFlow(ctx.requestId, "code-agent", prompt, userPrompt, [], true);
+
+  // Parse code blocks from response
+  const pageTsx = extractCodeBlock(result.content, "page.tsx") || extractCodeBlock(result.content, "tsx") || "";
+  const globalsCssExtra = extractCodeBlock(result.content, "globals.css") || extractCodeBlock(result.content, "css") || "";
+
+  logger.info("code-agent", `[${ctx.requestId}] Response: ${result.content.length} chars, page.tsx: ${pageTsx.length} chars, css: ${globalsCssExtra.length} chars`);
+  if (!pageTsx) {
+    // Log first 500 chars to debug parsing failure
+    logger.warn("code-agent", `[${ctx.requestId}] Could not extract code block. Response preview: ${result.content.slice(0, 500)}`);
+  }
+
+  // Validate the generated code
+  const errors = validateGeneratedCode(pageTsx);
+
+  return {
+    pageTsx,
+    globalsCssExtra,
+    valid: errors.length === 0 && pageTsx.length > 100,
+    errors,
+  };
+}
+
+function extractCodeBlock(content: string, label: string): string | null {
+  const normalized = content.replace(/\r\n/g, "\n");
+
+  // Strategy 1: Find all properly closed code blocks
+  const allBlocks: Array<{ lang: string; code: string }> = [];
+  const blockRegex = /```(\S*)\s*\n([\s\S]*?)```/g;
+  let match;
+  while ((match = blockRegex.exec(normalized)) !== null) {
+    allBlocks.push({ lang: match[1] || "", code: match[2].trim() });
+  }
+
+  // Strategy 2: Find UNCLOSED code blocks (truncated by token limit)
+  // Look for ```label\n...content... without a closing ```
+  const unclosedBlocks: Array<{ lang: string; code: string }> = [];
+  const unclosedRegex = /```(\S*)\s*\n([\s\S]+)$/g;
+  let um;
+  while ((um = unclosedRegex.exec(normalized)) !== null) {
+    const code = um[2].trim();
+    // Only use if it's substantial and not already captured as a closed block
+    if (code.length > 200 && !allBlocks.some(b => code.startsWith(b.code.slice(0, 100)))) {
+      unclosedBlocks.push({ lang: um[1] || "", code });
+    }
+  }
+
+  const allCandidates = [...allBlocks, ...unclosedBlocks];
+
+  if (label === "page.tsx" || label === "tsx") {
+    const exact = allCandidates.find(b => b.lang === "page.tsx" || b.lang === "page");
+    if (exact && exact.code.length > 50) return autoRepairTruncation(exact.code);
+
+    const tsxBlock = allCandidates.find(b => /^(tsx|typescript|jsx|ts)$/i.test(b.lang));
+    if (tsxBlock && tsxBlock.code.length > 50) return autoRepairTruncation(tsxBlock.code);
+
+    const reactBlock = allCandidates
+      .filter(b => b.code.includes("export default function") || b.code.includes('"use client"'))
+      .sort((a, b) => b.code.length - a.code.length)[0];
+    if (reactBlock) return autoRepairTruncation(reactBlock.code);
+  }
+
+  if (label === "globals.css" || label === "css") {
+    const exact = allCandidates.find(b => b.lang === "globals.css" || b.lang === "css" || b.lang === "scss");
+    if (exact) return exact.code;
+
+    const cssBlock = allCandidates
+      .filter(b => b.code.includes("{") && b.code.includes("}") && !b.code.includes("export default"))
+      .sort((a, b) => b.code.length - a.code.length)[0];
+    if (cssBlock) return cssBlock.code;
+  }
+
+  return null;
+}
+
+/**
+ * Auto-repair truncated React component code.
+ * Closes unclosed braces, JSX tags, and component function.
+ */
+function autoRepairTruncation(code: string): string {
+  let repaired = code;
+
+  // Count braces
+  const openBraces = (repaired.match(/\{/g) || []).length;
+  const closeBraces = (repaired.match(/\}/g) || []).length;
+  const missingBraces = openBraces - closeBraces;
+
+  // Count JSX divs
+  const openDivs = (repaired.match(/<div[\s>]/g) || []).length;
+  const closeDivs = (repaired.match(/<\/div>/g) || []).length;
+  const missingDivs = openDivs - closeDivs;
+
+  // Count parens
+  const openParens = (repaired.match(/\(/g) || []).length;
+  const closeParens = (repaired.match(/\)/g) || []).length;
+  const missingParens = openParens - closeParens;
+
+  if (missingDivs > 0 || missingBraces > 0 || missingParens > 0) {
+    // Add closing tags
+    repaired += "\n";
+    for (let i = 0; i < missingDivs; i++) repaired += "      </div>\n";
+    for (let i = 0; i < missingParens; i++) repaired += "    )";
+    // Ensure component function closes properly
+    if (!repaired.trimEnd().endsWith("}")) {
+      for (let i = 0; i < Math.min(missingBraces, 3); i++) repaired += "\n}";
+    }
+  }
+
+  // Ensure the component has a proper ending
+  if (repaired.includes("export default function") && !repaired.match(/\}\s*$/)) {
+    repaired += "\n}\n";
+  }
+
+  return repaired;
+}
+
+function validateGeneratedCode(code: string): string[] {
+  const errors: string[] = [];
+  if (!code) { errors.push("No code generated"); return errors; }
+
+  // Must have "use client"
+  if (!code.includes('"use client"') && !code.includes("'use client'")) {
+    errors.push('Missing "use client" directive');
+  }
+
+  // Must have useLanguage
+  if (!code.includes("useLanguage")) {
+    errors.push("Missing useLanguage import/usage");
+  }
+
+  // Must export default function
+  if (!code.includes("export default function")) {
+    errors.push("Missing default export function");
+  }
+
+  // Check for unclosed JSX tags (simple heuristic)
+  const openDivs = (code.match(/<div[\s>]/g) || []).length;
+  const closeDivs = (code.match(/<\/div>/g) || []).length;
+  if (Math.abs(openDivs - closeDivs) > 2) {
+    errors.push(`Unbalanced div tags: ${openDivs} open, ${closeDivs} close`);
+  }
+
+  // Check for common JSX errors
+  if (code.includes('className="') && code.includes("className={`")) {
+    // Mixed is fine
+  }
+
+  // Must have return statement with JSX
+  if (!code.includes("return (") && !code.includes("return(")) {
+    errors.push("Missing return statement with JSX");
+  }
+
+  return errors;
 }

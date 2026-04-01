@@ -9,6 +9,8 @@ export interface SiteSpecSection {
   type?: string;
   /** Rendering category — matches SectionKind from component library */
   kind?: string;
+  /** Specific component variant to use (optional — runtime auto-selects if missing) */
+  variant?: string;
   enabled?: boolean;
   /** Content depth: how much of this section to show */
   depth?: "teaser" | "summary" | "full" | "interactive";
@@ -86,6 +88,31 @@ function readSpecValue(input: SpecValue): string {
   return typeof input.value === "string" ? input.value : "";
 }
 
+/**
+ * Classify whether an experience knowledge item is a standalone "project" vs "work experience".
+ * Negative signals (work/employment markers) take priority over positive signals.
+ */
+function isProjectItem(e: KnowledgeItem): boolean {
+  const title = e.title;
+  // Negative: titles describing work roles / employment — NOT a standalone project
+  if (/工作经历|工作经验|任职|在职|就职|实习经历|work\s*experience|employment|position\s*at|role\s*at/i.test(title)) {
+    return false;
+  }
+  // Positive: title starts with "项目：" / "项目:" or "Project:"
+  if (/^(?:项目|project)\s*[：:]/i.test(title)) {
+    return true;
+  }
+  // Positive: title contains standalone project keywords (not as part of compound role names)
+  if (/(?:项目|project|作品|portfolio|case\s*study|案例)/i.test(title)) {
+    return true;
+  }
+  // Positive: tags explicitly mark it as a project
+  if (e.tags?.some(tag => /project|项目|作品|案例/i.test(tag))) {
+    return true;
+  }
+  return false;
+}
+
 export function buildWorkspaceDataFromKnowledge(items: KnowledgeItem[]): WorkspaceData {
   const get = (cat: string) => items.filter(i => i.category === cat);
   const factual = get("factual");
@@ -98,6 +125,9 @@ export function buildWorkspaceDataFromKnowledge(items: KnowledgeItem[]): Workspa
   const title = factual.find(i => /title|职位|头衔|role/i.test(i.title))?.content || "";
   const email = factual.find(i => /email|邮箱/i.test(i.title))?.content || "";
   const bio = meta.find(i => /summary|简介|overview|bio/i.test(i.title))?.content || meta[0]?.content || "";
+
+  const projectItems = experience.filter(e => isProjectItem(e));
+  const timelineItems = experience.filter(e => !isProjectItem(e));
 
   return {
     name,
@@ -113,16 +143,16 @@ export function buildWorkspaceDataFromKnowledge(items: KnowledgeItem[]): Workspa
     bioTagsEn: meta.flatMap(m => m.tags).slice(0, 6),
     skills: skills.length > 0 ? [{ title: "Skills", skills: skills.map(s => s.title) }] : [],
     skillsEn: skills.length > 0 ? [{ title: "Skills", skills: skills.map(s => s.title) }] : [],
-    projects: experience.filter(e => /project|项目/i.test(e.title)).map(e => ({ title: e.title, org: "", desc: e.content.slice(0, 200), tags: e.tags, image: "", link: "" })),
-    projectsEn: experience.filter(e => /project|项目/i.test(e.title)).map(e => ({ title: e.title, org: "", desc: e.content.slice(0, 200), tags: e.tags, image: "", link: "" })),
-    timeline: experience.filter(e => !/project|项目/i.test(e.title)).map((e, i) => ({ date: "", title: e.title, desc: e.content.slice(0, 200), active: i === 0 })),
-    timelineEn: experience.filter(e => !/project|项目/i.test(e.title)).map((e, i) => ({ date: "", title: e.title, desc: e.content.slice(0, 200), active: i === 0 })),
+    projects: projectItems.map(e => ({ title: e.title, org: "", desc: e.content.slice(0, 200), tags: e.tags, image: "", link: "" })),
+    projectsEn: projectItems.map(e => ({ title: e.title, org: "", desc: e.content.slice(0, 200), tags: e.tags, image: "", link: "" })),
+    timeline: timelineItems.map((e, i) => ({ date: "", title: e.title, desc: e.content.slice(0, 200), active: i === 0 })),
+    timelineEn: timelineItems.map((e, i) => ({ date: "", title: e.title, desc: e.content.slice(0, 200), active: i === 0 })),
     education: [],
     educationEn: [],
     tags: skills.map(s => s.title).slice(0, 6),
     tagsEn: skills.map(s => s.title).slice(0, 6),
     links: media.map(m => ({ label: m.title, labelEn: m.title, url: m.content, icon: "website" })),
-    visibleSections: ["about", ...(skills.length > 0 ? ["skills"] : []), ...(experience.length > 0 ? ["projects", "timeline"] : []), ...(media.length > 0 ? ["links"] : [])],
+    visibleSections: ["about", ...(skills.length > 0 ? ["skills"] : []), ...(projectItems.length > 0 ? ["projects"] : []), ...(timelineItems.length > 0 ? ["timeline"] : []), ...(media.length > 0 ? ["links"] : [])],
     chatbotContext: items.map(i => `${i.title}: ${i.content}`).join("\n"),
   };
 }

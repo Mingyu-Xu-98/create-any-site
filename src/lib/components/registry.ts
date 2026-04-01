@@ -6,6 +6,8 @@
 import type { SectionKind, SectionVariantFn, LayoutWrapperFn, EffectFn, SectionContext, CompositionPlan, PageParts, EffectOutput } from "./types";
 import { getExtensionRenderer } from "./extensions/registry";
 import type { ExtensionOutput } from "./extensions/types";
+import { resolveVisualDirection } from "../assets/registry";
+import "../assets"; // Register all assets
 
 // ---- Kind-based registry ----
 // Each kind maps to a set of named variants.
@@ -111,6 +113,20 @@ function resolveSection(
 
 // ---- Page assembler ----
 
+/** Get CSS from visual direction for injection into globals.css */
+export function getVisualAssetCSS(plan: CompositionPlan): string {
+  if (!plan.visualDirection) return "";
+  const output = resolveVisualDirection(plan.visualDirection);
+  return output.css || "";
+}
+
+/** Get extra component files from visual direction */
+export function getVisualAssetComponents(plan: CompositionPlan): Record<string, string> {
+  if (!plan.visualDirection) return {};
+  const output = resolveVisualDirection(plan.visualDirection);
+  return output.components || {};
+}
+
 export function assemblePage(plan: CompositionPlan, ctx: SectionContext): string {
   // Resolve nav
   const navFn = navRegistry[plan.nav];
@@ -160,11 +176,19 @@ export function assemblePage(plan: CompositionPlan, ctx: SectionContext): string
     return layoutFn(ctx, parts);
   }
 
+  // Resolve visual assets
+  const assetOutput = plan.visualDirection ? resolveVisualDirection(plan.visualDirection) : null;
+  const assetCss = assetOutput?.css || "";
+
   // Fallback: simple concatenation
   const allImports = extensionOutputs.flatMap(e => e.imports);
   const extensionJsx = extensionOutputs.map(e => e.jsx).filter(Boolean).join("\n");
   const effectJsx = effects.map(e => e.jsx).filter(Boolean).join("\n");
   const sectionJsx = sections.map(s => s.content).join("\n\n");
+
+  // Texture overlay JSX (if texture asset is active)
+  const textureJsx = assetCss.includes("texture-overlay") ? `<div className="texture-overlay" />` : "";
+  const bokehJsx = assetCss.includes("bokeh-bg") ? `<div className="bokeh-bg"><div className="orb orb-1" /><div className="orb orb-2" /><div className="orb orb-3" /></div>` : "";
 
   return `"use client";
 import { useState } from "react";
@@ -179,6 +203,8 @@ export default function Home() {
 
   return (
     <div className="min-h-screen relative bg-bg text-text">
+      ${bokehJsx}
+      ${textureJsx}
       ${effectJsx}
       <div className="relative z-10">
         ${navContent}
@@ -192,5 +218,6 @@ export default function Home() {
     </div>
   );
 }
+
 `;
 }

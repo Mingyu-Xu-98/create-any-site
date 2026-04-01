@@ -7,7 +7,8 @@ import fs from "fs/promises";
 import path from "path";
 import { exec } from "child_process";
 import { logger } from "@/lib/logger";
-import { syncDraftPreview } from "@/lib/build-runtime";
+import { syncDraftPreview, hasPublishedPreviewDirectory, rewriteExportAssetPaths } from "@/lib/build-runtime";
+import { runCodeGuardrails } from "@/lib/code-guardrails";
 
 const SITES_DIR = path.join(process.cwd(), "sites-data");
 const TRANSLATIONS_FILE = "src/i18n/translations.ts";
@@ -60,22 +61,38 @@ interface FileChange {
   content?: string;
 }
 
-async function runVerification(siteDir: string, spec?: { sections?: Array<{ id?: string; type?: string; enabled?: boolean }> }) {
+async function runVerification(siteDir: string, spec?: { sections?: Array<{ id?: string; type?: string; enabled?: boolean }>; pages?: Array<{ route?: string; sections: Array<{ id?: string; type?: string; enabled?: boolean }> }> }) {
   const checks: Array<{ label: string; ok: boolean }> = [];
   const outIndex = path.join(siteDir, "out", "index.html");
 
   try {
     const html = await fs.readFile(outIndex, "utf-8");
     checks.push({ label: "Static export index.html exists", ok: html.length > 0 });
-    if (Array.isArray(spec?.sections)) {
-      for (const section of spec.sections.filter(item => item.enabled !== false)) {
-        const sectionId = section.id || section.type;
-        if (!sectionId) continue;
-        const anchorId = sectionId === "timeline" ? "experience" : sectionId;
-        checks.push({
-          label: `Rendered section anchor: ${sectionId}`,
-          ok: html.includes(`id="${anchorId}"`) || html.includes(`id='${anchorId}'`) || html.includes(`#${anchorId}`),
-        });
+
+    // Check flat sections
+    const allSections = spec?.pages?.flatMap(p => p.sections) || spec?.sections || [];
+    for (const section of allSections.filter(item => item.enabled !== false)) {
+      const sectionId = section.id || section.type;
+      if (!sectionId) continue;
+      const anchorId = sectionId === "timeline" ? "experience" : sectionId;
+      checks.push({
+        label: `Rendered section anchor: ${sectionId}`,
+        ok: html.includes(`id="${anchorId}"`) || html.includes(`id='${anchorId}'`) || html.includes(`#${anchorId}`),
+      });
+    }
+
+    // Check multi-page routes
+    if (spec?.pages) {
+      for (const page of spec.pages) {
+        if (!page.route || page.route === "/") continue;
+        const routeDir = page.route.replace(/^\//, "");
+        const routeIndex = path.join(siteDir, "out", routeDir, "index.html");
+        try {
+          const routeHtml = await fs.readFile(routeIndex, "utf-8");
+          checks.push({ label: `Multi-page route: /${routeDir}`, ok: routeHtml.length > 0 });
+        } catch {
+          checks.push({ label: `Multi-page route: /${routeDir}`, ok: false });
+        }
       }
     }
   } catch {
@@ -155,7 +172,20 @@ export async function POST(req: NextRequest) {
       updatedAt: new Date().toISOString(),
     }).where(eq(sites.id, siteId));
 
-    logger.info("modify", `[${requestId}] Applied ${applied.length} changes, rebuilding...`, { applied });
+    logger.info("modify", `[${requestId}] Applied ${applied.length} changes, running guardrails...`, { applied });
+
+    // Run code guardrails on modified files (fixes translations exports, SharePoster, JSX issues, etc.)
+    const previewBaseUrl = (process.env.PREVIEW_BASE_URL?.trim() || "http://localhost:3002").replace(/\/+$/, "");
+    const guarded = runCodeGuardrails(fileMap, siteId, previewBaseUrl, logger);
+    // Write any guardrail-fixed files back to disk
+    for (const [filePath, content] of Object.entries(guarded)) {
+      if (content !== fileMap[filePath]) {
+        const fullPath = path.join(siteDir, filePath);
+        await fs.mkdir(path.dirname(fullPath), { recursive: true });
+        await fs.writeFile(fullPath, content, "utf-8");
+      }
+    }
+    Object.assign(fileMap, guarded);
 
     // Rebuild static export after modification
     let buildSuccess = true;
@@ -170,6 +200,11 @@ export async function POST(req: NextRequest) {
           else { logger.info("modify", "Rebuild complete"); resolve(); }
         });
       });
+      // Rewrite asset paths for static preview (same as first build does)
+      const outDir = path.join(siteDir, "out");
+      if (!hasPublishedPreviewDirectory()) {
+        await rewriteExportAssetPaths(outDir, "", `/${siteId}`);
+      }
       await syncDraftPreview(siteId, siteDir);
       verification = await runVerification(siteDir, spec);
       await db.update(sites).set({

@@ -37,6 +37,15 @@ export function runCodeGuardrails(
   // 6. Fix CSS overflow issues
   fixCssOverflow(files, fixes);
 
+  // 7. Fix bare special chars in JSX text (>, <, {, })
+  fixJsxBareSpecialChars(files, fixes);
+
+  // 8. Ensure SharePoster is imported and used
+  fixMissingSharePoster(files, fixes);
+
+  // 9. Ensure translations.ts exports Lang and Translations types
+  fixTranslationsExports(files, fixes);
+
   if (fixes.length > 0) {
     logger.info("guardrails", `Applied ${fixes.length} auto-fixes for site ${siteId}`, { fixes });
   }
@@ -44,27 +53,34 @@ export function runCodeGuardrails(
   return files;
 }
 
-/** Fix ChatBot fetching /api/chat which doesn't work in static export */
+/** Fix ChatBot / CartoonAssistant fetching /api/chat which doesn't work in static export */
 function fixChatBotApiUrl(
   files: Record<string, string>,
   siteId: string,
   previewBaseUrl: string,
   fixes: string[],
 ) {
-  const chatbot = files["src/components/ChatBot.tsx"];
-  if (!chatbot) return;
+  const targets = [
+    "src/components/ChatBot.tsx",
+    "src/components/CartoonAssistant.tsx",
+  ];
 
-  // If it still has a hardcoded /api/chat, patch it to use the host project's proxy
-  if (chatbot.includes('fetch("/api/chat"') && !chatbot.includes("site-chat")) {
-    const mainHost = previewBaseUrl
-      ? new URL(previewBaseUrl).origin.replace(":3002", ":3001")
-      : "http://localhost:3001";
+  const mainHost = previewBaseUrl
+    ? new URL(previewBaseUrl).origin.replace(":3002", ":3001")
+    : "http://localhost:3001";
 
-    files["src/components/ChatBot.tsx"] = chatbot.replace(
-      /const res = await fetch\("\/api\/chat"/g,
-      `const res = await fetch("${mainHost}/api/site-chat/${siteId}"`,
-    );
-    fixes.push("chatbot: patched API URL to use host project proxy");
+  for (const path of targets) {
+    const content = files[path];
+    if (!content) continue;
+
+    // If it still has a hardcoded /api/chat, patch it to use the host project's proxy
+    if (content.includes('fetch("/api/chat"') && !content.includes("site-chat")) {
+      files[path] = content.replace(
+        /const res = await fetch\("\/api\/chat"/g,
+        `const res = await fetch("${mainHost}/api/site-chat/${siteId}"`,
+      );
+      fixes.push(`${path.split("/").pop()}: patched API URL to use host project proxy`);
+    }
   }
 }
 
@@ -150,4 +166,467 @@ h1, h2, h3, h4, p, span, a { overflow-wrap: break-word; word-break: break-word; 
 `;
     fixes.push("css: added word-break and overflow rules");
   }
+}
+
+/**
+ * Fix bare `>` and `<` characters in JSX text content.
+ * JSX requires these to be expressed as `{'>'}` / `{'<'}` or `&gt;` / `&lt;`.
+ * Code Agent often writes `<span>>></span>` or `> {text}` in terminal-style themes.
+ *
+ * Pattern: finds `>` or `<` that sit between a closing `>` and text/whitespace,
+ * i.e., JSX text positions, and wraps them in `{'...'}`.
+ */
+function fixJsxBareSpecialChars(
+  files: Record<string, string>,
+  fixes: string[],
+) {
+  for (const [path, content] of Object.entries(files)) {
+    if (!path.endsWith(".tsx")) continue;
+
+    // Match: >X</  where X is a bare > or < character in JSX text position
+    // e.g., <span className="...">></span>  →  <span className="...">{'>'}</span>
+    // Also: <span>>></span>  →  <span>{'>'}{'>'}>/span>  — but simpler to catch the ">>" pattern too
+
+    let patched = content;
+
+    // Pattern 1: `">">` — a bare `>` between a tag close `">` and next tag/text
+    // e.g.,  ...className="text-accent">></span>
+    //        ...className="text-accent">{'>'}>/span>
+    patched = patched.replace(
+      /(?<=>)(>)(?=\s)/g,
+      "{'>'}"
+    );
+
+    // Pattern 2: `">"> ` — bare `>` followed by space then text (common: `> {highlight}`)
+    patched = patched.replace(
+      /(?<=>)(>)(\s*\{)/g,
+      "{'>'}$2"
+    );
+
+    // Pattern 3: standalone bare `>` between tags: `>><` → `{'>'}<`
+    patched = patched.replace(
+      /(?<=>)(>)(?=<)/g,
+      "{'>'}"
+    );
+
+    // Pattern 4: bare `<` in text position: `><` before non-/ (not a closing tag)
+    // This is rarer but handle `>< ` text patterns
+    patched = patched.replace(
+      /(?<=>)(<)(?=[^/a-zA-Z{])/g,
+      "{'<'}"
+    );
+
+    if (patched !== content) {
+      files[path] = patched;
+      fixes.push(`${path.split("/").pop()}: escaped bare > / < in JSX text`);
+    }
+  }
+}
+
+/** Ensure SharePoster is imported and rendered in page.tsx */
+function fixMissingSharePoster(
+  files: Record<string, string>,
+  fixes: string[],
+) {
+  const page = files["src/app/page.tsx"];
+  if (!page || !files["src/components/SharePoster.tsx"]) return;
+
+  let patched = page;
+  const hasImport = /import\s+SharePoster\s+from/.test(patched);
+  const hasJsx = /<SharePoster\s*\/>/.test(patched);
+
+  if (!hasImport) {
+    patched = `import SharePoster from "@/components/SharePoster";\n${patched}`;
+    fixes.push("page.tsx: added missing SharePoster import");
+  }
+
+  if (!hasJsx) {
+    // Insert <SharePoster /> before the last closing </div> or before CartoonAssistant/ChatBot
+    const insertBefore = patched.lastIndexOf("</div>");
+    if (insertBefore > 0) {
+      patched = patched.slice(0, insertBefore) + "      <SharePoster />\n    " + patched.slice(insertBefore);
+      fixes.push("page.tsx: injected <SharePoster /> component");
+    }
+  }
+
+  if (patched !== page) {
+    files["src/app/page.tsx"] = patched;
+  }
+}
+
+/**
+ * Ensure translations.ts always exports Lang and Translations types.
+ * Secondary edits (modify flow) sometimes rewrite translations and drop these exports,
+ * causing LanguageProvider to fail with "Module has no exported member 'Lang'".
+ */
+function fixTranslationsExports(
+  files: Record<string, string>,
+  fixes: string[],
+) {
+  const trans = files["src/i18n/translations.ts"];
+  if (!trans) return;
+
+  let patched = trans;
+  const hasLangExport = /export\s+type\s+Lang\b/.test(patched);
+  const hasTranslationsExport = /export\s+type\s+Translations\b/.test(patched);
+
+  if (!hasLangExport || !hasTranslationsExport) {
+    // Ensure the translations object is exported
+    if (!patched.includes("export const translations")) {
+      patched = patched.replace(/\bconst translations\b/, "export const translations");
+    }
+    // Append missing type exports
+    if (!hasLangExport) {
+      patched += '\nexport type Lang = keyof typeof translations;\n';
+    }
+    if (!hasTranslationsExport) {
+      patched += 'export type Translations = (typeof translations)[Lang];\n';
+    }
+    files["src/i18n/translations.ts"] = patched;
+    fixes.push("translations.ts: added missing Lang/Translations type exports");
+  }
+}
+
+// ============================================================
+// Advanced Mode Deep Guardrails
+// ============================================================
+
+/** Known translation top-level keys that generateAdvancedTranslations() always produces */
+const KNOWN_TRANSLATION_KEYS = new Set([
+  "nav", "hero", "about", "projects", "experience", "skills", "education",
+  "testimonials", "awards", "publications", "media", "demos", "contact",
+  "footer", "chatbot", "share", "availableSections", "posts", "links",
+]);
+
+/**
+ * Deep validation + auto-fix for advanced mode (Code Agent) generated code.
+ * Runs AFTER runCodeGuardrails() and BEFORE writeFilesToSiteDir().
+ * Returns the list of fixes applied (for progress reporting).
+ */
+export function runAdvancedModeGuardrails(
+  files: Record<string, string>,
+  allowedDeps: Set<string>,
+  logger: Logger,
+): string[] {
+  const fixes: string[] = [];
+
+  // Check 0: Truncate trailing garbage after the default export function closes
+  fixTrailingGarbage(files, fixes);
+
+  // Check 1: Auto-add `: any` to untyped callback parameters in page.tsx
+  fixCallbackParamTypes(files, fixes);
+
+  // Check 2: Universal import completeness — remove imports for non-existent local modules
+  fixAllUnresolvedLocalImports(files, fixes);
+
+  // Check 3: Third-party dependency import linkage — remove imports for non-whitelisted packages
+  fixNonWhitelistedImports(files, allowedDeps, fixes);
+
+  // Check 4: Translation key safety — guard against undefined t.xxx access
+  fixTranslationKeySafety(files, fixes);
+
+  if (fixes.length > 0) {
+    logger.info("guardrails-advanced", `Applied ${fixes.length} advanced auto-fixes`, { fixes });
+  }
+
+  return fixes;
+}
+
+/**
+ * Check 0: Fix trailing garbage after the default export function.
+ * Code Agent sometimes emits extra `</div>`, `}`, or duplicated fragments
+ * after the component's final closing brace. This truncates everything
+ * after the last balanced top-level `}` of `export default function`.
+ */
+function fixTrailingGarbage(
+  files: Record<string, string>,
+  fixes: string[],
+) {
+  const page = files["src/app/page.tsx"];
+  if (!page) return;
+
+  // Strategy: find `export default function`, then track brace depth.
+  // When depth returns to 0, everything after that closing `}` is garbage.
+  const exportIdx = page.indexOf("export default function");
+  if (exportIdx === -1) return;
+
+  // Find the opening `{` of the function body
+  const bodyStart = page.indexOf("{", exportIdx);
+  if (bodyStart === -1) return;
+
+  let depth = 0;
+  let endIdx = -1;
+  // Track whether we're inside a string or template literal to avoid counting braces in strings
+  for (let i = bodyStart; i < page.length; i++) {
+    const ch = page[i];
+    // Skip string literals
+    if (ch === '"' || ch === "'" || ch === "`") {
+      const quote = ch;
+      i++;
+      while (i < page.length && page[i] !== quote) {
+        if (page[i] === "\\") i++; // skip escaped char
+        i++;
+      }
+      continue;
+    }
+    // Skip line comments
+    if (ch === "/" && page[i + 1] === "/") {
+      while (i < page.length && page[i] !== "\n") i++;
+      continue;
+    }
+    // Skip block comments
+    if (ch === "/" && page[i + 1] === "*") {
+      i += 2;
+      while (i < page.length - 1 && !(page[i] === "*" && page[i + 1] === "/")) i++;
+      i++;
+      continue;
+    }
+    if (ch === "{") depth++;
+    else if (ch === "}") {
+      depth--;
+      if (depth === 0) {
+        endIdx = i + 1;
+        // Don't break yet — there may be legitimate code after (unlikely for page.tsx, but safe)
+        // Check if remaining content is just whitespace
+        const remaining = page.slice(endIdx).trim();
+        if (remaining.length > 0) {
+          // There's trailing content — truncate it
+          files["src/app/page.tsx"] = page.slice(0, endIdx) + "\n";
+          fixes.push(`page.tsx: removed ${remaining.length} chars of trailing garbage after component`);
+        }
+        return;
+      }
+    }
+  }
+}
+
+/**
+ * Check 1: Auto-add `: any` type annotations to callback parameters.
+ * Fixes TypeScript `noImplicitAny` errors like:
+ *   .map((section) => ...)  →  .map((section: any) => ...)
+ *   .map((item, index) => ...)  →  .map((item: any, index: number) => ...)
+ */
+function fixCallbackParamTypes(
+  files: Record<string, string>,
+  fixes: string[],
+) {
+  const page = files["src/app/page.tsx"];
+  if (!page) return;
+
+  let patched = page;
+  const methods = "map|filter|forEach|find|some|every|reduce|flatMap|sort|findIndex";
+
+  // Single param: .map((item) => ...) → .map((item: any) => ...)
+  // But skip if already typed: .map((item: SomeType) => ...)
+  const singleParamRe = new RegExp(
+    `\\.(${methods})\\(\\(([a-zA-Z_$][a-zA-Z0-9_$]*)\\)\\s*=>`,
+    "g",
+  );
+  patched = patched.replace(singleParamRe, (match, method, param) => {
+    return `.${method}((${param}: any) =>`;
+  });
+
+  // Two params: .map((item, index) => ...) → .map((item: any, index: number) => ...)
+  const twoParamRe = new RegExp(
+    `\\.(${methods})\\(\\(([a-zA-Z_$][a-zA-Z0-9_$]*)\\s*,\\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\\)\\s*=>`,
+    "g",
+  );
+  patched = patched.replace(twoParamRe, (match, method, param1, param2) => {
+    return `.${method}((${param1}: any, ${param2}: number) =>`;
+  });
+
+  // Destructured param: .map(({ title, desc }) => ...) → .map(({ title, desc }: any) => ...)
+  const destructuredRe = new RegExp(
+    `\\.(${methods})\\(\\(\\{([^}]+)\\}\\)\\s*=>`,
+    "g",
+  );
+  patched = patched.replace(destructuredRe, (match, method, inner) => {
+    return `.${method}(({ ${inner} }: any) =>`;
+  });
+
+  if (patched !== page) {
+    files["src/app/page.tsx"] = patched;
+    fixes.push("page.tsx: added type annotations to callback parameters");
+  }
+}
+
+/**
+ * Check 2: Universal import completeness — scan ALL `@/...` imports and verify files exist.
+ * Replaces the old hardcoded 3-component approach in fixUnresolvedImports().
+ */
+function fixAllUnresolvedLocalImports(
+  files: Record<string, string>,
+  fixes: string[],
+) {
+  const page = files["src/app/page.tsx"];
+  if (!page) return;
+
+  // Match: import X from "@/..."; or import { X } from "@/...";
+  const importRe = /^import\s+(?:(\w+)|(?:\{[^}]+\}))\s+from\s+["']@\/([^"']+)["'];?\s*$/gm;
+  const toRemove: Array<{ fullMatch: string; defaultExport: string | null; modulePath: string }> = [];
+
+  let m;
+  while ((m = importRe.exec(page)) !== null) {
+    const defaultExport = m[1] || null;
+    const modulePath = m[2]; // e.g., "components/ParticleBackground"
+
+    // Check if the file exists in the file map
+    const candidates = [
+      `src/${modulePath}.tsx`,
+      `src/${modulePath}.ts`,
+      `src/${modulePath}/index.tsx`,
+      `src/${modulePath}/index.ts`,
+    ];
+
+    const exists = candidates.some(c => files[c] !== undefined);
+    if (!exists) {
+      toRemove.push({ fullMatch: m[0], defaultExport, modulePath });
+    }
+  }
+
+  if (toRemove.length === 0) return;
+
+  let patched = page;
+  for (const { fullMatch, defaultExport, modulePath } of toRemove) {
+    // Remove the import line
+    patched = patched.replace(fullMatch + "\n", "");
+    patched = patched.replace(fullMatch, "");
+
+    // Remove JSX usage of default export: <ComponentName /> and <ComponentName ...>...</ComponentName>
+    if (defaultExport) {
+      // Self-closing: <ComponentName /> or <ComponentName prop="x" />
+      patched = patched.replace(new RegExp(`<${defaultExport}\\s[^>]*/\\s*>`, "g"), "");
+      patched = patched.replace(new RegExp(`<${defaultExport}\\s*/>`, "g"), "");
+      // Opening + closing pair: <ComponentName>...</ComponentName>
+      patched = patched.replace(new RegExp(`<${defaultExport}[^>]*>[\\s\\S]*?</${defaultExport}>`, "g"), "");
+    }
+
+    fixes.push(`page.tsx: removed unresolved import @/${modulePath}`);
+  }
+
+  files["src/app/page.tsx"] = patched;
+}
+
+/**
+ * Check 3: Third-party dependency import linkage.
+ * When package.json deps are stripped by the whitelist validator,
+ * the corresponding imports in page.tsx must also be removed.
+ */
+function fixNonWhitelistedImports(
+  files: Record<string, string>,
+  allowedDeps: Set<string>,
+  fixes: string[],
+) {
+  const page = files["src/app/page.tsx"];
+  if (!page) return;
+
+  // Known built-in modules that don't need to be in package.json
+  const builtins = new Set(["react", "react-dom", "next", "next/image", "next/link", "next/font", "next/navigation"]);
+
+  // Match: import X from "package-name"; or import { X } from "package-name";
+  // Exclude @/ (local) imports
+  const importRe = /^import\s+(?:(\w+)|(?:\{([^}]+)\}))\s+from\s+["']([^@./][^"']*)["'];?\s*$/gm;
+  const toRemove: Array<{ fullMatch: string; defaultExport: string | null; namedExports: string[]; pkg: string }> = [];
+
+  let m;
+  while ((m = importRe.exec(page)) !== null) {
+    const defaultExport = m[1] || null;
+    const namedStr = m[2] || "";
+    const pkg = m[3];
+
+    // Extract base package name (e.g., "three" from "three", "@react-three/fiber" from "@react-three/fiber")
+    // For sub-paths like "next/image" → "next"
+    const basePkg = pkg.startsWith("@") ? pkg.split("/").slice(0, 2).join("/") : pkg.split("/")[0];
+
+    if (builtins.has(pkg) || builtins.has(basePkg)) continue;
+    if (allowedDeps.has(basePkg)) continue;
+
+    const namedExports = namedStr.split(",").map(s => s.trim().split(/\s+as\s+/).pop()?.trim()).filter(Boolean) as string[];
+    toRemove.push({ fullMatch: m[0], defaultExport, namedExports, pkg });
+  }
+
+  if (toRemove.length === 0) return;
+
+  let patched = page;
+  for (const { fullMatch, defaultExport, namedExports, pkg } of toRemove) {
+    patched = patched.replace(fullMatch + "\n", "");
+    patched = patched.replace(fullMatch, "");
+
+    // Remove JSX usage for default export
+    if (defaultExport) {
+      patched = patched.replace(new RegExp(`<${defaultExport}\\s[^>]*/\\s*>`, "g"), "");
+      patched = patched.replace(new RegExp(`<${defaultExport}\\s*/>`, "g"), "");
+      patched = patched.replace(new RegExp(`<${defaultExport}[^>]*>[\\s\\S]*?</${defaultExport}>`, "g"), "");
+    }
+
+    // Remove JSX usage for named exports
+    for (const name of namedExports) {
+      if (/^[A-Z]/.test(name)) {
+        patched = patched.replace(new RegExp(`<${name}\\s[^>]*/\\s*>`, "g"), "");
+        patched = patched.replace(new RegExp(`<${name}\\s*/>`, "g"), "");
+        patched = patched.replace(new RegExp(`<${name}[^>]*>[\\s\\S]*?</${name}>`, "g"), "");
+      }
+    }
+
+    fixes.push(`page.tsx: removed non-whitelisted import "${pkg}"`);
+  }
+
+  files["src/app/page.tsx"] = patched;
+}
+
+/**
+ * Check 4: Translation key safety.
+ * Scans page.tsx for `t.xxx` top-level access and ensures translations has those keys.
+ * Instead of rewriting t → _t, we patch the translations file to always have safe defaults.
+ */
+function fixTranslationKeySafety(
+  files: Record<string, string>,
+  fixes: string[],
+) {
+  const page = files["src/app/page.tsx"];
+  if (!page) return;
+
+  // Find all t.xxx top-level accesses (t.projects, t.hero, etc.)
+  const accessRe = /\bt\.(\w+)/g;
+  const usedKeys = new Set<string>();
+  let m;
+  while ((m = accessRe.exec(page)) !== null) {
+    usedKeys.add(m[1]);
+  }
+
+  // Find keys NOT in the known set
+  const missingKeys: string[] = [];
+  for (const key of usedKeys) {
+    if (!KNOWN_TRANSLATION_KEYS.has(key)) {
+      missingKeys.push(key);
+    }
+  }
+
+  if (missingKeys.length === 0) return;
+
+  // Patch page.tsx: inject safe defaults after the useLanguage() call
+  // Find the line with useLanguage() and add defaults after it
+  const langLine = page.match(/const\s*\{[^}]*\}\s*=\s*useLanguage\(\);?\s*\n/);
+  if (!langLine) return;
+
+  const defaults = missingKeys.map(key => {
+    // Heuristic: if key is plural-sounding, default to []; otherwise ""
+    const isArray = /s$|list$|items$/i.test(key);
+    return `  const _guardrail_${key} = t.${key} ?? ${isArray ? "[]" : '""'};`;
+  }).join("\n");
+
+  const replacements = missingKeys.map(key => ({
+    // Replace t.keyName with the guardrail variable (but only for these missing keys)
+    pattern: new RegExp(`\\bt\\.${key}\\b`, "g"),
+    replacement: `_guardrail_${key}`,
+  }));
+
+  let patched = page.replace(langLine[0], langLine[0] + "\n  // Guardrail: safe defaults for unknown translation keys\n" + defaults + "\n\n");
+
+  for (const { pattern, replacement } of replacements) {
+    patched = patched.replace(pattern, replacement);
+  }
+
+  files["src/app/page.tsx"] = patched;
+  fixes.push(`page.tsx: added safe defaults for unknown translation keys: ${missingKeys.join(", ")}`);
 }

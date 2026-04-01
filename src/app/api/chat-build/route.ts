@@ -99,13 +99,35 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Format knowledge with routing hints for the agent
-    const knowledgeContext = selectedKnowledge.map(k => {
+    // Load knowledge base files (new KB system) if knowledgeBaseId provided
+    const knowledgeBaseId = typeof body?.knowledgeBaseId === "string" ? body.knowledgeBaseId : "";
+    let kbContent = "";
+    let kbFileCount = 0;
+    if (knowledgeBaseId && session?.user?.id) {
+      try {
+        const { loadFullKBContext, formatFilesForPrompt } = await import("@/lib/kb-loader");
+        const kbCtx = await loadFullKBContext(session.user.id, knowledgeBaseId);
+        if (kbCtx.fileCount > 0) {
+          kbContent = `## Knowledge Base Index\n${kbCtx.indexContent}\n\n## File Contents\n${formatFilesForPrompt(kbCtx.fileContents, 20000)}`;
+          kbFileCount = kbCtx.fileCount;
+        }
+      } catch (err) {
+        logger.warn("chat-build", `[${requestId}] KB load failed: ${err instanceof Error ? err.message : "unknown"}`);
+      }
+    }
+
+    // Format knowledge: combine legacy items + KB files
+    const legacyContext = selectedKnowledge.map(k => {
       const useCaseHint = k.useCase ? `\nRouting: ${k.useCase}` : "";
       return `[${k.category}] ${k.title}: ${k.content}${useCaseHint}`;
-    }).join("\n\n").slice(0, 30000);
-    const knowledgeSummary = selectedKnowledge.length > 0
-      ? `${selectedKnowledge.length} items: ${Object.entries(selectedKnowledge.reduce<Record<string, number>>((a, k) => { a[k.category] = (a[k.category] || 0) + 1; return a; }, {})).map(([c, n]) => `${c}:${n}`).join(", ")}`
+    }).join("\n\n").slice(0, 15000);
+
+    const knowledgeContext = kbContent
+      ? (legacyContext ? `${kbContent}\n\n## Legacy Knowledge Items\n${legacyContext}` : kbContent)
+      : legacyContext;
+
+    const knowledgeSummary = (selectedKnowledge.length > 0 || kbFileCount > 0)
+      ? `${kbFileCount > 0 ? `${kbFileCount} KB files` : ""}${kbFileCount > 0 && selectedKnowledge.length > 0 ? " + " : ""}${selectedKnowledge.length > 0 ? `${selectedKnowledge.length} items: ${Object.entries(selectedKnowledge.reduce<Record<string, number>>((a, k) => { a[k.category] = (a[k.category] || 0) + 1; return a; }, {})).map(([c, n]) => `${c}:${n}`).join(", ")}` : ""}`
       : "None";
 
     logger.info("chat-build", `[${requestId}] phase=${phase || "auto"}, ${messages.length} msgs, knowledge=${knowledgeSummary}, skills=${allSkills.length}, code=${hasSiteCode}, llm=${getChatProviderSummary()}`);
@@ -126,6 +148,7 @@ export async function POST(req: NextRequest) {
           ? JSON.stringify(requestPrd, null, 2)
           : persistedPrd,
       currentSelections,
+      useDesignAgent: Boolean(body.useDesignAgent),
     });
 
     logger.info("chat-build", `[${requestId}] Response: ${result.content.length} chars`, {

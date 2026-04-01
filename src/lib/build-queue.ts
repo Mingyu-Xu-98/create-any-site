@@ -12,11 +12,25 @@ interface BuildPayload {
   prd?: unknown;
   previewBaseUrl: string;
   knowledgeRefs?: unknown[];
+  knowledgeBaseId?: string;
   userId?: string;
 }
 
 const runningJobs = new Set<string>();
 let kickScheduled = false;
+
+/** Write an incremental build step to the job's logs column so the frontend can show progress. */
+async function updateBuildStep(jobId: string, step: string) {
+  try {
+    const now = new Date().toISOString();
+    const job = await db.select({ logs: siteBuilds.logs }).from(siteBuilds).where(eq(siteBuilds.id, jobId)).get();
+    const steps: string[] = job?.logs ? JSON.parse(job.logs) : [];
+    steps.push(step);
+    await db.update(siteBuilds).set({ logs: JSON.stringify(steps), updatedAt: now }).where(eq(siteBuilds.id, jobId));
+  } catch {
+    // Non-critical — don't let progress reporting break the build
+  }
+}
 
 function getBuildConcurrency(): number {
   const raw = Number.parseInt(process.env.BUILD_MAX_CONCURRENCY || "", 10);
@@ -75,15 +89,25 @@ export async function processBuildJob(jobId: string, options?: { alreadyClaimed?
 
   try {
     const payload = JSON.parse(job.payload) as BuildPayload;
-    const result = await runSiteBuild({
+    const BUILD_TIMEOUT_MS = 300_000; // 5 minutes max per build
+
+    const buildPromise = runSiteBuild({
       siteId: job.siteId,
       userId: payload.userId,
       data: payload.data,
       selections: payload.selections,
       spec: payload.spec || null,
       previewBaseUrl: payload.previewBaseUrl,
+      knowledgeBaseId: payload.knowledgeBaseId,
       requestId,
+      onProgress: (step: string) => updateBuildStep(jobId, step),
     });
+
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(`Build timeout: exceeded ${BUILD_TIMEOUT_MS / 1000}s`)), BUILD_TIMEOUT_MS)
+    );
+
+    const result = await Promise.race([buildPromise, timeoutPromise]);
 
     const finishedAt = new Date().toISOString();
     await db.update(siteBuilds).set({
@@ -92,7 +116,11 @@ export async function processBuildJob(jobId: string, options?: { alreadyClaimed?
       fileMapSnapshot: JSON.stringify(result.fileMap),
       specSnapshot: payload.spec ? JSON.stringify(payload.spec) : null,
       prdSnapshot: payload.prd ? JSON.stringify(payload.prd) : null,
-      knowledgeRefsSnapshot: Array.isArray(payload.knowledgeRefs) ? JSON.stringify(payload.knowledgeRefs) : null,
+      knowledgeRefsSnapshot: JSON.stringify({
+        knowledgeRefs: Array.isArray(payload.knowledgeRefs) ? payload.knowledgeRefs : [],
+        compositionPlan: payload.selections?.compositionPlan || null,
+        userId: payload.userId || null,
+      }),
       finishedAt,
       updatedAt: finishedAt,
       logs: JSON.stringify(result.verification?.checks || []),

@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { sites } from "@/lib/db/schema";
+import { sites, siteBuilds } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
-import { hasPublishedPreviewDirectory, publishDraftPreview, unpublishPreview } from "@/lib/build-runtime";
+import path from "path";
+import { hasPublishedPreviewDirectory, publishDraftPreview, unpublishPreview, syncDraftPreview } from "@/lib/build-runtime";
 
 // GET /api/sites/[id]
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -73,6 +74,42 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
           publishMode: hasPublishedPreviewDirectory() ? "static" : "preview-fallback",
         },
       });
+    }
+
+    if (body?.action === "rollback") {
+      if (!site.publishedBuildId) {
+        return NextResponse.json({ error: "No published build to rollback to" }, { status: 400 });
+      }
+
+      const publishedBuild = await db.select({ fileMapSnapshot: siteBuilds.fileMapSnapshot, previewUrl: siteBuilds.previewUrl })
+        .from(siteBuilds).where(eq(siteBuilds.id, site.publishedBuildId)).get();
+
+      if (publishedBuild?.fileMapSnapshot) {
+        // 1. Update DB
+        await db.update(sites).set({
+          draftBuildId: site.publishedBuildId,
+          fileMap: publishedBuild.fileMapSnapshot,
+          previewUrl: publishedBuild.previewUrl || site.previewUrl,
+          buildStatus: "ready",
+          buildError: null,
+          updatedAt: now,
+        }).where(and(eq(sites.id, id), eq(sites.userId, session.user.id)));
+
+        // 2. Restore files on disk from the snapshot
+        const fileMap = JSON.parse(publishedBuild.fileMapSnapshot) as Record<string, string>;
+        const siteDir = path.join(process.cwd(), "sites-data", id);
+        const fsModule = await import("fs/promises");
+        for (const [filePath, content] of Object.entries(fileMap)) {
+          const fullPath = path.join(siteDir, filePath);
+          await fsModule.mkdir(path.dirname(fullPath), { recursive: true });
+          await fsModule.writeFile(fullPath, content, "utf-8");
+        }
+
+        // 3. Re-sync preview directory
+        try { await syncDraftPreview(id, siteDir); } catch {}
+      }
+
+      return NextResponse.json({ ok: true, site: { status: site.status, rolledBack: true } });
     }
 
     if (body?.action === "unpublish") {

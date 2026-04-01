@@ -109,6 +109,34 @@ function initDb() {
       updated_at TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS knowledge_bases (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      description TEXT,
+      index_md TEXT,
+      file_count INTEGER DEFAULT 0,
+      total_chars INTEGER DEFAULT 0,
+      created_at TEXT,
+      updated_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS knowledge_files (
+      id TEXT PRIMARY KEY,
+      base_id TEXT NOT NULL REFERENCES knowledge_bases(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      type TEXT NOT NULL,
+      description TEXT,
+      keywords TEXT,
+      original_url TEXT,
+      content_length INTEGER DEFAULT 0,
+      content TEXT,
+      mime_type TEXT,
+      asset_path TEXT,
+      created_at TEXT
+    );
+
     CREATE TABLE IF NOT EXISTS knowledge_groups (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -219,6 +247,8 @@ function initDb() {
     "ALTER TABLE knowledge_items ADD COLUMN use_case TEXT",
     "ALTER TABLE knowledge_items ADD COLUMN format TEXT",
     "ALTER TABLE knowledge_groups ADD COLUMN eureka_md TEXT",
+    "ALTER TABLE sites ADD COLUMN is_public INTEGER DEFAULT 0",
+    "ALTER TABLE sites ADD COLUMN public_desc TEXT",
   ];
 
   for (const statement of alterStatements) {

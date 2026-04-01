@@ -3007,7 +3007,7 @@ export function genTranslations(data: WorkspaceData, spec?: SiteSpec | null): st
       blog: sectionTitles.blog || "博客文章",
     },
     about: { text: aboutText, tags: aboutTags },
-    projects: specProjects.map((p, i) => ({ title: p.title, org: p.org, desc: p.desc, tags: p.tags, image: p.image || `/images/project-${i + 1}.png`, link: p.link || "", badge: p.badge || "" })),
+    projects: specProjects.map((p, i) => ({ title: p.title, org: p.org, desc: p.desc, tags: p.tags, image: p.image || "", link: p.link || "", badge: p.badge || "" })),
     timeline: specTimeline,
     skills: data.skills,
     education: data.education,
@@ -3057,6 +3057,12 @@ export function genTranslations(data: WorkspaceData, spec?: SiteSpec | null): st
         education: "教育",
       },
     },
+    testimonials: [] as Array<{ quote: string; author: string; role: string; company: string }>,
+    awards: [] as Array<{ title: string; org: string; year: string; description: string }>,
+    publications: [] as Array<{ title: string; authors: string; venue: string; year: string; abstract: string; url: string }>,
+    media: [] as Array<{ type: string; title: string; platform: string; url: string; date: string; description: string }>,
+    demos: [] as Array<{ title: string; description: string; url: string; screenshot: string; techStack: string[] }>,
+    contact: { email: data.email || "", links: (data.links || []).map(l => ({ type: "website", label: l.label, url: l.url, icon: l.icon || "other" })) },
     availableSections,
     links: (data.links || []).map(l => ({ label: l.label, url: l.url, icon: l.icon || "other" })),
   };
@@ -3087,7 +3093,7 @@ export function genTranslations(data: WorkspaceData, spec?: SiteSpec | null): st
       blog: sectionTitles.blog || "Blog",
     },
     about: { text: aboutText || data.bioEn, tags: aboutTags.length > 0 ? aboutTags : data.bioTagsEn },
-    projects: specProjectsEn.map((p, i) => ({ title: p.title, org: p.org, desc: p.desc, tags: p.tags, image: p.image || `/images/project-${i + 1}.png`, link: p.link || "", badge: p.badge || "" })),
+    projects: specProjectsEn.map((p, i) => ({ title: p.title, org: p.org, desc: p.desc, tags: p.tags, image: p.image || "", link: p.link || "", badge: p.badge || "" })),
     timeline: specTimelineEn,
     skills: data.skillsEn || data.skills,
     education: data.educationEn || data.education,
@@ -3158,12 +3164,19 @@ interface TranslationData {
   timeline: TranslationTimeline[];
   skills: TranslationSkill[];
   education: TranslationEdu[];
+  testimonials: Array<{ quote: string; author: string; role: string; company: string }>;
+  awards: Array<{ title: string; org: string; year: string; description: string }>;
+  publications: Array<{ title: string; authors: string; venue: string; year: string; abstract: string; url: string }>;
+  media: Array<{ type: string; title: string; platform: string; url: string; date: string; description: string }>;
+  demos: Array<{ title: string; description: string; url: string; screenshot: string; techStack: string[] }>;
+  contact: { email: string; links: Array<{ type: string; label: string; url: string; icon?: string }> };
   footer: string;
   chatbot: TranslationChatbot;
   share: TranslationShare;
   ui: { heyIm: string; welcomeToSite: string; availableForHire: string; letsCollaborate: string; openForOpportunities: string; contactMe: string; scrollDown: string; viewProject: string; sectionSubtitles: Record<string, string>; statLabels: Record<string, string>; };
   availableSections: string[];
   links: TranslationLink[];
+  [key: string]: unknown;
 }
 
 export const translations: { zh: TranslationData; en: TranslationData } = {

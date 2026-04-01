@@ -62,6 +62,8 @@ export const sites = sqliteTable("sites", {
   previewUrl: text("preview_url"),
   publishedUrl: text("published_url"),
   publishedAt: text("published_at"),
+  isPublic: integer("is_public").default(0),   // 0=private, 1=public (shown on homepage)
+  publicDesc: text("public_desc"),              // One-line description for public showcase
   templateId: text("template_id"),
   editorState: text("editor_state"),      // JSON
   prd: text("prd"),                       // Current PRD JSON
@@ -106,7 +108,37 @@ export const ingestionTasks = sqliteTable("ingestion_tasks", {
   updatedAt: text("updated_at").$defaultFn(() => new Date().toISOString()),
 });
 
-// ---- Knowledge Groups (folders) ----
+// ---- Knowledge Bases (new: folder-level, with index + raw files) ----
+
+export const knowledgeBases = sqliteTable("knowledge_bases", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  description: text("description"),
+  indexMd: text("index_md"),             // Auto-generated index: file list + descriptions + keywords
+  fileCount: integer("file_count").default(0),
+  totalChars: integer("total_chars").default(0),
+  createdAt: text("created_at").$defaultFn(() => new Date().toISOString()),
+  updatedAt: text("updated_at").$defaultFn(() => new Date().toISOString()),
+});
+
+export const knowledgeFiles = sqliteTable("knowledge_files", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  baseId: text("base_id").notNull().references(() => knowledgeBases.id, { onDelete: "cascade" }),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),          // Original filename or link title
+  type: text("type").notNull(),          // pdf, md, txt, docx, image, link
+  description: text("description"),       // AI-generated one-line description
+  keywords: text("keywords"),             // JSON array of keywords
+  originalUrl: text("original_url"),      // For links: the original URL
+  contentLength: integer("content_length").default(0), // Character count of raw content
+  content: text("content"),               // Raw full text (parsed from PDF/DOCX, or link content)
+  mimeType: text("mime_type"),            // For images: image/png etc
+  assetPath: text("asset_path"),          // For images: path in user-assets
+  createdAt: text("created_at").$defaultFn(() => new Date().toISOString()),
+});
+
+// ---- Knowledge Groups (legacy — kept for backwards compat) ----
 
 export const knowledgeGroups = sqliteTable("knowledge_groups", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),

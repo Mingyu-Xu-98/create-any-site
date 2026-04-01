@@ -15,9 +15,6 @@ export default function Navbar() {
   const navItems = [
     ...(session?.user ? [
       { href: "/create", label: t("nav.create") },
-    ] : []),
-    { href: "/templates", label: t("nav.templates") },
-    ...(session?.user ? [
       { href: "/knowledge", label: t("nav.knowledge") },
       { href: "/dashboard", label: t("nav.dashboard") },
     ] : []),
@@ -32,6 +29,7 @@ export default function Navbar() {
     <nav className="fixed top-0 left-0 right-0 z-50 bg-white/80 backdrop-blur-xl border-b border-black/5 shadow-sm">
       <div className="max-w-7xl mx-auto px-6 h-14 flex items-center justify-between">
         <Link href="/" className="flex items-center gap-2">
+          <svg className="w-6 h-6 shrink-0" viewBox="0 0 120 120" fill="none"><circle cx="60" cy="56" r="36" fill="#E86C2C"/><ellipse cx="60" cy="65" rx="22" ry="18" fill="#FFF3E0"/><path d="M26,38 L18,6 L48,30Z" fill="#E86C2C"/><path d="M94,38 L102,6 L72,30Z" fill="#E86C2C"/><ellipse cx="44" cy="52" rx="5" ry="6" fill="#2D5016"/><circle cx="45.5" cy="50.5" r="1.5" fill="#fff"/><ellipse cx="76" cy="52" rx="5" ry="6" fill="#2D5016"/><circle cx="77.5" cy="50.5" r="1.5" fill="#fff"/><ellipse cx="60" cy="64" rx="4" ry="3" fill="#333"/><path d="M52,72 Q60,78 68,72" stroke="#333" strokeWidth="2" fill="none" strokeLinecap="round"/></svg>
           <span className="text-lg font-bold bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">
             CreateAnySite
           </span>

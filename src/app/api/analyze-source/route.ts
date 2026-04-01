@@ -5,197 +5,20 @@ import type { KnowledgeItem, KnowledgeCategory } from "@/lib/knowledge";
 import { logger } from "@/lib/logger";
 import { saveUserImage, isImageFile } from "@/lib/asset-store";
 import { auth } from "@/lib/auth";
+import { parsePdfWithMinerU as sharedParsePdfWithMinerU, basicPdfExtract as sharedBasicPdfExtract, parsePdfSafe as sharedParsePdfSafe } from "@/lib/pdf-parser";
 
-const MINERU_BASE = "https://mineru.net/api/v4";
+// ─── PDF Parsing (delegates to shared module @/lib/pdf-parser) ───
 
-// ─── MinerU PDF Parsing ───
 async function parsePdfWithMinerU(buffer: ArrayBuffer, filename: string): Promise<string> {
-  const apiKey = process.env.MINERU_API_KEY;
-  if (!apiKey) {
-    logger.warn("mineru", "MINERU_API_KEY not set, falling back to basic extraction");
-    return basicPdfExtract(buffer);
-  }
-
-  logger.info("mineru", `Starting PDF parse for: ${filename}`, { size: buffer.byteLength });
-
-  // Step 1: Request upload URL
-  logger.info("mineru", "Requesting upload URL...");
-  const batchRes = await fetch(`${MINERU_BASE}/file-urls/batch`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      enable_formula: true,
-      enable_table: true,
-      language: "ch",
-      files: [{ name: filename, is_ocr: true }],
-    }),
-  });
-
-  if (!batchRes.ok) {
-    const errText = await batchRes.text();
-    logger.error("mineru", `Failed to get upload URL: ${batchRes.status}`, { response: errText });
-    throw new Error(`MinerU upload URL failed: ${batchRes.status}`);
-  }
-
-  const batchData = await batchRes.json();
-  logger.info("mineru", "Upload URL response", { code: batchData.code, msg: batchData.msg });
-
-  if (batchData.code !== 0) {
-    logger.error("mineru", `MinerU API error: ${batchData.msg}`, { code: batchData.code });
-    throw new Error(`MinerU error: ${batchData.msg}`);
-  }
-
-  const batchId = batchData.data?.batch_id;
-  const uploadUrl = batchData.data?.file_urls?.[0];
-
-  if (!uploadUrl || !batchId) {
-    logger.error("mineru", "No upload URL or batch_id returned", { data: batchData.data });
-    throw new Error("MinerU: no upload URL returned");
-  }
-
-  logger.info("mineru", `Got upload URL, batch_id: ${batchId}`);
-
-  // Step 2: Upload file via PUT
-  logger.info("mineru", `Uploading file (${(buffer.byteLength / 1024).toFixed(1)}KB)...`);
-  const uploadRes = await fetch(uploadUrl, {
-    method: "PUT",
-    body: buffer,
-  });
-
-  if (!uploadRes.ok) {
-    const errText = await uploadRes.text();
-    logger.error("mineru", `File upload failed: ${uploadRes.status}`, { response: errText.slice(0, 500) });
-    throw new Error(`MinerU upload failed: ${uploadRes.status}`);
-  }
-
-  logger.info("mineru", "File uploaded successfully");
-
-  // Step 3: Poll for results
-  logger.info("mineru", `Polling batch results: ${batchId}`);
-  const maxWait = 120_000; // 2 min
-  const pollInterval = 3_000;
-  const startTime = Date.now();
-  let resultUrl: string | null = null;
-
-  while (Date.now() - startTime < maxWait) {
-    await new Promise((r) => setTimeout(r, pollInterval));
-
-    const pollRes = await fetch(`${MINERU_BASE}/extract-results/batch/${batchId}`, {
-      headers: { Authorization: `Bearer ${apiKey}` },
-    });
-
-    if (!pollRes.ok) {
-      logger.warn("mineru", `Poll request failed: ${pollRes.status}`);
-      continue;
-    }
-
-    const pollData = await pollRes.json();
-    const results = pollData.data?.extract_result || [];
-    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-
-    if (results.length > 0) {
-      const r = results[0];
-      logger.info("mineru", `Poll state: ${r.state}, elapsed: ${elapsed}s`, {
-        pages: r.extract_progress?.extracted_pages,
-        total: r.extract_progress?.total_pages,
-      });
-
-      if (r.state === "done" && r.full_zip_url) {
-        resultUrl = r.full_zip_url;
-        logger.info("mineru", `Parse complete! Elapsed: ${elapsed}s`, { url: resultUrl });
-        break;
-      } else if (r.state === "failed") {
-        logger.error("mineru", `Parse failed: ${r.err_msg}`, { elapsed });
-        throw new Error(`MinerU parse failed: ${r.err_msg}`);
-      }
-    }
-  }
-
-  if (!resultUrl) {
-    logger.error("mineru", "Timeout waiting for parse result", { maxWait });
-    throw new Error("MinerU: timeout waiting for result");
-  }
-
-  // Step 4: Download and extract result
-  logger.info("mineru", "Downloading result ZIP...");
-  const zipRes = await fetch(resultUrl);
-  if (!zipRes.ok) {
-    logger.error("mineru", `Result download failed: ${zipRes.status}`);
-    throw new Error(`MinerU result download failed: ${zipRes.status}`);
-  }
-
-  const zipBuffer = await zipRes.arrayBuffer();
-  logger.info("mineru", `Result ZIP downloaded: ${(zipBuffer.byteLength / 1024).toFixed(1)}KB`);
-
-  const zip = await JSZip.loadAsync(zipBuffer);
-  const markdownFiles: string[] = [];
-  const extractedImages: string[] = [];
-
-  // Get user ID for image storage
   const session = await auth();
   const userId = session?.user?.id;
-
-  for (const [filePath, entry] of Object.entries(zip.files)) {
-    if (entry.dir) continue;
-    const ext = filePath.split(".").pop()?.toLowerCase() || "";
-    const fileName = filePath.split("/").pop() || filePath;
-
-    // Extract text files
-    if (ext === "md" || ext === "txt" || ext === "json") {
-      try {
-        const content = await entry.async("string");
-        if (content.length > 0) {
-          markdownFiles.push(`=== ${filePath} ===\n${content}`);
-          logger.info("mineru", `Extracted text: ${filePath} (${content.length} chars)`);
-        }
-      } catch { /* skip */ }
-    }
-
-    // Extract images
-    if (isImageFile(fileName) && userId) {
-      try {
-        const imgBuffer = await entry.async("nodebuffer");
-        if (imgBuffer.byteLength > 500) { // Skip tiny/broken images
-          const savedName = await saveUserImage(userId, fileName, imgBuffer, `mineru:${filename}`);
-          extractedImages.push(savedName);
-          logger.info("mineru", `Saved image: ${fileName} → ${savedName} (${(imgBuffer.byteLength / 1024).toFixed(1)}KB)`);
-        }
-      } catch { /* skip broken images */ }
-    }
-  }
-
-  if (extractedImages.length > 0) {
-    logger.info("mineru", `Extracted ${extractedImages.length} images from PDF`);
-  }
-
-  const result = markdownFiles.join("\n\n");
-  logger.info("mineru", `PDF parse complete. Total content: ${result.length} chars from ${markdownFiles.length} files, ${extractedImages.length} images`);
-  return result;
+  return sharedParsePdfWithMinerU(buffer, filename, userId ? {
+    saveImage: (fn, buf, src) => saveUserImage(userId, fn, buf, src),
+  } : undefined);
 }
 
-// ─── Basic PDF text extraction (fallback) ───
 function basicPdfExtract(buffer: ArrayBuffer): string {
-  logger.info("pdf-basic", "Using basic PDF text extraction");
-  const bytes = new Uint8Array(buffer);
-  const text = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
-
-  const segments: string[] = [];
-  const matches = text.match(/\(([^)]+)\)/g);
-  if (matches) {
-    for (const m of matches) {
-      const inner = m.slice(1, -1);
-      if (inner.length > 2 && /[\w\u4e00-\u9fff]/.test(inner)) {
-        segments.push(inner);
-      }
-    }
-  }
-
-  const result = segments.length > 0 ? segments.join(" ") : "[PDF - limited text extraction]";
-  logger.info("pdf-basic", `Extracted ${segments.length} segments, ${result.length} chars`);
-  return result;
+  return sharedBasicPdfExtract(buffer);
 }
 
 // ─── Extract text from ZIP ───
@@ -525,37 +348,68 @@ Tags: routing, mapping`;
 
   const userMessage = `Source: ${sourceName}\nType: ${sourceType}\n\nContent:\n${sourceContent.slice(0, 60000)}`;
 
-  const startTime = Date.now();
-  const response = await fetch("https://api.siliconflow.cn/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: "Pro/zai-org/GLM-5",
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userMessage },
-      ],
-      temperature: 0.3,
-      max_tokens: 8192,
-    }),
-  });
+  const MAX_RETRIES = 2;
+  let response: Response | null = null;
+  let lastError = "";
 
-  const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    const startTime = Date.now();
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 120_000); // 2 min per attempt
 
-  if (!response.ok) {
-    const errText = await response.text();
-    logger.error("ai", `AI request failed (${elapsed}s): ${response.status}`, { response: errText.slice(0, 500) });
-    throw new Error(`AI analysis failed: ${response.status}`);
+      response = await fetch("https://api.siliconflow.cn/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: "Pro/zai-org/GLM-5",
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userMessage },
+          ],
+          temperature: 0.3,
+          max_tokens: 8192,
+        }),
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeout);
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+
+      if (response.ok) {
+        logger.info("ai", `AI request succeeded (attempt ${attempt + 1}, ${elapsed}s)`);
+        break;
+      }
+
+      const errText = await response.text();
+      lastError = `${response.status}: ${errText.slice(0, 200)}`;
+      logger.warn("ai", `AI request failed (attempt ${attempt + 1}, ${elapsed}s): ${lastError}`);
+      response = null;
+    } catch (err) {
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+      lastError = err instanceof Error ? err.message : "fetch failed";
+      logger.warn("ai", `AI request error (attempt ${attempt + 1}, ${elapsed}s): ${lastError}`);
+      response = null;
+    }
+
+    // Wait before retry
+    if (attempt < MAX_RETRIES) {
+      await new Promise(r => setTimeout(r, 3000 * (attempt + 1)));
+    }
+  }
+
+  if (!response || !response.ok) {
+    throw new Error(`AI analysis failed after ${MAX_RETRIES + 1} attempts: ${lastError}`);
   }
 
   const result = await response.json();
   const rawContent = result.choices?.[0]?.message?.content || "";
   const tokenUsage = result.usage;
 
-  logger.info("ai", `AI response received (${elapsed}s)`, {
+  logger.info("ai", `AI response parsed`, {
     tokens: tokenUsage,
     responseLength: rawContent.length,
   });
@@ -594,10 +448,20 @@ function detectFileType(name: string): string {
   return "unknown";
 }
 
+/** Try MinerU first, fall back to basic PDF extraction on timeout/error */
+async function parsePdfSafe(buffer: ArrayBuffer, name: string): Promise<string> {
+  try {
+    return await parsePdfWithMinerU(buffer, name);
+  } catch (err) {
+    logger.warn("pdf", `MinerU failed for ${name}: ${err instanceof Error ? err.message : "unknown"}, falling back to basic extraction`);
+    return basicPdfExtract(buffer);
+  }
+}
+
 // ─── Parse a single file buffer by type ───
 async function parseFileContent(buffer: ArrayBuffer, name: string, type: string): Promise<string> {
   switch (type) {
-    case "pdf": return await parsePdfWithMinerU(buffer, name);
+    case "pdf": return await parsePdfSafe(buffer, name);
     case "docx": return await extractFromDocx(buffer);
     case "txt":
     case "md": return new TextDecoder("utf-8").decode(new Uint8Array(buffer));
@@ -636,38 +500,50 @@ async function parseZipPerFile(buffer: ArrayBuffer): Promise<ZipFileResult[]> {
   }
   if (imageCount > 0) logger.info("zip-per-file", `Extracted ${imageCount} images from ZIP`);
 
+  // Collect files to process
+  const filesToProcess: Array<{ filePath: string; fileName: string; ext: string; entry: JSZip.JSZipObject }> = [];
   for (const [filePath, entry] of Object.entries(zip.files)) {
     if (entry.dir) continue;
     const fileName = filePath.split("/").pop() || filePath;
     const ext = fileName.split(".").pop()?.toLowerCase() || "";
     if (!supportedExts.includes(ext)) continue;
+    filesToProcess.push({ filePath, fileName, ext, entry });
+  }
 
-    logger.info("zip-per-file", `Processing: ${fileName} (${ext})`);
-
-    try {
+  // Process in parallel with concurrency limit (2 at a time to avoid API overload)
+  const CONCURRENCY = 2;
+  for (let i = 0; i < filesToProcess.length; i += CONCURRENCY) {
+    const batch = filesToProcess.slice(i, i + CONCURRENCY);
+    const batchResults = await Promise.allSettled(batch.map(async ({ fileName, ext, entry }) => {
+      logger.info("zip-per-file", `Processing: ${fileName} (${ext})`);
       const fileBuffer = await entry.async("arraybuffer");
       const fileType = detectFileType(fileName);
       let content: string;
 
       if (fileType === "pdf") {
-        content = await parsePdfWithMinerU(fileBuffer, fileName);
+        content = await parsePdfSafe(fileBuffer, fileName);
       } else if (fileType === "docx") {
         content = await extractFromDocx(fileBuffer);
       } else {
-        // txt, md, json, csv, yaml, html — read as text
         content = await entry.async("string");
       }
 
       if (!content || content.trim().length < 10) {
         logger.warn("zip-per-file", `Skipping ${fileName}: too short`);
-        continue;
+        return null;
       }
 
-      const { items, relations: extractedRelations } = await aiExtractKnowledge(content, fileName, ext);
-      results.push({ name: fileName, type: ext, items });
+      const { items } = await aiExtractKnowledge(content, fileName, ext);
       logger.info("zip-per-file", `${fileName}: ${items.length} items extracted`);
-    } catch (err) {
-      logger.warn("zip-per-file", `Failed to process ${fileName}: ${err instanceof Error ? err.message : "error"}`);
+      return { name: fileName, type: ext, items };
+    }));
+
+    for (const r of batchResults) {
+      if (r.status === "fulfilled" && r.value) {
+        results.push(r.value);
+      } else if (r.status === "rejected") {
+        logger.warn("zip-per-file", `Batch file failed: ${r.reason instanceof Error ? r.reason.message : "error"}`);
+      }
     }
   }
 

@@ -11,9 +11,11 @@ export const projectsGrid: SectionVariantFn = () => {
           <div className="mini-projects-grid">
             {t.projects.map((p) => (
               <div key={p.title} className="mini-project-card">
+                {p.image && (
                 <div className="mini-project-image">
                   <Image src={p.image} alt={p.title} fill className="object-cover" unoptimized />
                 </div>
+                )}
                 <div className="mini-project-body">
                   <div className="flex items-start justify-between gap-2 mb-1">
                     <div>

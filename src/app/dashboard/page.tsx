@@ -19,6 +19,8 @@ interface SiteItem {
   previewUrl?: string | null;
   lastBuiltAt?: string | null;
   publishedUrl?: string | null;
+  isPublic?: number | null;
+  publicDesc?: string | null;
   createdAt: string;
   updatedAt: string;
   conversationId?: string | null;
@@ -126,7 +128,16 @@ export default function DashboardPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
             {sites.map((site) => (
               <div key={site.id} className="group overflow-hidden rounded-2xl bg-white border border-gray-200 hover:border-accent/30 transition-all shadow-sm hover:shadow-md">
-                <div className="h-1.5 w-full" style={{ background: `linear-gradient(90deg, ${site.theme === "cyberpunk" ? "#00fff0" : site.theme === "ghibli" ? "#7d9b5f" : site.theme === "glassmorphism" ? "#c89bda" : site.theme === "bold-creative" ? "#ff6b6b" : site.theme === "brutalist" ? "#4493f8" : site.theme === "cinematic" ? "#e94560" : site.theme === "retro" ? "#c0392b" : site.theme === "neo-tokyo" ? "#ff2e63" : "#6366f1"}, ${site.theme === "cyberpunk" ? "#ff00ff" : site.theme === "ghibli" ? "#e8a87c" : site.theme === "glassmorphism" ? "#e8b88a" : site.theme === "bold-creative" ? "#4d96ff" : "#818cf8"})` }} />
+                {site.previewUrl ? (
+                  <div className="relative h-36 overflow-hidden bg-gray-50 border-b border-gray-100 cursor-pointer" onClick={() => window.open(site.previewUrl!, "_blank")}>
+                    <div className="absolute inset-0 origin-top-left scale-[0.3] w-[334%] h-[334%] pointer-events-none">
+                      <iframe src={site.previewUrl} className="w-full h-full border-0" title={site.name} loading="lazy" sandbox="allow-same-origin" />
+                    </div>
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/20 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                  </div>
+                ) : (
+                  <div className="h-1.5 w-full" style={{ background: `linear-gradient(90deg, ${site.theme === "cyberpunk" ? "#00fff0" : site.theme === "ghibli" ? "#7d9b5f" : site.theme === "glassmorphism" ? "#c89bda" : site.theme === "bold-creative" ? "#ff6b6b" : site.theme === "brutalist" ? "#4493f8" : site.theme === "cinematic" ? "#e94560" : site.theme === "retro" ? "#c0392b" : site.theme === "neo-tokyo" ? "#ff2e63" : "#6366f1"}, ${site.theme === "cyberpunk" ? "#ff00ff" : site.theme === "ghibli" ? "#e8a87c" : site.theme === "glassmorphism" ? "#e8b88a" : site.theme === "bold-creative" ? "#4d96ff" : "#818cf8"})` }} />
+                )}
                 <div className="p-5">
                   {/* Header: name + status */}
                   <div className="flex items-start justify-between gap-3 mb-4">
@@ -218,6 +229,22 @@ export default function DashboardPage() {
                         className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs text-gray-600 hover:bg-gray-50 transition-all">
                         {locale === "zh" ? "访问" : "Visit"}
                       </a>
+                    )}
+                    {site.status === "published" && (
+                      <button
+                        onClick={async () => {
+                          const newVal = site.isPublic ? 0 : 1;
+                          let desc = site.publicDesc || "";
+                          if (newVal === 1 && !desc) {
+                            desc = prompt(locale === "zh" ? "输入一句话描述（展示在首页）：" : "Enter a short description (shown on homepage):") || "";
+                          }
+                          await fetch(`/api/sites/${site.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ isPublic: newVal, publicDesc: desc }) });
+                          setSites(prev => prev.map(s => s.id === site.id ? { ...s, isPublic: newVal, publicDesc: desc } : s));
+                        }}
+                        className={`px-3 py-1.5 rounded-lg border text-xs transition-all ${site.isPublic ? "border-green-300 text-green-600 bg-green-50 hover:bg-green-100" : "border-gray-200 text-gray-400 hover:bg-gray-50"}`}
+                      >
+                        {site.isPublic ? (locale === "zh" ? "已公开" : "Public") : (locale === "zh" ? "公开" : "Make Public")}
+                      </button>
                     )}
                     <button
                       onClick={async () => {

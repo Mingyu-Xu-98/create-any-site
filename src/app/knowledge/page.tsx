@@ -7,9 +7,6 @@ import Navbar from "@/components/Navbar";
 import { useLocale } from "@/components/LocaleProvider";
 import type { KnowledgeItem, KnowledgeCategory, SourceType } from "@/lib/knowledge";
 import { CATEGORY_META, SOURCE_TYPE_META } from "@/lib/knowledge";
-import dynamic from "next/dynamic";
-
-const KnowledgeGraph = dynamic(() => import("@/components/KnowledgeGraph"), { ssr: false });
 
 interface KGGroup {
   id: string;
@@ -42,11 +39,16 @@ export default function KnowledgePage() {
   const { locale } = useLocale();
   const zh = locale === "zh";
 
-  // State
+  // Knowledge Bases (new system)
+  const [bases, setBases] = useState<Array<{ id: string; name: string; description: string; fileCount: number; totalChars: number; updatedAt: string }>>([]);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [newBaseName, setNewBaseName] = useState("");
+
+  // Legacy state
   const [groups, setGroups] = useState<KGGroup[]>([]);
   const [items, setItems] = useState<KnowledgeItem[]>([]);
   const [loaded, setLoaded] = useState(false);
-  const [viewMode, setViewMode] = useState<"list" | "graph">("list");
+  const [viewMode, setViewMode] = useState<"list">("list");
   const [search, setSearch] = useState("");
   const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
   const [groupItems, setGroupItems] = useState<KnowledgeItem[]>([]);
@@ -77,9 +79,31 @@ export default function KnowledgePage() {
     setLoaded(true);
   }, []);
 
+  const loadBases = useCallback(async () => {
+    try {
+      const res = await fetch("/api/kb");
+      if (res.ok) { const d = await res.json(); setBases(d.bases || []); }
+    } catch {}
+  }, []);
+
+  const createBase = async () => {
+    if (!newBaseName.trim()) return;
+    const res = await fetch("/api/kb", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: newBaseName.trim() }),
+    });
+    if (res.ok) {
+      const d = await res.json();
+      setNewBaseName("");
+      setShowCreateModal(false);
+      router.push(`/knowledge/${d.id}`);
+    }
+  };
+
   useEffect(() => {
-    if (session?.user) { loadGroups(); loadItems(); }
-  }, [session, loadGroups, loadItems]);
+    if (session?.user) { loadBases(); loadGroups(); loadItems(); }
+  }, [session, loadBases, loadGroups, loadItems]);
 
   // Stats
   const selectedCount = items.filter(i => i.selected).length;
@@ -223,35 +247,76 @@ export default function KnowledgePage() {
             <div>
               <h1 className="text-2xl font-bold text-gray-900">{zh ? "知识库" : "Knowledge Base"}</h1>
               <p className="text-sm text-gray-500 mt-1">
-                {zh ? `${groups.length} 个知识组 · ${selectedCount}/${totalCount} 条已选` : `${groups.length} groups · ${selectedCount}/${totalCount} selected`}
+                {zh ? `${bases.length} 个知识库 · ${groups.length} 个旧知识组` : `${bases.length} bases · ${groups.length} legacy groups`}
               </p>
             </div>
             <div className="flex items-center gap-3">
-              <button onClick={() => setShowUploadModal(true)} className="flex items-center gap-2 px-4 py-2 rounded-xl bg-accent text-white text-sm font-medium hover:bg-accent/90 transition-all shadow-sm shadow-accent/20">
+              <button onClick={() => setShowCreateModal(true)} className="flex items-center gap-2 px-4 py-2 rounded-xl bg-accent text-white text-sm font-medium hover:bg-accent/90 transition-all shadow-sm shadow-accent/20">
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-                {zh ? "添加资料" : "Add Source"}
+                {zh ? "新建知识库" : "New Knowledge Base"}
               </button>
-              <div className="flex rounded-lg border border-gray-200 overflow-hidden">
-                <button onClick={() => setViewMode("list")} className={`px-3 py-1.5 text-xs transition-all ${viewMode === "list" ? "bg-accent text-white" : "bg-white text-gray-500 hover:bg-gray-50"}`}>
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 10h16M4 14h16M4 18h16" /></svg>
-                </button>
-                <button onClick={() => setViewMode("graph")} className={`px-3 py-1.5 text-xs transition-all ${viewMode === "graph" ? "bg-accent text-white" : "bg-white text-gray-500 hover:bg-gray-50"}`}>
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="6" cy="6" r="2" strokeWidth={2} /><circle cx="18" cy="6" r="2" strokeWidth={2} /><circle cx="12" cy="18" r="2" strokeWidth={2} /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7.5 7.5l3 7.5m6-7.5l-3 7.5" /></svg>
-                </button>
-              </div>
-              {viewMode === "list" && (
-                <>
-                  <input type="text" placeholder={zh ? "搜索..." : "Search..."} value={search} onChange={e => setSearch(e.target.value)}
+              <input type="text" placeholder={zh ? "搜索..." : "Search..."} value={search} onChange={e => setSearch(e.target.value)}
                     className="px-3 py-1.5 rounded-lg bg-white border border-gray-200 text-sm placeholder:text-gray-400 focus:outline-none focus:border-accent/50 w-48" />
                   <button onClick={toggleAll} className="px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-xs text-gray-500 hover:bg-gray-50 transition-all">
                     {items.every(i => i.selected) ? (zh ? "全部取消" : "Deselect all") : (zh ? "全部选择" : "Select all")}
                   </button>
-                </>
-              )}
             </div>
           </div>
 
-          {/* Processing status bar — always visible when files are uploading */}
+          {/* ===== Knowledge Bases (new system) ===== */}
+          {bases.length > 0 && (
+            <div className="mb-8">
+              <h2 className="text-sm font-medium text-gray-500 uppercase tracking-wider mb-3">{zh ? "知识库" : "Knowledge Bases"}</h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {bases.map(b => (
+                  <div key={b.id} onClick={() => router.push(`/knowledge/${b.id}`)} className="rounded-xl border border-gray-200 bg-white p-5 cursor-pointer hover:border-accent/20 hover:shadow-sm transition-all group">
+                    <div className="flex items-start justify-between mb-2">
+                      <h3 className="text-sm font-semibold text-gray-800 group-hover:text-accent truncate">{b.name}</h3>
+                      <button onClick={async (e) => { e.stopPropagation(); if (confirm(zh ? "删除此知识库？" : "Delete?")) { await fetch(`/api/kb/${b.id}`, { method: "DELETE" }); loadBases(); } }} className="opacity-0 group-hover:opacity-100 p-1 rounded text-gray-300 hover:text-red-500 transition-all">
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                      </button>
+                    </div>
+                    {b.description && <p className="text-xs text-gray-500 line-clamp-1 mb-2">{b.description}</p>}
+                    <div className="flex items-center gap-3 text-[10px] text-gray-400">
+                      <span>{b.fileCount} {zh ? "文件" : "files"}</span>
+                      <span>{(b.totalChars || 0).toLocaleString()} {zh ? "字" : "chars"}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {bases.length === 0 && groups.length === 0 && (
+            <div className="text-center py-16 mb-8">
+              <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-gray-100 flex items-center justify-center"><span className="text-2xl opacity-30">📚</span></div>
+              <p className="text-gray-500 mb-2">{zh ? "还没有知识库" : "No knowledge bases yet"}</p>
+              <p className="text-xs text-gray-400 mb-4">{zh ? "新建一个知识库，上传你的资料" : "Create a knowledge base and upload your materials"}</p>
+              <button onClick={() => setShowCreateModal(true)} className="px-4 py-2 rounded-lg bg-accent text-white text-sm hover:bg-accent/90">{zh ? "新建知识库" : "Create Knowledge Base"}</button>
+            </div>
+          )}
+
+          {/* Create Knowledge Base Modal */}
+          {showCreateModal && (
+            <div className="fixed inset-0 z-[200] flex items-center justify-center p-4" onClick={() => setShowCreateModal(false)}>
+              <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
+              <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md" onClick={e => e.stopPropagation()}>
+                <div className="px-6 py-4 border-b border-gray-100">
+                  <h3 className="text-base font-semibold">{zh ? "新建知识库" : "Create Knowledge Base"}</h3>
+                </div>
+                <div className="p-6">
+                  <label className="text-xs text-gray-500 mb-1 block">{zh ? "名称" : "Name"}</label>
+                  <input type="text" value={newBaseName} onChange={e => setNewBaseName(e.target.value)} placeholder={zh ? "例如：我的简历资料" : "e.g., My Resume Materials"} className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-accent/50" autoFocus onKeyDown={e => { if (e.key === "Enter") createBase(); }} />
+                  <div className="flex justify-end gap-2 mt-4">
+                    <button onClick={() => setShowCreateModal(false)} className="px-4 py-2 rounded-lg border border-gray-200 text-sm text-gray-500 hover:bg-gray-50">{zh ? "取消" : "Cancel"}</button>
+                    <button onClick={createBase} disabled={!newBaseName.trim()} className="px-4 py-2 rounded-lg bg-accent text-white text-sm hover:bg-accent/90 disabled:opacity-30">{zh ? "创建" : "Create"}</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Legacy: Processing status bar — always visible when files are uploading */}
           {uploadingFiles.some(f => f.status === "uploading" || f.status === "extracting") && (
             <div className="mb-4 rounded-xl border border-accent/20 bg-accent/5 px-4 py-3">
               <div className="flex items-center gap-2 mb-2">
@@ -271,12 +336,11 @@ export default function KnowledgePage() {
           )}
 
           {/* Recently completed uploads */}
-          {uploadingFiles.some(f => f.status === "done" || f.status === "error") && !uploadingFiles.some(f => f.status === "uploading" || f.status === "extracting") && (
+          {uploadingFiles.some(f => f.status === "done") && !uploadingFiles.some(f => f.status === "uploading" || f.status === "extracting") && (
             <div className="mb-4 rounded-xl border border-gray-200 bg-white px-4 py-3 flex items-center justify-between">
               <div className="flex items-center gap-2 text-xs text-gray-500">
                 <span className="text-green-500">✓</span>
                 {zh ? `${uploadingFiles.filter(f => f.status === "done").length} 个文件处理完成` : `${uploadingFiles.filter(f => f.status === "done").length} files processed`}
-                {uploadingFiles.some(f => f.status === "error") && <span className="text-red-500 ml-2">{zh ? `${uploadingFiles.filter(f => f.status === "error").length} 个失败` : `${uploadingFiles.filter(f => f.status === "error").length} failed`}</span>}
               </div>
               <button onClick={() => setUploadingFiles([])} className="text-xs text-gray-400 hover:text-gray-600">{zh ? "清除" : "Dismiss"}</button>
             </div>
@@ -343,7 +407,7 @@ export default function KnowledgePage() {
                   {/* Upload progress inside modal */}
                   {uploadingFiles.length > 0 && (
                     <div className="mt-5 pt-5 border-t border-gray-100 space-y-2 max-h-40 overflow-y-auto">
-                      {uploadingFiles.map(f => (
+                      {uploadingFiles.filter(f => f.status !== "error").map(f => (
                         <div key={f.id} className="flex items-center gap-3 text-sm">
                           <span className="text-xs">{SOURCE_TYPE_META[f.type as SourceType]?.icon || "📄"}</span>
                           <span className="text-gray-700 truncate flex-1">{f.name}</span>
@@ -352,10 +416,8 @@ export default function KnowledgePage() {
                               <span className="w-3 h-3 border border-accent/30 border-t-accent rounded-full animate-spin" />
                               {f.progress}
                             </span>
-                          ) : f.status === "done" ? (
-                            <span className="text-xs text-green-600">{f.progress}</span>
                           ) : (
-                            <span className="text-xs text-red-500">{f.error || f.progress}</span>
+                            <span className="text-xs text-green-600">{f.progress}</span>
                           )}
                         </div>
                       ))}
@@ -366,15 +428,8 @@ export default function KnowledgePage() {
             </div>
           )}
 
-          {/* Graph view */}
-          {viewMode === "graph" && (
-            <div className="rounded-xl border border-gray-200 bg-white overflow-hidden" style={{ height: "calc(100vh - 320px)" }}>
-              <KnowledgeGraph />
-            </div>
-          )}
-
-          {/* List view */}
-          {viewMode === "list" && (
+          {/* Legacy knowledge groups list */}
+          {groups.length > 0 && (
             <div>
               {!loaded ? (
                 <div className="space-y-3">{[1, 2, 3].map(i => <div key={i} className="h-20 rounded-xl bg-white border border-gray-200 animate-pulse" />)}</div>

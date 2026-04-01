@@ -49,7 +49,9 @@ export function getSpecName(spec?: SiteSpec | null): string {
 
 export function getSectionTitles(spec?: SiteSpec | null): Partial<Record<string, string>> {
   const map: Partial<Record<string, string>> = {};
-  for (const section of spec?.sections || []) {
+  // Read from pages[] if available, else sections[]
+  const allSections = spec?.pages?.flatMap(p => p.sections) || spec?.sections || [];
+  for (const section of allSections) {
     const key = section.id || section.type;
     if (!key) continue;
     const data = section.data || {};
@@ -91,7 +93,14 @@ export function getAvailableSections(data: WorkspaceData, spec?: SiteSpec | null
 }
 
 export function findSpecSection(spec: SiteSpec | null | undefined, id: string): SiteSpecSection | undefined {
-  return spec?.sections?.find(section => (section.id || section.type) === id);
+  // Search pages[] first, then flat sections[]
+  if (spec?.pages) {
+    for (const page of spec.pages) {
+      const found = page.sections.find(s => (s.id || s.type) === id || s.kind === id);
+      if (found) return found;
+    }
+  }
+  return spec?.sections?.find(section => (section.id || section.type) === id || section.kind === id);
 }
 
 export function readStringArray(input: unknown): string[] {

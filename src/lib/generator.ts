@@ -13,8 +13,11 @@ import {
   genTypewriterHero, genThemeToggle, genParticleBackground, genGrainOverlay,
   genSharePoster, genChatBot, buildKnowledgeChunks, genChatRoute, genGhibliImageScript,
 } from "./generator-shared";
-import { assemblePage, buildCompositionPlan } from "./components";
+import { assemblePage, buildCompositionPlan, getVisualAssetCSS, getVisualAssetComponents } from "./components";
 import type { SectionContext } from "./components/types";
+import type { ContentModel } from "./content-model";
+import { renderFromContentModel } from "./template-renderer";
+import "./templates"; // Register all templates
 
 /**
  * Generate all website file contents as a Record<path, content>.
@@ -81,40 +84,64 @@ export function generateFileMap(
   files["src/app/layout.tsx"] = genLayout(data, theme, features, styleConfig, spec);
   files["src/app/globals.css"] = customHeader + genGlobalCSS(theme, layout, features, styleConfig);
 
-  // Page generation: always try the composable assembler first.
-  // 1. Agent-provided CompositionPlan (best)
-  // 2. Auto-generated plan from spec sections with kind info
-  // 3. Auto-generated plan from theme/layout mapping
-  // 4. Legacy genPage (last resort)
+  // Inject visual asset CSS if a CompositionPlan with visualDirection exists
+  const activePlan = selections.compositionPlan;
+  if (activePlan?.visualDirection) {
+    const assetCSS = getVisualAssetCSS(activePlan);
+    if (assetCSS) files["src/app/globals.css"] += "\n\n/* === Visual Assets === */\n" + assetCSS;
+    // Also generate any extra component files from assets
+    const assetComponents = getVisualAssetComponents(activePlan);
+    for (const [path, code] of Object.entries(assetComponents)) {
+      files[path] = code as string;
+    }
+  }
+
+  // ===== Page generation: multi-page aware =====
   const ctx: SectionContext = { data, spec, theme, layout, styleConfig, features };
-  const agentPlan = selections.compositionPlan;
-  if (agentPlan) {
-    files["src/app/page.tsx"] = assemblePage(agentPlan, ctx);
-  } else if (spec?.sections?.some(s => s.kind)) {
-    // Spec has kind-aware sections — build a plan from them
-    const autoSections = (spec.sections || [])
-      .filter(s => s.enabled !== false && s.id)
-      .map(s => ({
+
+  // Helper: build a CompositionPlan from SiteSpec sections
+  function sectionsToPage(sections: Array<{ id?: string; kind?: string; type?: string; variant?: string; data?: Record<string, unknown>; enabled?: boolean }>, navStyle = "sticky", footerStyle = "standard"): import("./components/types").CompositionPlan {
+    const filtered = sections.filter(s => s.enabled !== false && s.id);
+    const heroSection = filtered.find(s => s.kind === "hero");
+    return {
+      layout: "single",
+      nav: navStyle,
+      hero: heroSection?.variant || "centered",
+      sections: filtered.filter(s => s.kind !== "hero").map(s => ({
         id: s.id!,
         kind: (s.kind || "content") as import("./components/types").SectionKind,
         type: s.type,
-        variant: undefined as string | undefined,
+        variant: s.variant,
         data: s.data,
-      }));
-    const autoPlan: import("./components/types").CompositionPlan = {
-      layout: "single",
-      nav: "sticky",
-      hero: autoSections.find(s => s.kind === "hero")?.variant || "centered",
-      sections: autoSections.filter(s => s.kind !== "hero"),
+      })),
       effects: [],
-      footer: "standard",
+      footer: footerStyle,
     };
-    files["src/app/page.tsx"] = assemblePage(autoPlan, ctx);
-  } else {
-    // Fallback: build plan from theme/layout, then assemble
-    const fallbackPlan = buildCompositionPlan(theme, layout, getAvailableSections(data, spec));
+  }
+
+  // Path 1: Agent provided a full CompositionPlan
+  const agentPlan = selections.compositionPlan;
+  if (agentPlan) {
+    files["src/app/page.tsx"] = assemblePage(agentPlan, ctx);
+  }
+  // Path 2: Spec has pages[] — generate per-page route files
+  else if (spec?.pages && spec.pages.length > 0) {
+    const navStyle = spec.navigation?.style || "sticky";
+    for (const page of spec.pages) {
+      const pagePlan = sectionsToPage(page.sections, navStyle);
+      const route = page.route === "/" ? "" : page.route.replace(/^\//, "");
+      const filePath = route ? `src/app/${route}/page.tsx` : "src/app/page.tsx";
+      files[filePath] = assemblePage(pagePlan, ctx);
+    }
+  }
+  // Path 3: Spec has kind-aware sections (flat, single page)
+  else if (spec?.sections?.some(s => s.kind)) {
+    files["src/app/page.tsx"] = assemblePage(sectionsToPage(spec.sections || []), ctx);
+  }
+  // Path 4: Fallback from theme/layout mapping
+  else {
+    const fallbackPlan = buildCompositionPlan(theme, layout, getAvailableSections(data, spec), spec);
     const assembled = assemblePage(fallbackPlan, ctx);
-    // Use assembled if it produces content, otherwise legacy
     if (assembled.includes("section") || assembled.includes("className")) {
       files["src/app/page.tsx"] = assembled;
     } else {
@@ -2416,7 +2443,22 @@ export default function Home() {
 `;
 }
 
+// ---- Default mode: ContentModel → Template ----
+
+/**
+ * Generate site files from a ContentModel using the template renderer.
+ * This is the new default path — simpler, more reliable than the old chain.
+ */
+export function generateFromContentModel(
+  content: ContentModel,
+  templateId?: string,
+): Record<string, string> {
+  return renderFromContentModel(content, templateId);
+}
+
 // ---- Re-exports for external use ----
 export { buildCompositionPlan, assemblePage, listVariants, listLayouts } from "./components";
+export { renderFromContentModel, autoSelectTemplate, getTemplatesForMode, listTemplateIds } from "./template-renderer";
 export type { CompositionPlan, SectionContext } from "./components/types";
+export type { ContentModel } from "./content-model";
 

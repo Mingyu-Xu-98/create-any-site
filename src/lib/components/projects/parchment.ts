@@ -10,9 +10,11 @@ export const projectsParchment: SectionVariantFn = () => {
           <div className="ghibli-projects-grid">
             {t.projects.map((p) => (
               <div key={p.title} className="parchment-card">
+                {p.image && (
                 <div className="relative h-36 overflow-hidden">
                   <Image src={p.image} alt={p.title} fill className="object-cover" unoptimized />
                 </div>
+                )}
                 <div className="p-4">
                   <div className="flex items-start justify-between mb-1">
                     <div>

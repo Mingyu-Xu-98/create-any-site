@@ -76,6 +76,7 @@ export type SiteType = string;
  */
 export type ThemeStyle = "cyberpunk" | "minimalist" | "ghibli" | "glassmorphism" | "retro" | "brutalist"
   | "cinematic" | "bold-creative" | "editorial" | "nature" | "gradient-mesh" | "neo-tokyo"
+  | "watercolor" | "terminal-green" | "vaporwave" | "craft-paper" | "aurora" | "ink-wash"
   | "tpl-business" | "tpl-resume-bold" | "tpl-resume-dark" | "tpl-blog" | "custom";
 
 /**
@@ -163,6 +164,9 @@ export interface FeatureFlags {
 
 // ---- User Selections ----
 
+/** Generation mode: default (template-driven) vs advanced (AI-driven component assembly) */
+export type GenerationMode = "default" | "advanced";
+
 export interface UserSelections {
   siteType: SiteType | null;
   theme: ThemeStyle | null;
@@ -171,7 +175,13 @@ export interface UserSelections {
   customTheme: string;
   customLayout: string;
   features: FeatureFlags;
-  /** Composition plan from AI agent — drives the component assembler */
+  /** Generation mode: "default" = template-driven, "advanced" = AI component assembly */
+  mode?: GenerationMode;
+  /** Template ID for default mode */
+  templateId?: string;
+  /** Content model for default mode — template reads this directly */
+  contentModel?: import("./content-model").ContentModel;
+  /** Composition plan from AI agent — drives the component assembler (advanced mode) */
   compositionPlan?: import("./components/types").CompositionPlan;
   /** Full site spec from compile-spec (carries pages/design/interactions) */
   fullSpec?: import("./site-spec").SiteSpec;

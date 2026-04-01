@@ -172,6 +172,72 @@ export const STYLE_CONFIG: Record<
     fontHeading: '"Noto Sans JP", "JetBrains Mono", sans-serif',
     borderRadius: "4px",
   },
+  watercolor: {
+    colors: {
+      bg: "#faf6f1", "bg-card": "rgba(255,255,255,0.7)", "bg-card-solid": "#fff8f2",
+      "bg-tag": "rgba(155,142,196,0.1)", text: "#3a3550", "text-muted": "#8a82a0",
+      accent: "#9b8ec4", "accent-soft": "rgba(155,142,196,0.12)", "accent-alt": "#e8a0bf",
+      line: "rgba(155,142,196,0.18)", green: "#7dab8e",
+    },
+    fontSans: '"Lora", Georgia, "Times New Roman", serif',
+    fontHeading: '"Caveat", "Comic Sans MS", cursive',
+    borderRadius: "28px",
+  },
+  "terminal-green": {
+    colors: {
+      bg: "#0a0a0a", "bg-card": "rgba(0,255,65,0.04)", "bg-card-solid": "#0d1a0d",
+      "bg-tag": "rgba(0,255,65,0.08)", text: "#00ff41", "text-muted": "#00aa2a",
+      accent: "#00ff41", "accent-soft": "rgba(0,255,65,0.1)", "accent-alt": "#39ff14",
+      line: "rgba(0,255,65,0.15)", green: "#00ff41",
+    },
+    fontSans: '"VT323", "Courier New", monospace',
+    fontHeading: '"VT323", "Courier New", monospace',
+    borderRadius: "0px",
+  },
+  vaporwave: {
+    colors: {
+      bg: "#1a0a2e", "bg-card": "rgba(255,113,206,0.06)", "bg-card-solid": "#2a1040",
+      "bg-tag": "rgba(255,113,206,0.1)", text: "#f0e0ff", "text-muted": "#a080c0",
+      accent: "#ff71ce", "accent-soft": "rgba(255,113,206,0.12)", "accent-alt": "#01cdfe",
+      line: "rgba(255,113,206,0.15)", green: "#05ffa1",
+    },
+    fontSans: '"Quicksand", -apple-system, BlinkMacSystemFont, sans-serif',
+    fontHeading: '"Audiowide", Impact, sans-serif',
+    borderRadius: "8px",
+  },
+  "craft-paper": {
+    colors: {
+      bg: "#e8d5b7", "bg-card": "rgba(255,248,235,0.8)", "bg-card-solid": "#f0e0c8",
+      "bg-tag": "rgba(139,69,19,0.1)", text: "#3e2723", "text-muted": "#795548",
+      accent: "#8b4513", "accent-soft": "rgba(139,69,19,0.1)", "accent-alt": "#c0392b",
+      line: "rgba(139,69,19,0.2)", green: "#558b2f",
+    },
+    fontSans: '"Patrick Hand", "Comic Sans MS", cursive',
+    fontHeading: '"Permanent Marker", Impact, cursive',
+    borderRadius: "4px",
+  },
+  aurora: {
+    colors: {
+      bg: "#060d1f", "bg-card": "rgba(0,212,170,0.06)", "bg-card-solid": "#0a1a30",
+      "bg-tag": "rgba(0,212,170,0.1)", text: "#e0f0f8", "text-muted": "#6090a8",
+      accent: "#00d4aa", "accent-soft": "rgba(0,212,170,0.1)", "accent-alt": "#7b68ee",
+      line: "rgba(0,212,170,0.12)", green: "#00d4aa",
+    },
+    fontSans: '"Outfit", -apple-system, BlinkMacSystemFont, sans-serif',
+    fontHeading: '"Outfit", -apple-system, sans-serif',
+    borderRadius: "16px",
+  },
+  "ink-wash": {
+    colors: {
+      bg: "#f5f0e8", "bg-card": "rgba(255,252,245,0.85)", "bg-card-solid": "#efe8d8",
+      "bg-tag": "rgba(44,44,44,0.06)", text: "#2c2c2c", "text-muted": "#6b6560",
+      accent: "#2c2c2c", "accent-soft": "rgba(44,44,44,0.08)", "accent-alt": "#c0392b",
+      line: "rgba(44,44,44,0.15)", green: "#5a7247",
+    },
+    fontSans: '"Noto Serif SC", Georgia, "Times New Roman", serif',
+    fontHeading: '"Ma Shan Zheng", "STKaiti", "KaiTi", cursive',
+    borderRadius: "4px",
+  },
   "tpl-business": {
     colors: {
       bg: "#0a0a1a", "bg-card": "rgba(26,16,64,0.7)", "bg-card-solid": "#1a1040",

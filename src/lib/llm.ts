@@ -13,6 +13,8 @@ interface ChatCompletionInput {
   history?: Array<{ role: Exclude<ChatRole, "system">; content: string }>;
   temperature?: number;
   maxTokens?: number;
+  /** Use advanced model (for Design Agent / high-quality generation) */
+  useAdvancedModel?: boolean;
 }
 
 interface ChatCompletionResult {
@@ -64,6 +66,23 @@ function getSiliconFlowConfig(): ProviderConfig | null {
 
 function getProviderConfig() {
   return getOpenRouterConfig() || getSiliconFlowConfig();
+}
+
+/** Get a stronger model config for advanced mode */
+function getAdvancedProviderConfig(): ProviderConfig | null {
+  // Advanced mode prefers OpenRouter with a strong model (Claude/GPT-4)
+  const advancedModel = process.env.ADVANCED_MODEL?.trim();
+  const orConfig = getOpenRouterConfig();
+  if (orConfig && advancedModel) {
+    return { ...orConfig, model: advancedModel };
+  }
+  // Fallback: use OpenRouter with default model, or SiliconFlow
+  return orConfig || getSiliconFlowConfig();
+}
+
+/** Get provider config based on mode */
+export function getProviderForMode(mode: "default" | "advanced" = "default"): ProviderConfig | null {
+  return mode === "advanced" ? getAdvancedProviderConfig() : getProviderConfig();
 }
 
 export function getChatProviderSummary(): string {
@@ -125,7 +144,7 @@ async function callProvider(config: ProviderConfig, input: ChatCompletionInput, 
 }
 
 export async function chatCompletion(input: ChatCompletionInput): Promise<ChatCompletionResult> {
-  const config = getProviderConfig();
+  const config = input.useAdvancedModel ? (getAdvancedProviderConfig() || getProviderConfig()) : getProviderConfig();
   if (!config) {
     throw new Error("No LLM provider configured. Set OPENROUTER_API_KEY or SILICONFLOW_API_KEY.");
   }
