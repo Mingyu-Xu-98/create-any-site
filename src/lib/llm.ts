@@ -55,7 +55,7 @@ const DEFAULTS = {
   SILICONFLOW_MODEL: "Pro/zai-org/GLM-5",
   SILICONFLOW_BASE_URL: "https://api.siliconflow.cn/v1",
   ADVANCED_MODEL_ANTHROPIC: "claude-opus-4-20250514",
-  ADVANCED_MODEL_OPENROUTER: "anthropic/claude-opus-4",
+  ADVANCED_MODEL_OPENROUTER: "anthropic/claude-sonnet-4",
 };
 
 function env(key: string, fallback?: string): string {
