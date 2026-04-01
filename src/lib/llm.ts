@@ -97,21 +97,21 @@ function getSiliconFlowConfig(): ProviderConfig | null {
   };
 }
 
-/** Provider priority: Anthropic > OpenRouter > SiliconFlow */
+/** Provider priority: OpenRouter > Anthropic > SiliconFlow */
 function getProviderConfig() {
-  return getAnthropicConfig() || getOpenRouterConfig() || getSiliconFlowConfig();
+  return getOpenRouterConfig() || getAnthropicConfig() || getSiliconFlowConfig();
 }
 
 /** Get a stronger model config for advanced mode */
 function getAdvancedProviderConfig(): ProviderConfig | null {
   const advancedModel = env("ADVANCED_MODEL");
-  const anthropicConfig = getAnthropicConfig();
-  if (anthropicConfig) {
-    return { ...anthropicConfig, model: advancedModel || DEFAULTS.ADVANCED_MODEL_ANTHROPIC };
-  }
   const orConfig = getOpenRouterConfig();
   if (orConfig) {
     return { ...orConfig, model: advancedModel || DEFAULTS.ADVANCED_MODEL_OPENROUTER };
+  }
+  const anthropicConfig = getAnthropicConfig();
+  if (anthropicConfig) {
+    return { ...anthropicConfig, model: advancedModel || DEFAULTS.ADVANCED_MODEL_ANTHROPIC };
   }
   return getSiliconFlowConfig();
 }
