@@ -2,6 +2,8 @@
  * Ingestion Worker — processes file uploads in the background.
  * Runs asynchronously, updates task status in DB.
  * Survives page navigation because task state is in DB, not React state.
+ *
+ * Concurrency: max 2 tasks run in parallel, rest queue up.
  */
 import { db } from "@/lib/db";
 import { ingestionTasks, knowledgeGroups, knowledgeItems } from "@/lib/db/schema";
@@ -18,17 +20,54 @@ interface IngestionInput {
   urlType: string | null;
 }
 
+interface QueuedTask {
+  taskId: string;
+  userId: string;
+  input: IngestionInput;
+}
+
+const MAX_CONCURRENCY = 2;
+let running = 0;
+const queue: QueuedTask[] = [];
+
 async function updateTask(taskId: string, update: Record<string, unknown>) {
   await db.update(ingestionTasks).set({ ...update, updatedAt: new Date().toISOString() }).where(eq(ingestionTasks.id, taskId));
 }
 
+function drainQueue() {
+  while (running < MAX_CONCURRENCY && queue.length > 0) {
+    const next = queue.shift()!;
+    running++;
+    processTask(next.taskId, next.userId, next.input)
+      .catch(() => {})
+      .finally(() => {
+        running--;
+        drainQueue();
+      });
+  }
+}
+
 /**
- * Main entry point — called from the API route, runs in background.
+ * Public entry point — called from the API route.
+ * Enqueues the task; actual processing happens via drainQueue().
  */
 export async function runIngestionTask(taskId: string, userId: string, input: IngestionInput) {
+  queue.push({ taskId, userId, input });
+  if (queue.length > 1) {
+    const pos = queue.length;
+    await updateTask(taskId, { status: "queued", progress: `排队中（第 ${pos} 个）...` });
+    logger.info("ingestion", `[${taskId}] Queued at position ${pos} (${running}/${MAX_CONCURRENCY} running)`);
+  }
+  drainQueue();
+}
+
+/**
+ * Actual task processing logic.
+ */
+async function processTask(taskId: string, userId: string, input: IngestionInput) {
   try {
     await updateTask(taskId, { status: "processing", progress: "解析文件中..." });
-    logger.info("ingestion", `[${taskId}] Starting: ${input.fileName} (${input.fileType})`);
+    logger.info("ingestion", `[${taskId}] Starting: ${input.fileName} (${input.fileType}), running=${running}/${MAX_CONCURRENCY}`);
 
     // Handle direct image upload
     if (input.fileBuffer && isImageFile(input.fileName)) {
@@ -47,7 +86,7 @@ export async function runIngestionTask(taskId: string, userId: string, input: In
       return;
     }
 
-    // Call analyze-source via internal HTTP (same process, no auth needed for file parsing)
+    // Call analyze-source via internal HTTP
     await updateTask(taskId, { progress: "AI 正在提取知识..." });
 
     const baseUrl = process.env.NEXTAUTH_URL || "http://localhost:3001";
@@ -134,4 +173,3 @@ async function saveToKnowledgeBase(userId: string, fileName: string, fileType: s
 
   return groupId;
 }
-
