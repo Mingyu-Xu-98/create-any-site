@@ -6,6 +6,7 @@
  * Code Agent is told to import and use these.
  */
 import { getInstalledNextVersion } from "./next-version";
+import { genSharePoster } from "./generator-shared";
 
 /**
  * Generate all infrastructure + shared component files.
@@ -83,7 +84,6 @@ export function generateBaseFiles(options: {
   files["src/components/ChatBot.tsx"] = generateChatBot();
 
   // SharePoster — use the full canvas+QR version from generator-shared
-  const { genSharePoster } = require("./generator-shared") as typeof import("./generator-shared");
   files["src/components/SharePoster.tsx"] = genSharePoster();
 
   // CartoonAssistant — animated animal character + chat (alternative to ChatBot)

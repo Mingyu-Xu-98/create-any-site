@@ -13,6 +13,7 @@ import { db } from "@/lib/db";
 import { eq } from "drizzle-orm";
 import type { KnowledgeItem } from "@/lib/knowledge";
 import { getSpecSections } from "@/lib/site-spec";
+import { STYLE_CONFIG } from "@/lib/generator-config";
 
 const SITES_DIR = path.join(process.cwd(), "sites-data");
 const RUNTIME_BASE_DIR = (process.env.RUNTIME_BASE_DIR?.trim() || path.join(SITES_DIR, "_runtime_base")).replace(/\/+$/, "");
@@ -792,8 +793,7 @@ function regexEnrichWorkspaceData(text: string): Partial<WorkspaceData> {
 // ---- Advanced mode helpers ----
 
 function generateMinimalThemeCSS(theme: string): string {
-  const { STYLE_CONFIG } = require("./generator-config") as { STYLE_CONFIG: Record<string, { colors: Record<string, string>; fontSans: string; fontHeading: string; borderRadius: string }> };
-  const config = STYLE_CONFIG[theme] || STYLE_CONFIG.minimalist;
+  const config = STYLE_CONFIG[theme as keyof typeof STYLE_CONFIG] || STYLE_CONFIG.minimalist;
   const colorVars = Object.entries(config.colors).map(([k, v]) => `  --color-${k}: ${v};`).join("\n");
   return `@import "tailwindcss";
 
@@ -810,8 +810,7 @@ html { scroll-behavior: smooth; }
 }
 
 function generateAdvancedLayout(theme: string): string {
-  const { STYLE_CONFIG } = require("./generator-config") as { STYLE_CONFIG: Record<string, { fontSans: string; fontHeading: string }> };
-  const config = STYLE_CONFIG[theme] || STYLE_CONFIG.minimalist;
+  const config = STYLE_CONFIG[theme as keyof typeof STYLE_CONFIG] || STYLE_CONFIG.minimalist;
   const fontFamilies = new Set<string>();
   for (const f of [config.fontSans, config.fontHeading]) {
     const match = f.match(/"([^"]+)"/);
