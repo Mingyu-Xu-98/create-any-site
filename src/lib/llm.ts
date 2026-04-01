@@ -50,12 +50,12 @@ type ProviderConfig =
 const DEFAULTS = {
   ANTHROPIC_MODEL: "claude-opus-4-20250514",
   ANTHROPIC_BASE_URL: "https://api.anthropic.com",
-  OPENROUTER_MODEL: "anthropic/claude-sonnet-4",
+  OPENROUTER_MODEL: "anthropic/claude-sonnet-4.6",
   OPENROUTER_BASE_URL: "https://openrouter.ai/api/v1",
   SILICONFLOW_MODEL: "Pro/zai-org/GLM-5",
   SILICONFLOW_BASE_URL: "https://api.siliconflow.cn/v1",
   ADVANCED_MODEL_ANTHROPIC: "claude-opus-4-20250514",
-  ADVANCED_MODEL_OPENROUTER: "anthropic/claude-sonnet-4",
+  ADVANCED_MODEL_OPENROUTER: "anthropic/claude-sonnet-4.6",
 };
 
 function env(key: string, fallback?: string): string {
