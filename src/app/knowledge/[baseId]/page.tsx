@@ -40,6 +40,7 @@ export default function KnowledgeBaseDetail() {
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState("");
+  const [uploadQueue, setUploadQueue] = useState<Array<{ id: string; name: string; status: "waiting" | "processing" | "done" | "error" }>>([]);
   const [detailTab, setDetailTab] = useState<"files" | "index">("files");
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [urlInput, setUrlInput] = useState("");
@@ -62,20 +63,34 @@ export default function KnowledgeBaseDetail() {
 
   useEffect(() => { if (session?.user) loadData(); }, [session, loadData]);
 
-  const uploadFile = async (file: File) => {
+  const uploadFiles = async (fileList: File[]) => {
+    if (fileList.length === 0) return;
+    const items = fileList.map(f => ({ id: crypto.randomUUID(), name: f.name, status: "waiting" as const }));
+    setUploadQueue(prev => [...prev, ...items]);
     setUploading(true);
-    setUploadProgress(zh ? `正在处理 ${file.name}...` : `Processing ${file.name}...`);
-    try {
-      const formData = new FormData();
-      formData.append("file", file);
-      const res = await fetch(`/api/kb/${baseId}/files`, { method: "POST", body: formData });
-      if (!res.ok) throw new Error("Upload failed");
-      await loadData();
-      setUploadProgress("");
-    } catch {
-      setUploadProgress(zh ? "上传失败" : "Upload failed");
-    } finally { setUploading(false); }
+
+    for (let i = 0; i < fileList.length; i++) {
+      const file = fileList[i];
+      const itemId = items[i].id;
+      setUploadQueue(prev => prev.map(q => q.id === itemId ? { ...q, status: "processing" } : q));
+      try {
+        const formData = new FormData();
+        formData.append("file", file);
+        const res = await fetch(`/api/kb/${baseId}/files`, { method: "POST", body: formData });
+        if (!res.ok) throw new Error("Upload failed");
+        setUploadQueue(prev => prev.map(q => q.id === itemId ? { ...q, status: "done" } : q));
+        // Auto-remove completed item after 2s
+        setTimeout(() => setUploadQueue(prev => prev.filter(q => q.id !== itemId)), 2000);
+      } catch {
+        setUploadQueue(prev => prev.map(q => q.id === itemId ? { ...q, status: "error" } : q));
+      }
+    }
+    await loadData();
+    setUploading(false);
   };
+
+  // Legacy single-file compat
+  const uploadFile = (file: File) => uploadFiles([file]);
 
   const addLink = async () => {
     if (!urlInput.trim()) return;
@@ -118,7 +133,49 @@ export default function KnowledgeBaseDetail() {
     <div className="min-h-screen bg-[#f8f9fc]">
       <Navbar />
       <div className="pt-14">
-        <div className="max-w-4xl mx-auto px-6 py-8">
+        <div className="max-w-5xl mx-auto px-6 py-8 flex gap-6">
+
+          {/* Left: Upload Queue Panel */}
+          {uploadQueue.length > 0 && (
+            <div className="w-64 shrink-0 sticky top-20 self-start">
+              <div className="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
+                <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+                  <h3 className="text-xs font-semibold text-gray-700">{zh ? "上传队列" : "Upload Queue"}</h3>
+                  <span className="text-[10px] text-gray-400">{uploadQueue.filter(q => q.status === "done").length}/{uploadQueue.length}</span>
+                </div>
+                <div className="max-h-[60vh] overflow-y-auto">
+                  {uploadQueue.map(q => (
+                    <div key={q.id} className={`px-4 py-2.5 border-b border-gray-50 last:border-0 flex items-center gap-2.5 transition-all ${q.status === "done" ? "opacity-50" : ""}`}>
+                      {q.status === "waiting" && <div className="w-4 h-4 rounded-full border-2 border-gray-200 shrink-0" />}
+                      {q.status === "processing" && <div className="w-4 h-4 border-2 border-accent/30 border-t-accent rounded-full animate-spin shrink-0" />}
+                      {q.status === "done" && <svg className="w-4 h-4 text-emerald-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>}
+                      {q.status === "error" && <svg className="w-4 h-4 text-red-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[11px] text-gray-700 truncate">{q.name}</p>
+                        <p className="text-[9px] text-gray-400">
+                          {q.status === "waiting" && (zh ? "等待中" : "Waiting")}
+                          {q.status === "processing" && (zh ? "处理中..." : "Processing...")}
+                          {q.status === "done" && (zh ? "完成" : "Done")}
+                          {q.status === "error" && (zh ? "失败" : "Failed")}
+                        </p>
+                      </div>
+                      {q.status === "error" && (
+                        <button onClick={() => setUploadQueue(prev => prev.filter(p => p.id !== q.id))} className="text-[9px] text-red-400 hover:text-red-600 shrink-0">{zh ? "移除" : "Remove"}</button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                {uploadQueue.some(q => q.status === "done" || q.status === "error") && (
+                  <div className="px-4 py-2 border-t border-gray-100">
+                    <button onClick={() => setUploadQueue(prev => prev.filter(q => q.status === "processing" || q.status === "waiting"))} className="text-[10px] text-gray-400 hover:text-gray-600">{zh ? "清除已完成" : "Clear finished"}</button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Right: Main content */}
+          <div className="flex-1 min-w-0">
 
           {/* Back + Header */}
           <button onClick={() => router.push("/knowledge")} className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 mb-4">
@@ -193,8 +250,8 @@ export default function KnowledgeBaseDetail() {
             </div>
           )}
 
-          {/* Upload progress */}
-          {uploadProgress && (
+          {/* Upload progress (inline fallback for link uploads) */}
+          {uploadProgress && !uploadQueue.length && (
             <div className="mb-4 rounded-lg border border-accent/20 bg-accent/5 px-4 py-2 flex items-center gap-2 text-sm text-accent">
               {uploading && <span className="w-4 h-4 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />}
               {uploadProgress}
@@ -345,6 +402,9 @@ export default function KnowledgeBaseDetail() {
             );
           })()}
 
+          </div>{/* end flex-1 main content */}
+        </div>{/* end flex row */}
+
           {/* Upload Modal */}
           {showUploadModal && (
             <div className="fixed inset-0 z-[200] flex items-center justify-center p-4" onClick={() => setShowUploadModal(false)}>
@@ -366,7 +426,7 @@ export default function KnowledgeBaseDetail() {
                     <p className="text-xs text-gray-400">PDF, DOCX, TXT, MD, PNG, JPG</p>
                     <label className="mt-3 inline-flex px-4 py-2 rounded-lg bg-accent text-white text-sm cursor-pointer hover:bg-accent/90">
                       {zh ? "选择文件" : "Choose"}
-                      <input type="file" className="hidden" accept=".pdf,.docx,.doc,.txt,.md,.png,.jpg,.jpeg,.gif,.webp,.svg,.zip" multiple onChange={e => { if (e.target.files) Array.from(e.target.files).forEach(uploadFile); setShowUploadModal(false); }} />
+                      <input type="file" className="hidden" accept=".pdf,.docx,.doc,.txt,.md,.png,.jpg,.jpeg,.gif,.webp,.svg,.zip" multiple onChange={e => { if (e.target.files) uploadFiles(Array.from(e.target.files)); setShowUploadModal(false); }} />
                     </label>
                   </div>
                   {/* Link input */}
@@ -406,7 +466,6 @@ export default function KnowledgeBaseDetail() {
             </div>
           )}
 
-        </div>
       </div>
     </div>
   );
