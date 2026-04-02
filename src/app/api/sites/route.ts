@@ -29,6 +29,8 @@ export async function GET() {
       publishedUrl: sites.publishedUrl,
       publishedAt: sites.publishedAt,
       lastBuiltAt: sites.lastBuiltAt,
+      isPublic: sites.isPublic,
+      publicDesc: sites.publicDesc,
       createdAt: sites.createdAt,
       updatedAt: sites.updatedAt,
     })
