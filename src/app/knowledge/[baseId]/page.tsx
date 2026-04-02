@@ -473,7 +473,7 @@ export default function KnowledgeBaseDetail() {
                       <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
                     </div>
                     <p className="text-sm text-gray-600 mb-1">{zh ? "拖拽文件或点击上传" : "Drop or click to upload"}</p>
-                    <p className="text-xs text-gray-400">PDF, DOCX, TXT, MD, PNG, JPG</p>
+                    <p className="text-xs text-gray-400">PDF, DOCX, TXT, MD, PNG, JPG, ZIP · {zh ? "单文件最大 50MB" : "Max 50MB per file"}</p>
                     <label className="mt-3 inline-flex px-4 py-2 rounded-lg bg-accent text-white text-sm cursor-pointer hover:bg-accent/90">
                       {zh ? "选择文件" : "Choose"}
                       <input type="file" className="hidden" accept=".pdf,.docx,.doc,.txt,.md,.png,.jpg,.jpeg,.gif,.webp,.svg,.zip" multiple onChange={e => { if (e.target.files) uploadFiles(Array.from(e.target.files)); setShowUploadModal(false); }} />
