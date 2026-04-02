@@ -10,6 +10,8 @@ import { getChatProviderSummary, hasChatProvider } from "@/lib/llm";
 const CODE_CONTEXT_FILES = [
   "src/app/page.tsx", "src/app/globals.css", "src/app/layout.tsx",
   "src/i18n/translations.ts", "src/components/LanguageProvider.tsx",
+  "src/components/SharePoster.tsx", "src/components/CartoonAssistant.tsx",
+  "src/components/ChatBot.tsx", "src/components/ProjectDemo.tsx",
   "public/game.js", "public/main.js", "package.json", "next.config.mjs",
 ];
 
@@ -76,7 +78,7 @@ export async function POST(req: NextRequest) {
           const codeFiles: string[] = [];
           let totalChars = 0;
           for (const key of CODE_CONTEXT_FILES) {
-            if (fileMap[key] && totalChars + fileMap[key].length < 40000) {
+            if (fileMap[key] && totalChars + fileMap[key].length < 60000) {
               codeFiles.push(`### ${key}\n\`\`\`\n${fileMap[key]}\n\`\`\``);
               totalChars += fileMap[key].length;
             }
@@ -92,7 +94,7 @@ export async function POST(req: NextRequest) {
               !key.endsWith(".json")
             ) continue;
             if (!key.startsWith("src/") && !key.startsWith("public/") && key !== "package.json" && !key.startsWith("next.config")) continue;
-            if (totalChars + content.length < 40000) { codeFiles.push(`### ${key}\n\`\`\`\n${content}\n\`\`\``); totalChars += content.length; }
+            if (totalChars + content.length < 60000) { codeFiles.push(`### ${key}\n\`\`\`\n${content}\n\`\`\``); totalChars += content.length; }
           }
           if (codeFiles.length > 0) { codeContext = codeFiles.join("\n\n"); hasSiteCode = true; }
         } catch {}
