@@ -125,7 +125,10 @@ export default function KnowledgeBaseDetail() {
         const formData = new FormData();
         formData.append("file", file);
         const res = await fetch(`/api/kb/${baseId}/files`, { method: "POST", body: formData });
-        if (!res.ok) throw new Error("Upload failed");
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.error || `Upload failed (${res.status})`);
+        }
         setUploadQueue(prev => prev.map(q => q.id === itemId ? { ...q, status: "done" } : q));
         // Auto-remove completed item after 2s
         setTimeout(() => setUploadQueue(prev => prev.filter(q => q.id !== itemId)), 2000);

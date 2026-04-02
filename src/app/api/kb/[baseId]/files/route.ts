@@ -16,6 +16,7 @@ import { saveUserImage, isImageFile } from "@/lib/asset-store";
  */
 export async function POST(req: NextRequest, { params }: { params: Promise<{ baseId: string }> }) {
   const { baseId } = await params;
+  try {
   const session = await auth();
   if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
@@ -175,6 +176,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ bas
   await regenerateIndex(baseId, session.user.id);
 
   return NextResponse.json({ fileId, name: fileName, description, keywords, contentLength: rawContent.length });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Unknown error";
+    console.error("[KB upload error]", msg, err);
+    return NextResponse.json({ error: `Upload failed: ${msg}` }, { status: 500 });
+  }
 }
 
 // ---- Helpers ----
