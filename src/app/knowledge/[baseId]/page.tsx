@@ -276,48 +276,7 @@ export default function KnowledgeBaseDetail() {
               </div>
             );
             return (
-              <div className="flex gap-5 items-start">
-                {/* Left: Upload queue — aligned with first document */}
-                {uploadQueue.length > 0 && (
-                  <div className="w-56 shrink-0 sticky top-20">
-                    <div className="rounded-xl border border-accent/15 bg-white shadow-sm overflow-hidden">
-                      <div className="px-3 py-2 border-b border-gray-100 flex items-center justify-between">
-                        <div className="flex items-center gap-1.5">
-                          {uploadQueue.some(q => q.status === "processing") && <div className="w-3 h-3 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />}
-                          <h3 className="text-[11px] font-semibold text-gray-600">{zh ? "上传队列" : "Uploads"}</h3>
-                        </div>
-                        <span className="text-[9px] text-gray-400">{uploadQueue.filter(q => q.status === "done").length}/{uploadQueue.length}</span>
-                      </div>
-                      <div className="max-h-[50vh] overflow-y-auto divide-y divide-gray-50">
-                        {uploadQueue.map(q => (
-                          <div key={q.id} className={`px-3 py-2 flex items-center gap-2 ${q.status === "done" ? "opacity-40" : ""}`}>
-                            {q.status === "waiting" && <div className="w-3 h-3 rounded-full border-2 border-gray-200 shrink-0" />}
-                            {q.status === "processing" && <div className="w-3 h-3 border-2 border-accent/30 border-t-accent rounded-full animate-spin shrink-0" />}
-                            {q.status === "done" && <svg className="w-3 h-3 text-emerald-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>}
-                            {q.status === "error" && <svg className="w-3 h-3 text-red-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>}
-                            <div className="flex-1 min-w-0">
-                              <p className="text-[10px] text-gray-700 truncate">{q.name}</p>
-                              <p className="text-[9px] text-gray-400">
-                                {q.status === "waiting" && (zh ? "等待中" : "Waiting")}
-                                {q.status === "processing" && (zh ? "处理中..." : "Processing...")}
-                                {q.status === "done" && (zh ? "完成" : "Done")}
-                                {q.status === "error" && (zh ? "失败" : "Failed")}
-                              </p>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                      {uploadQueue.some(q => q.status === "done" || q.status === "error") && (
-                        <div className="px-3 py-1.5 border-t border-gray-100">
-                          <button onClick={() => setUploadQueue(prev => prev.filter(q => q.status === "processing" || q.status === "waiting"))} className="text-[9px] text-gray-400 hover:text-gray-600">{zh ? "清除" : "Clear"}</button>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                {/* Right: File sections */}
-                <div className="flex-1 min-w-0 space-y-6">
+              <div className="space-y-6">
                 {/* Documents section */}
                 {docs.length > 0 && (
                   <div>
@@ -326,7 +285,46 @@ export default function KnowledgeBaseDetail() {
                       <h3 className="text-sm font-semibold text-gray-700">{zh ? "文档" : "Documents"} <span className="text-gray-400 font-normal">({docs.length})</span></h3>
                       <svg className={`w-4 h-4 text-gray-400 ml-auto transition-transform ${collapsed.docs ? "-rotate-90" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
                     </button>
-                    {!collapsed.docs && <div className="space-y-2">
+                    {!collapsed.docs && <div className="flex gap-4 items-start">
+                      {/* Upload queue sidebar — aligned with first card */}
+                      {uploadQueue.length > 0 && (
+                        <div className="w-52 shrink-0 sticky top-20">
+                          <div className="rounded-xl border border-accent/15 bg-white shadow-sm overflow-hidden">
+                            <div className="px-3 py-2 border-b border-gray-100 flex items-center justify-between">
+                              <div className="flex items-center gap-1.5">
+                                {uploadQueue.some(q => q.status === "processing") && <div className="w-3 h-3 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />}
+                                <h3 className="text-[11px] font-semibold text-gray-600">{zh ? "上传队列" : "Uploads"}</h3>
+                              </div>
+                              <span className="text-[9px] text-gray-400">{uploadQueue.filter(q => q.status === "done").length}/{uploadQueue.length}</span>
+                            </div>
+                            <div className="max-h-[50vh] overflow-y-auto divide-y divide-gray-50">
+                              {uploadQueue.map(q => (
+                                <div key={q.id} className={`px-3 py-2 flex items-center gap-2 ${q.status === "done" ? "opacity-40" : ""}`}>
+                                  {q.status === "waiting" && <div className="w-3 h-3 rounded-full border-2 border-gray-200 shrink-0" />}
+                                  {q.status === "processing" && <div className="w-3 h-3 border-2 border-accent/30 border-t-accent rounded-full animate-spin shrink-0" />}
+                                  {q.status === "done" && <svg className="w-3 h-3 text-emerald-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>}
+                                  {q.status === "error" && <svg className="w-3 h-3 text-red-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>}
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-[10px] text-gray-700 truncate">{q.name}</p>
+                                    <p className="text-[9px] text-gray-400">
+                                      {q.status === "waiting" && (zh ? "等待中" : "Waiting")}
+                                      {q.status === "processing" && (zh ? "处理中..." : "Processing...")}
+                                      {q.status === "done" && (zh ? "完成" : "Done")}
+                                      {q.status === "error" && (zh ? "失败" : "Failed")}
+                                    </p>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                            {uploadQueue.some(q => q.status === "done" || q.status === "error") && (
+                              <div className="px-3 py-1.5 border-t border-gray-100">
+                                <button onClick={() => setUploadQueue(prev => prev.filter(q => q.status === "processing" || q.status === "waiting"))} className="text-[9px] text-gray-400 hover:text-gray-600">{zh ? "清除" : "Clear"}</button>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                      <div className="flex-1 min-w-0 space-y-2">
                       {docs.map(f => {
                         const kw: string[] = f.keywords ? JSON.parse(f.keywords) : [];
                         const typeIcon = f.type === "link" ? "🔗" : f.type === "pdf" ? "📄" : "📝";
@@ -357,6 +355,7 @@ export default function KnowledgeBaseDetail() {
                           </div>
                         );
                       })}
+                      </div>{/* end flex-1 doc cards */}
                     </div>}
                   </div>
                 )}
@@ -445,7 +444,6 @@ export default function KnowledgeBaseDetail() {
                     </div>}
                   </div>
                 )}
-                </div>{/* end flex-1 file sections */}
               </div>
             );
           })()}
