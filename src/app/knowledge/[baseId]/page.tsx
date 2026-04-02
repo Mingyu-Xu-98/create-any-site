@@ -269,7 +269,7 @@ export default function KnowledgeBaseDetail() {
             const docs = files.filter(f => f.type !== "image" && f.type !== "link");
             const links = files.filter(f => f.type === "link");
             const images = files.filter(f => f.type === "image");
-            if (files.length === 0) return (
+            if (files.length === 0 && uploadQueue.length === 0) return (
               <div className="text-center py-20">
                 <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-gray-100 flex items-center justify-center"><span className="text-2xl opacity-30">📁</span></div>
                 <p className="text-gray-500">{zh ? "暂无文件。点击上方添加。" : "No files yet. Add some above."}</p>
