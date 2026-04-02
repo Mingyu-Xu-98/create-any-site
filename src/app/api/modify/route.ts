@@ -121,12 +121,13 @@ export async function POST(req: NextRequest) {
     const session = await auth();
     if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    const { siteId, changes, spec, prd, knowledgeRefs } = await req.json() as {
+    const { siteId, changes, spec, prd, knowledgeRefs, knowledgeBaseIds } = await req.json() as {
       siteId: string;
       changes: FileChange[];
       spec?: { sections?: Array<{ id?: string; type?: string; enabled?: boolean }> };
       prd?: unknown;
       knowledgeRefs?: unknown[];
+      knowledgeBaseIds?: string[];
     };
     if (!siteId || !Array.isArray(changes) || changes.length === 0) {
       return NextResponse.json({ error: "siteId and changes required" }, { status: 400 });

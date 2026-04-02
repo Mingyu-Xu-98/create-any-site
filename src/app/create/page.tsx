@@ -139,7 +139,7 @@ function CreatePageInner() {
   // Knowledge Bases (new KB system)
   interface KBBase { id: string; name: string; description: string | null; fileCount: number | null; totalChars: number | null }
   const [kbBases, setKbBases] = useState<KBBase[]>([]);
-  const [selectedBaseId, setSelectedBaseId] = useState<string | null>(null);
+  const [selectedBaseIds, setSelectedBaseIds] = useState<string[]>([]);
 
   // Knowledge Groups
   interface KGGroup { id: string; name: string; description: string | null; tags: string[]; sourceFile: string | null; sourceType: string | null; indexMd: string | null; itemCount: number; selectedCount: number; categoryCounts: Record<string, number> }
@@ -612,7 +612,7 @@ function CreatePageInner() {
         body: JSON.stringify({
           messages: newMsgs.map(m => ({ role: m.role, content: m.content })),
           knowledge: items.filter(i => i.selected),
-          knowledgeBaseId: selectedBaseId,
+          knowledgeBaseIds: selectedBaseIds,
           currentSelections: {},
           loadedSkills: loadedSkillIds,
           siteId: siteIdRef.current,
@@ -815,7 +815,7 @@ function CreatePageInner() {
       const r = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ data, selections, skillIds, siteId: siteIdRef.current, prd: effectivePrd, spec, knowledgeRefs: getSelectedResourceRefs(), knowledgeBaseId: selectedBaseId }),
+        body: JSON.stringify({ data, selections, skillIds, siteId: siteIdRef.current, prd: effectivePrd, spec, knowledgeRefs: getSelectedResourceRefs(), knowledgeBaseIds: selectedBaseIds }),
       });
       await handleGenerateResult(r, zh, theme, data);
     } catch (err) {
@@ -913,7 +913,7 @@ function CreatePageInner() {
       const r = await fetch("/api/modify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ siteId: siteIdRef.current, changes: action.changes, spec, prd: nextPrd || prdData, knowledgeRefs: getSelectedResourceRefs(), knowledgeBaseId: selectedBaseId }),
+        body: JSON.stringify({ siteId: siteIdRef.current, changes: action.changes, spec, prd: nextPrd || prdData, knowledgeRefs: getSelectedResourceRefs(), knowledgeBaseIds: selectedBaseIds }),
       });
       const d = await readJsonResponse<{
         ok?: boolean;
@@ -1221,8 +1221,8 @@ function CreatePageInner() {
                 <div className="relative">
                   <button onClick={() => setShowKnowledgeSelector(!showKnowledgeSelector)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-100 text-[10px] text-gray-400 hover:bg-gray-200/50 transition-all">
                     <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg>
-                    {selectedBaseId
-                      ? (kbBases.find(b => b.id === selectedBaseId)?.name || (locale === "zh" ? "知识库" : "KB"))
+                    {selectedBaseIds.length > 0
+                      ? (selectedBaseIds.length === 1 ? (kbBases.find(b => b.id === selectedBaseIds[0])?.name || (locale === "zh" ? "知识库" : "KB")) : `${selectedBaseIds.length} ${locale === "zh" ? "个知识库" : "KBs"}`)
                       : (locale === "zh" ? `知识库 (${selectedCount}/${items.length})` : `Knowledge (${selectedCount}/${items.length})`)}
                     <svg className={`w-2.5 h-2.5 transition-transform ${showKnowledgeSelector ? "rotate-180" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
                   </button>
@@ -1237,9 +1237,9 @@ function CreatePageInner() {
                         <div className="p-2 border-b border-gray-100">
                           <p className="text-[9px] text-gray-400 px-2 mb-1">{locale === "zh" ? "知识库" : "Knowledge Bases"}</p>
                           {kbBases.map(kb => (
-                            <button key={kb.id} onClick={() => setSelectedBaseId(selectedBaseId === kb.id ? null : kb.id)} className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-left transition-all ${selectedBaseId === kb.id ? "bg-accent/10" : "hover:bg-gray-100"}`}>
-                              <div className={`w-4 h-4 rounded border shrink-0 flex items-center justify-center ${selectedBaseId === kb.id ? "bg-accent border-accent" : "border-gray-300"}`}>
-                                {selectedBaseId === kb.id && <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
+                            <button key={kb.id} onClick={() => setSelectedBaseIds(prev => prev.includes(kb.id) ? prev.filter(id => id !== kb.id) : [...prev, kb.id])} className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-left transition-all ${selectedBaseIds.includes(kb.id) ? "bg-accent/10" : "hover:bg-gray-100"}`}>
+                              <div className={`w-4 h-4 rounded border shrink-0 flex items-center justify-center ${selectedBaseIds.includes(kb.id) ? "bg-accent border-accent" : "border-gray-300"}`}>
+                                {selectedBaseIds.includes(kb.id) && <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
                               </div>
                               <span className="text-sm">📚</span>
                               <div className="flex-1 min-w-0">
@@ -1569,7 +1569,7 @@ function CreatePageInner() {
                     </button>
                     <button onClick={() => setPreviewTab("resources")} className={`px-2.5 py-1 rounded-full text-[10px] font-medium transition-all ${previewTab === "resources" ? "bg-accent/10 text-accent ring-1 ring-accent/20" : "text-gray-500 hover:bg-gray-200/60"}`}>
                       {locale === "zh" ? "资源" : "Resources"}
-                      {(siteResources.length > 0 || selectedBaseId) && previewTab !== "resources" && <span className="ml-1 w-1.5 h-1.5 rounded-full bg-accent inline-block animate-pulse" />}
+                      {(siteResources.length > 0 || selectedBaseIds.length > 0) && previewTab !== "resources" && <span className="ml-1 w-1.5 h-1.5 rounded-full bg-accent inline-block animate-pulse" />}
                     </button>
                     <span className="border-l border-gray-200/60 mx-0.5" />
                     {siteStatus === "published" ? (
@@ -1662,22 +1662,25 @@ function CreatePageInner() {
                   </div>
                   <div className="p-5 space-y-4">
                     {/* Knowledge Base source */}
-                    {selectedBaseId && (
+                    {selectedBaseIds.length > 0 && (
                       <div className="rounded-xl border border-accent/20 bg-accent/5 p-4">
                         <div className="flex items-center gap-2 mb-2">
                           <span className="text-sm">📚</span>
-                          <p className="text-xs font-medium text-gray-800">{locale === "zh" ? "知识库" : "Knowledge Base"}</p>
+                          <p className="text-xs font-medium text-gray-800">{locale === "zh" ? "关联知识库" : "Linked KBs"} ({selectedBaseIds.length})</p>
                         </div>
-                        <p className="text-[11px] text-gray-600">
-                          {kbBases.find(b => b.id === selectedBaseId)?.name || selectedBaseId}
-                        </p>
-                        <p className="mt-1 text-[10px] text-gray-500">
-                          {kbBases.find(b => b.id === selectedBaseId)?.fileCount || 0} {locale === "zh" ? "个文件" : "files"}
-                          {" · "}
-                          {((kbBases.find(b => b.id === selectedBaseId)?.totalChars || 0)).toLocaleString()} {locale === "zh" ? "字" : "chars"}
-                        </p>
-                        <a href={`/knowledge/${selectedBaseId}`} target="_blank" rel="noopener noreferrer" className="mt-2 inline-block text-[10px] text-accent hover:underline">
-                          {locale === "zh" ? "管理知识库 →" : "Manage KB →"}
+                        <div className="space-y-1.5">
+                          {selectedBaseIds.map(bid => {
+                            const kb = kbBases.find(b => b.id === bid);
+                            return (
+                              <div key={bid} className="flex items-center justify-between text-[11px]">
+                                <span className="text-gray-600 truncate">{kb?.name || bid}</span>
+                                <span className="text-[9px] text-gray-400 shrink-0 ml-2">{kb?.fileCount || 0}{locale === "zh" ? "文件" : "f"}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <a href="/knowledge" target="_blank" rel="noopener noreferrer" className="mt-2 inline-block text-[10px] text-accent hover:underline">
+                          {locale === "zh" ? "管理知识库 →" : "Manage KBs →"}
                         </a>
                       </div>
                     )}
@@ -1706,7 +1709,7 @@ function CreatePageInner() {
                         </div>
                       </div>
                     )}
-                    {!selectedBaseId && siteResources.length === 0 && (
+                    {selectedBaseIds.length === 0 && siteResources.length === 0 && (
                       <div className="text-center py-8">
                         <p className="text-3xl mb-2">📭</p>
                         <p className="text-[11px] text-gray-500">

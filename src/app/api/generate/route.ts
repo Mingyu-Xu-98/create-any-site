@@ -35,9 +35,11 @@ export async function POST(req: NextRequest) {
       spec?: import("@/lib/site-spec").SiteSpec;
       knowledgeRefs?: unknown[];
       knowledgeBaseId?: string;
+      knowledgeBaseIds?: string[];
     };
 
     const { data, selections, siteId: inputSiteId, siteName, prd, spec, knowledgeRefs, knowledgeBaseId } = body;
+    const knowledgeBaseIds: string[] = Array.isArray(body.knowledgeBaseIds) ? body.knowledgeBaseIds : (knowledgeBaseId ? [knowledgeBaseId] : []);
     if (!data || !selections) {
       return NextResponse.json({ error: "Missing data or selections" }, { status: 400 });
     }
@@ -101,7 +103,8 @@ export async function POST(req: NextRequest) {
         prd: prd || null,
         previewBaseUrl,
         knowledgeRefs: Array.isArray(knowledgeRefs) ? knowledgeRefs : [],
-        knowledgeBaseId: knowledgeBaseId || undefined,
+        knowledgeBaseId: knowledgeBaseIds[0] || undefined,
+        knowledgeBaseIds,
         userId: session.user.id,
       }),
       createdAt: now,

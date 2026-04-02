@@ -644,6 +644,7 @@ export interface RunSiteBuildInput {
   spec?: import("./site-spec").SiteSpec | null;
   previewBaseUrl: string;
   knowledgeBaseId?: string;
+  knowledgeBaseIds?: string[];
   requestId: string;
   onProgress?: (step: string) => Promise<void>;
 }
@@ -952,15 +953,24 @@ export async function runSiteBuild(input: RunSiteBuildInput): Promise<RunSiteBui
       siteType: selections.siteType,
     };
 
-    // Load knowledge base content (raw files, not just summaries)
+    // Load knowledge base content (raw files, not just summaries) — supports multiple KBs
     let kbContent = data.chatbotContext || "";
-    if (input.userId) {
+    const allBaseIds = input.knowledgeBaseIds?.length ? input.knowledgeBaseIds : (input.knowledgeBaseId ? [input.knowledgeBaseId] : []);
+    if (input.userId && allBaseIds.length > 0) {
       try {
         const { loadFullKBContext, formatFilesForPrompt } = await import("./kb-loader");
-        const kbCtx = await loadFullKBContext(input.userId, input.knowledgeBaseId);
-        if (kbCtx.fileCount > 0) {
-          kbContent = `## Knowledge Base Index\n${kbCtx.indexContent}\n\n## File Contents\n${formatFilesForPrompt(kbCtx.fileContents)}`;
-          logger.info("generate", `[${requestId}] Loaded ${kbCtx.fileCount} KB files for Code Agent`);
+        const parts: string[] = [];
+        let totalFiles = 0;
+        for (const bid of allBaseIds) {
+          const kbCtx = await loadFullKBContext(input.userId, bid);
+          if (kbCtx.fileCount > 0) {
+            parts.push(`## KB: ${kbCtx.indexContent.split("\\n")[0] || bid}\n${kbCtx.indexContent}\n\n${formatFilesForPrompt(kbCtx.fileContents, Math.floor(60000 / allBaseIds.length))}`);
+            totalFiles += kbCtx.fileCount;
+          }
+        }
+        if (parts.length > 0) {
+          kbContent = parts.join("\n\n---\n\n");
+          logger.info("generate", `[${requestId}] Loaded ${totalFiles} KB files from ${allBaseIds.length} bases for Code Agent`);
         }
       } catch (err) {
         logger.warn("generate", `[${requestId}] KB load failed: ${err instanceof Error ? err.message : "unknown"}`);
@@ -1085,10 +1095,21 @@ export async function runSiteBuild(input: RunSiteBuildInput): Promise<RunSiteBui
   }
 
   // Enrich knowledge.json with KB file contents for chatbot (uses new knowledge_bases system)
-  if (input.knowledgeBaseId && files["src/data/knowledge.json"]) {
+  const chatbotBaseIds = input.knowledgeBaseIds?.length ? input.knowledgeBaseIds : (input.knowledgeBaseId ? [input.knowledgeBaseId] : []);
+  if (chatbotBaseIds.length > 0 && files["src/data/knowledge.json"]) {
     try {
       const { loadFullKBContext: loadKB, formatFilesForPrompt: fmtFiles } = await import("./kb-loader");
-      const kbCtx = await loadKB(input.userId || "", input.knowledgeBaseId);
+      // Merge all selected KBs for chatbot
+      const mergedFileContents = new Map<string, { name: string; content: string; type: string }>();
+      let mergedIndex = "";
+      for (const bid of chatbotBaseIds) {
+        const kbCtx = await loadKB(input.userId || "", bid);
+        if (kbCtx.fileCount > 0) {
+          mergedIndex += (mergedIndex ? "\n\n" : "") + kbCtx.indexContent;
+          for (const [k, v] of kbCtx.fileContents) mergedFileContents.set(`${bid}:${k}`, v);
+        }
+      }
+      const kbCtx = { fileCount: mergedFileContents.size, indexContent: mergedIndex, fileContents: mergedFileContents };
       if (kbCtx.fileCount > 0) {
         const existing = JSON.parse(files["src/data/knowledge.json"]);
         for (const [, file] of kbCtx.fileContents) {

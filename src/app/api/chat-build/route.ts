@@ -99,18 +99,23 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Load knowledge base files (new KB system) if knowledgeBaseId provided
-    const knowledgeBaseId = typeof body?.knowledgeBaseId === "string" ? body.knowledgeBaseId : "";
+    // Load knowledge base files (new KB system) — supports multiple KBs
+    const rawBaseIds = body?.knowledgeBaseIds || (body?.knowledgeBaseId ? [body.knowledgeBaseId] : []);
+    const knowledgeBaseIds: string[] = (Array.isArray(rawBaseIds) ? rawBaseIds : [rawBaseIds]).filter((id: unknown): id is string => typeof id === "string" && id.length > 0);
     let kbContent = "";
     let kbFileCount = 0;
-    if (knowledgeBaseId && session?.user?.id) {
+    if (knowledgeBaseIds.length > 0 && session?.user?.id) {
       try {
         const { loadFullKBContext, formatFilesForPrompt } = await import("@/lib/kb-loader");
-        const kbCtx = await loadFullKBContext(session.user.id, knowledgeBaseId);
-        if (kbCtx.fileCount > 0) {
-          kbContent = `## Knowledge Base Index\n${kbCtx.indexContent}\n\n## File Contents\n${formatFilesForPrompt(kbCtx.fileContents, 20000)}`;
-          kbFileCount = kbCtx.fileCount;
+        const allParts: string[] = [];
+        for (const baseId of knowledgeBaseIds) {
+          const kbCtx = await loadFullKBContext(session.user.id, baseId);
+          if (kbCtx.fileCount > 0) {
+            allParts.push(`## KB: ${kbCtx.indexContent.split("\n")[0] || baseId}\n${kbCtx.indexContent}\n\n${formatFilesForPrompt(kbCtx.fileContents, Math.floor(40000 / knowledgeBaseIds.length))}`);
+            kbFileCount += kbCtx.fileCount;
+          }
         }
+        if (allParts.length > 0) kbContent = allParts.join("\n\n---\n\n");
       } catch (err) {
         logger.warn("chat-build", `[${requestId}] KB load failed: ${err instanceof Error ? err.message : "unknown"}`);
       }
