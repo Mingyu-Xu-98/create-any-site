@@ -449,7 +449,7 @@ function CreatePageInner() {
 
   // ─── Source upload ───
   const addFileSource = async (file: File, type: SourceType) => {
-    const sid = crypto.randomUUID();
+    const sid = Math.random().toString(36).slice(2) + Date.now().toString(36);
     setSources(p => [...p, { id: sid, type, name: file.name, status: "analyzing", addedAt: new Date().toISOString() }]);
     setAddMode(null);
     try {
@@ -462,7 +462,7 @@ function CreatePageInner() {
     } catch (err) { setSources(p => p.map(s => s.id === sid ? { ...s, status: "error" as const, error: err instanceof Error ? err.message : "Failed" } : s)); }
   };
   const addUrlSource = async (url: string, type: SourceType) => {
-    const sid = crypto.randomUUID();
+    const sid = Math.random().toString(36).slice(2) + Date.now().toString(36);
     setSources(p => [...p, { id: sid, type, name: url, status: "analyzing", addedAt: new Date().toISOString() }]);
     setAddMode(null); setUrlInput("");
     try {

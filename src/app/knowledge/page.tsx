@@ -168,7 +168,7 @@ export default function KnowledgePage() {
       }]);
     } catch (err) {
       setUploadingFiles(prev => [...prev, {
-        id: crypto.randomUUID(),
+        id: Math.random().toString(36).slice(2) + Date.now().toString(36),
         name: file.name,
         type: file.name.split(".").pop()?.toLowerCase() || "txt",
         status: "error",
@@ -202,7 +202,7 @@ export default function KnowledgePage() {
       }]);
     } catch {
       setUploadingFiles(prev => [...prev, {
-        id: crypto.randomUUID(),
+        id: Math.random().toString(36).slice(2) + Date.now().toString(36),
         name: url,
         type,
         status: "error",

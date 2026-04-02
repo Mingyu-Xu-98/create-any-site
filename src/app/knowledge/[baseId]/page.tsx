@@ -113,7 +113,7 @@ export default function KnowledgeBaseDetail() {
 
   const uploadFiles = async (fileList: File[]) => {
     if (fileList.length === 0) return;
-    const items = fileList.map(f => ({ id: crypto.randomUUID(), name: f.name, status: "waiting" as const }));
+    const items = fileList.map(f => ({ id: Math.random().toString(36).slice(2) + Date.now().toString(36), name: f.name, status: "waiting" as const }));
     setUploadQueue(prev => [...prev, ...items]);
     setUploading(true);
 
