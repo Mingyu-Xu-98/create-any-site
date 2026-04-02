@@ -181,7 +181,7 @@ export default function KnowledgeBaseDetail() {
     <div className="min-h-screen bg-[#f8f9fc]">
       <Navbar />
       <div className="pt-14">
-        <div className="max-w-4xl mx-auto px-6 py-8">
+        <div className="max-w-5xl mx-auto px-6 py-8">
 
           {/* Back + Header */}
           <button onClick={() => router.push("/knowledge")} className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 mb-4">
@@ -256,42 +256,6 @@ export default function KnowledgeBaseDetail() {
             </div>
           )}
 
-          {/* Upload queue — shown above file list when active */}
-          {uploadQueue.length > 0 && (
-            <div className="mb-4 rounded-xl border border-accent/15 bg-accent/3 overflow-hidden">
-              <div className="px-4 py-2.5 border-b border-accent/10 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  {uploadQueue.some(q => q.status === "processing") && <div className="w-3.5 h-3.5 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />}
-                  <h3 className="text-xs font-semibold text-gray-700">{zh ? "上传队列" : "Upload Queue"}</h3>
-                  <span className="text-[10px] text-gray-400">{uploadQueue.filter(q => q.status === "done").length}/{uploadQueue.length}</span>
-                </div>
-                {uploadQueue.some(q => q.status === "done" || q.status === "error") && (
-                  <button onClick={() => setUploadQueue(prev => prev.filter(q => q.status === "processing" || q.status === "waiting"))} className="text-[10px] text-gray-400 hover:text-gray-600">{zh ? "清除已完成" : "Clear finished"}</button>
-                )}
-              </div>
-              <div className="divide-y divide-accent/5">
-                {uploadQueue.map(q => (
-                  <div key={q.id} className={`px-4 py-2 flex items-center gap-2.5 ${q.status === "done" ? "opacity-50" : ""}`}>
-                    {q.status === "waiting" && <div className="w-3.5 h-3.5 rounded-full border-2 border-gray-200 shrink-0" />}
-                    {q.status === "processing" && <div className="w-3.5 h-3.5 border-2 border-accent/30 border-t-accent rounded-full animate-spin shrink-0" />}
-                    {q.status === "done" && <svg className="w-3.5 h-3.5 text-emerald-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>}
-                    {q.status === "error" && <svg className="w-3.5 h-3.5 text-red-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>}
-                    <span className="text-[11px] text-gray-700 truncate flex-1">{q.name}</span>
-                    <span className="text-[9px] text-gray-400 shrink-0">
-                      {q.status === "waiting" && (zh ? "等待中" : "Waiting")}
-                      {q.status === "processing" && (zh ? "处理中" : "Processing")}
-                      {q.status === "done" && (zh ? "完成" : "Done")}
-                      {q.status === "error" && (zh ? "失败" : "Failed")}
-                    </span>
-                    {q.status === "error" && (
-                      <button onClick={() => setUploadQueue(prev => prev.filter(p => p.id !== q.id))} className="text-[9px] text-red-400 hover:text-red-600 shrink-0">{zh ? "移除" : "Remove"}</button>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
           {/* Upload progress (inline fallback for link uploads) */}
           {uploadProgress && !uploadQueue.length && (
             <div className="mb-4 rounded-lg border border-accent/20 bg-accent/5 px-4 py-2 flex items-center gap-2 text-sm text-accent">
@@ -300,7 +264,7 @@ export default function KnowledgeBaseDetail() {
             </div>
           )}
 
-          {/* File list tab — grouped by type */}
+          {/* File list tab — flex: upload queue (left) + file sections (right) */}
           {detailTab === "files" && (() => {
             const docs = files.filter(f => f.type !== "image" && f.type !== "link");
             const links = files.filter(f => f.type === "link");
@@ -312,7 +276,48 @@ export default function KnowledgeBaseDetail() {
               </div>
             );
             return (
-              <div className="space-y-6">
+              <div className="flex gap-5 items-start">
+                {/* Left: Upload queue — aligned with first document */}
+                {uploadQueue.length > 0 && (
+                  <div className="w-56 shrink-0 sticky top-20">
+                    <div className="rounded-xl border border-accent/15 bg-white shadow-sm overflow-hidden">
+                      <div className="px-3 py-2 border-b border-gray-100 flex items-center justify-between">
+                        <div className="flex items-center gap-1.5">
+                          {uploadQueue.some(q => q.status === "processing") && <div className="w-3 h-3 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />}
+                          <h3 className="text-[11px] font-semibold text-gray-600">{zh ? "上传队列" : "Uploads"}</h3>
+                        </div>
+                        <span className="text-[9px] text-gray-400">{uploadQueue.filter(q => q.status === "done").length}/{uploadQueue.length}</span>
+                      </div>
+                      <div className="max-h-[50vh] overflow-y-auto divide-y divide-gray-50">
+                        {uploadQueue.map(q => (
+                          <div key={q.id} className={`px-3 py-2 flex items-center gap-2 ${q.status === "done" ? "opacity-40" : ""}`}>
+                            {q.status === "waiting" && <div className="w-3 h-3 rounded-full border-2 border-gray-200 shrink-0" />}
+                            {q.status === "processing" && <div className="w-3 h-3 border-2 border-accent/30 border-t-accent rounded-full animate-spin shrink-0" />}
+                            {q.status === "done" && <svg className="w-3 h-3 text-emerald-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>}
+                            {q.status === "error" && <svg className="w-3 h-3 text-red-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>}
+                            <div className="flex-1 min-w-0">
+                              <p className="text-[10px] text-gray-700 truncate">{q.name}</p>
+                              <p className="text-[9px] text-gray-400">
+                                {q.status === "waiting" && (zh ? "等待中" : "Waiting")}
+                                {q.status === "processing" && (zh ? "处理中..." : "Processing...")}
+                                {q.status === "done" && (zh ? "完成" : "Done")}
+                                {q.status === "error" && (zh ? "失败" : "Failed")}
+                              </p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      {uploadQueue.some(q => q.status === "done" || q.status === "error") && (
+                        <div className="px-3 py-1.5 border-t border-gray-100">
+                          <button onClick={() => setUploadQueue(prev => prev.filter(q => q.status === "processing" || q.status === "waiting"))} className="text-[9px] text-gray-400 hover:text-gray-600">{zh ? "清除" : "Clear"}</button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Right: File sections */}
+                <div className="flex-1 min-w-0 space-y-6">
                 {/* Documents section */}
                 {docs.length > 0 && (
                   <div>
@@ -440,6 +445,7 @@ export default function KnowledgeBaseDetail() {
                     </div>}
                   </div>
                 )}
+                </div>{/* end flex-1 file sections */}
               </div>
             );
           })()}
