@@ -40,7 +40,20 @@ export default function KnowledgeBaseDetail() {
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState("");
-  const [uploadQueue, setUploadQueue] = useState<Array<{ id: string; name: string; status: "waiting" | "processing" | "done" | "error" }>>([]);
+  const [uploadQueue, setUploadQueue] = useState<Array<{ id: string; name: string; status: "waiting" | "processing" | "done" | "error" }>>(() => {
+    // Restore from localStorage on mount
+    if (typeof window === "undefined") return [];
+    try {
+      const saved = localStorage.getItem(`kb-upload-queue-${baseId}`);
+      if (saved) {
+        const parsed = JSON.parse(saved) as Array<{ id: string; name: string; status: string }>;
+        // Only restore non-done items (still processing or waiting)
+        return parsed.filter(q => q.status === "processing" || q.status === "waiting")
+          .map(q => ({ ...q, status: "processing" as const }));
+      }
+    } catch {}
+    return [];
+  });
   const [detailTab, setDetailTab] = useState<"files" | "index">("files");
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [urlInput, setUrlInput] = useState("");
@@ -62,6 +75,41 @@ export default function KnowledgeBaseDetail() {
   }, [baseId]);
 
   useEffect(() => { if (session?.user) loadData(); }, [session, loadData]);
+
+  // Persist upload queue to localStorage
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const active = uploadQueue.filter(q => q.status !== "done");
+    if (active.length > 0) {
+      localStorage.setItem(`kb-upload-queue-${baseId}`, JSON.stringify(active));
+    } else {
+      localStorage.removeItem(`kb-upload-queue-${baseId}`);
+    }
+  }, [uploadQueue, baseId]);
+
+  // Poll for restored processing items — check if they've finished (appeared in file list)
+  useEffect(() => {
+    const restored = uploadQueue.filter(q => q.status === "processing");
+    if (restored.length === 0) return;
+    const interval = setInterval(async () => {
+      await loadData();
+      // Check if any restored items' names now appear in the file list
+      setUploadQueue(prev => {
+        const fileNames = new Set(files.map(f => f.name));
+        let changed = false;
+        const updated = prev.map(q => {
+          if (q.status === "processing" && fileNames.has(q.name)) {
+            changed = true;
+            setTimeout(() => setUploadQueue(p => p.filter(x => x.id !== q.id)), 2000);
+            return { ...q, status: "done" as const };
+          }
+          return q;
+        });
+        return changed ? updated : prev;
+      });
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [uploadQueue.length, files, loadData]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const uploadFiles = async (fileList: File[]) => {
     if (fileList.length === 0) return;
@@ -133,49 +181,7 @@ export default function KnowledgeBaseDetail() {
     <div className="min-h-screen bg-[#f8f9fc]">
       <Navbar />
       <div className="pt-14">
-        <div className="max-w-5xl mx-auto px-6 py-8 flex gap-6">
-
-          {/* Left: Upload Queue Panel */}
-          {uploadQueue.length > 0 && (
-            <div className="w-64 shrink-0 sticky top-20 self-start">
-              <div className="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
-                <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
-                  <h3 className="text-xs font-semibold text-gray-700">{zh ? "上传队列" : "Upload Queue"}</h3>
-                  <span className="text-[10px] text-gray-400">{uploadQueue.filter(q => q.status === "done").length}/{uploadQueue.length}</span>
-                </div>
-                <div className="max-h-[60vh] overflow-y-auto">
-                  {uploadQueue.map(q => (
-                    <div key={q.id} className={`px-4 py-2.5 border-b border-gray-50 last:border-0 flex items-center gap-2.5 transition-all ${q.status === "done" ? "opacity-50" : ""}`}>
-                      {q.status === "waiting" && <div className="w-4 h-4 rounded-full border-2 border-gray-200 shrink-0" />}
-                      {q.status === "processing" && <div className="w-4 h-4 border-2 border-accent/30 border-t-accent rounded-full animate-spin shrink-0" />}
-                      {q.status === "done" && <svg className="w-4 h-4 text-emerald-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>}
-                      {q.status === "error" && <svg className="w-4 h-4 text-red-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>}
-                      <div className="flex-1 min-w-0">
-                        <p className="text-[11px] text-gray-700 truncate">{q.name}</p>
-                        <p className="text-[9px] text-gray-400">
-                          {q.status === "waiting" && (zh ? "等待中" : "Waiting")}
-                          {q.status === "processing" && (zh ? "处理中..." : "Processing...")}
-                          {q.status === "done" && (zh ? "完成" : "Done")}
-                          {q.status === "error" && (zh ? "失败" : "Failed")}
-                        </p>
-                      </div>
-                      {q.status === "error" && (
-                        <button onClick={() => setUploadQueue(prev => prev.filter(p => p.id !== q.id))} className="text-[9px] text-red-400 hover:text-red-600 shrink-0">{zh ? "移除" : "Remove"}</button>
-                      )}
-                    </div>
-                  ))}
-                </div>
-                {uploadQueue.some(q => q.status === "done" || q.status === "error") && (
-                  <div className="px-4 py-2 border-t border-gray-100">
-                    <button onClick={() => setUploadQueue(prev => prev.filter(q => q.status === "processing" || q.status === "waiting"))} className="text-[10px] text-gray-400 hover:text-gray-600">{zh ? "清除已完成" : "Clear finished"}</button>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Right: Main content */}
-          <div className="flex-1 min-w-0">
+        <div className="max-w-4xl mx-auto px-6 py-8">
 
           {/* Back + Header */}
           <button onClick={() => router.push("/knowledge")} className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 mb-4">
@@ -247,6 +253,42 @@ export default function KnowledgeBaseDetail() {
                   <p className="text-sm text-gray-400">{zh ? "索引将在文件上传后自动生成" : "Index will be generated after uploading files"}</p>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Upload queue — shown above file list when active */}
+          {uploadQueue.length > 0 && (
+            <div className="mb-4 rounded-xl border border-accent/15 bg-accent/3 overflow-hidden">
+              <div className="px-4 py-2.5 border-b border-accent/10 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  {uploadQueue.some(q => q.status === "processing") && <div className="w-3.5 h-3.5 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />}
+                  <h3 className="text-xs font-semibold text-gray-700">{zh ? "上传队列" : "Upload Queue"}</h3>
+                  <span className="text-[10px] text-gray-400">{uploadQueue.filter(q => q.status === "done").length}/{uploadQueue.length}</span>
+                </div>
+                {uploadQueue.some(q => q.status === "done" || q.status === "error") && (
+                  <button onClick={() => setUploadQueue(prev => prev.filter(q => q.status === "processing" || q.status === "waiting"))} className="text-[10px] text-gray-400 hover:text-gray-600">{zh ? "清除已完成" : "Clear finished"}</button>
+                )}
+              </div>
+              <div className="divide-y divide-accent/5">
+                {uploadQueue.map(q => (
+                  <div key={q.id} className={`px-4 py-2 flex items-center gap-2.5 ${q.status === "done" ? "opacity-50" : ""}`}>
+                    {q.status === "waiting" && <div className="w-3.5 h-3.5 rounded-full border-2 border-gray-200 shrink-0" />}
+                    {q.status === "processing" && <div className="w-3.5 h-3.5 border-2 border-accent/30 border-t-accent rounded-full animate-spin shrink-0" />}
+                    {q.status === "done" && <svg className="w-3.5 h-3.5 text-emerald-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>}
+                    {q.status === "error" && <svg className="w-3.5 h-3.5 text-red-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>}
+                    <span className="text-[11px] text-gray-700 truncate flex-1">{q.name}</span>
+                    <span className="text-[9px] text-gray-400 shrink-0">
+                      {q.status === "waiting" && (zh ? "等待中" : "Waiting")}
+                      {q.status === "processing" && (zh ? "处理中" : "Processing")}
+                      {q.status === "done" && (zh ? "完成" : "Done")}
+                      {q.status === "error" && (zh ? "失败" : "Failed")}
+                    </span>
+                    {q.status === "error" && (
+                      <button onClick={() => setUploadQueue(prev => prev.filter(p => p.id !== q.id))} className="text-[9px] text-red-400 hover:text-red-600 shrink-0">{zh ? "移除" : "Remove"}</button>
+                    )}
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 
@@ -402,9 +444,6 @@ export default function KnowledgeBaseDetail() {
             );
           })()}
 
-          </div>{/* end flex-1 main content */}
-        </div>{/* end flex row */}
-
           {/* Upload Modal */}
           {showUploadModal && (
             <div className="fixed inset-0 z-[200] flex items-center justify-center p-4" onClick={() => setShowUploadModal(false)}>
@@ -466,6 +505,7 @@ export default function KnowledgeBaseDetail() {
             </div>
           )}
 
+        </div>
       </div>
     </div>
   );
