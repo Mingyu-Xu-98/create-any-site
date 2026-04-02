@@ -156,6 +156,8 @@ export async function POST(req: NextRequest) {
           : persistedPrd,
       currentSelections,
       useDesignAgent: Boolean(body.useDesignAgent),
+      userId: session?.user?.id,
+      siteId: siteId || undefined,
     });
 
     logger.info("chat-build", `[${requestId}] Response: ${result.content.length} chars`, {

@@ -13,6 +13,7 @@ interface BuildPayload {
   previewBaseUrl: string;
   knowledgeRefs?: unknown[];
   knowledgeBaseId?: string;
+  knowledgeBaseIds?: string[];
   userId?: string;
 }
 
@@ -99,6 +100,7 @@ export async function processBuildJob(jobId: string, options?: { alreadyClaimed?
       spec: payload.spec || null,
       previewBaseUrl: payload.previewBaseUrl,
       knowledgeBaseId: payload.knowledgeBaseId,
+      knowledgeBaseIds: payload.knowledgeBaseIds,
       requestId,
       onProgress: (step: string) => updateBuildStep(jobId, step),
     });

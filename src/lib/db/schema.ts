@@ -233,3 +233,41 @@ export const templates = sqliteTable("templates", {
   createdAt: text("created_at").$defaultFn(() => new Date().toISOString()),
   updatedAt: text("updated_at").$defaultFn(() => new Date().toISOString()),
 });
+
+// ---- User Quotas (usage limits per user) ----
+
+export const userQuotas = sqliteTable("user_quotas", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  userId: text("user_id").notNull().unique().references(() => users.id, { onDelete: "cascade" }),
+  plan: text("plan").notNull().default("free"), // free | pro | enterprise | custom
+  monthlyTokenLimit: integer("monthly_token_limit").notNull().default(500000),
+  monthlyBuildLimit: integer("monthly_build_limit").notNull().default(20),
+  storageLimitMb: integer("storage_limit_mb").notNull().default(100),
+  currentMonthTokens: integer("current_month_tokens").notNull().default(0),
+  currentMonthBuilds: integer("current_month_builds").notNull().default(0),
+  currentStorageMb: integer("current_storage_mb").notNull().default(0),
+  periodStart: text("period_start").$defaultFn(() => new Date().toISOString()),
+  metadata: text("metadata"), // JSON
+  createdAt: text("created_at").$defaultFn(() => new Date().toISOString()),
+  updatedAt: text("updated_at").$defaultFn(() => new Date().toISOString()),
+});
+
+// ---- Usage Logs (per-call token tracking) ----
+
+export const usageLogs = sqliteTable("usage_logs", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  action: text("action").notNull(), // llm_call | build | file_upload | entity_extract | relation_infer
+  provider: text("provider"),       // siliconflow | openrouter | anthropic
+  model: text("model"),             // Pro/zai-org/GLM-5 etc.
+  inputTokens: integer("input_tokens").default(0),
+  outputTokens: integer("output_tokens").default(0),
+  totalTokens: integer("total_tokens").default(0),
+  durationMs: integer("duration_ms"),
+  label: text("label"),             // chat-build, compile-spec, code-agent, kb-describe ...
+  siteId: text("site_id"),
+  status: text("status").default("success"), // success | error
+  errorMessage: text("error_message"),
+  metadata: text("metadata"),       // JSON
+  createdAt: text("created_at").$defaultFn(() => new Date().toISOString()),
+});

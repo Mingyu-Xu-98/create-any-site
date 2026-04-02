@@ -662,7 +662,7 @@ export interface RunSiteBuildResult {
  * Use lightweight AI to extract structured data from KB content.
  * Falls back to regex if AI call fails.
  */
-async function enrichWorkspaceDataFromKB(data: WorkspaceData, kbContent: string): Promise<Partial<WorkspaceData>> {
+async function enrichWorkspaceDataFromKB(data: WorkspaceData, kbContent: string, userId?: string): Promise<Partial<WorkspaceData>> {
   const text = kbContent.slice(0, 40000);
 
   // Try AI extraction first
@@ -671,6 +671,7 @@ async function enrichWorkspaceDataFromKB(data: WorkspaceData, kbContent: string)
     const result = await chatCompletion({
       requestId: "kb-extract",
       label: "kb-content-extract",
+      userId,
       systemPrompt: `You extract structured personal/portfolio data from text. Output ONLY valid JSON, no markdown fences. The JSON must match this exact schema:
 {
   "name": "person's full name (original language)",
@@ -979,14 +980,14 @@ export async function runSiteBuild(input: RunSiteBuildInput): Promise<RunSiteBui
 
     logger.info("generate", `[${requestId}] Advanced mode: running Code Agent (${kbContent.length} chars knowledge)...`);
     const codeResult = await runCodeAgent(
-      { requestId, messages: [], knowledgeContext: kbContent, knowledgeSummary: "", knowledgeGroupIndex: "", skillCatalog: "", activatedContext: "", codeContext: "", hasSiteCode: false, currentPrd: "", currentSelections: selections },
+      { requestId, messages: [], knowledgeContext: kbContent, knowledgeSummary: "", knowledgeGroupIndex: "", skillCatalog: "", activatedContext: "", codeContext: "", hasSiteCode: false, currentPrd: "", currentSelections: selections, userId: input.userId, siteId: input.siteId },
       designPlan,
       assetCss,
     );
 
     // Enrich WorkspaceData from KB content when legacy items are empty
     if (kbContent && (!data.name || data.name === "Your Name" || data.name === "")) {
-      const enriched = await enrichWorkspaceDataFromKB(data, kbContent);
+      const enriched = await enrichWorkspaceDataFromKB(data, kbContent, input.userId);
       Object.assign(data, enriched);
       logger.info("generate", `[${requestId}] Enriched WorkspaceData from KB: name="${data.name}", bio=${data.bio?.length || 0} chars, projects=${data.projects?.length || 0}`);
     }
@@ -1188,6 +1189,17 @@ export async function runSiteBuild(input: RunSiteBuildInput): Promise<RunSiteBui
     : `${previewBaseUrl.replace(/\/+$/, "")}/${siteId}`;
   const verification = await runVerification(siteDir, files, spec || undefined);
   const previewReachable = await probePreviewUrl(url);
+
+  // Record build event
+  if (input.userId) {
+    import("./usage").then(({ recordUsage }) => {
+      recordUsage(input.userId!, {
+        action: "build",
+        label: "site-generate",
+        siteId: input.siteId || siteId,
+      }).catch(() => {});
+    });
+  }
 
   return { url, fileMap: files, verification, previewReachable };
 }

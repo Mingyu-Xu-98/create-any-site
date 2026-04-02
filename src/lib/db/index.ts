@@ -215,6 +215,43 @@ function initDb() {
       updated_at TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS user_quotas (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+      plan TEXT NOT NULL DEFAULT 'free',
+      monthly_token_limit INTEGER NOT NULL DEFAULT 500000,
+      monthly_build_limit INTEGER NOT NULL DEFAULT 20,
+      storage_limit_mb INTEGER NOT NULL DEFAULT 100,
+      current_month_tokens INTEGER NOT NULL DEFAULT 0,
+      current_month_builds INTEGER NOT NULL DEFAULT 0,
+      current_storage_mb INTEGER NOT NULL DEFAULT 0,
+      period_start TEXT,
+      metadata TEXT,
+      created_at TEXT,
+      updated_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS usage_logs (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      action TEXT NOT NULL,
+      provider TEXT,
+      model TEXT,
+      input_tokens INTEGER DEFAULT 0,
+      output_tokens INTEGER DEFAULT 0,
+      total_tokens INTEGER DEFAULT 0,
+      duration_ms INTEGER,
+      label TEXT,
+      site_id TEXT,
+      status TEXT DEFAULT 'success',
+      error_message TEXT,
+      metadata TEXT,
+      created_at TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_usage_logs_user_time ON usage_logs(user_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_usage_logs_action ON usage_logs(action, created_at);
+
     CREATE TABLE IF NOT EXISTS templates (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,

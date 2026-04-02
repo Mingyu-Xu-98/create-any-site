@@ -96,7 +96,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ bas
         }
 
         // Generate description for this file
-        const desc = await generateFileDescription(entryName, entryType, entryContent.slice(0, 3000));
+        const desc = await generateFileDescription(entryName, entryType, entryContent.slice(0, 3000), session.user.id);
 
         const entryFileId = crypto.randomUUID();
         await db.insert(knowledgeFiles).values({
@@ -152,7 +152,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ bas
   }
 
   // AI: generate one-line description + keywords (lightweight, fast)
-  const { description, keywords } = await generateFileDescription(fileName, fileType, rawContent.slice(0, 3000));
+  const { description, keywords } = await generateFileDescription(fileName, fileType, rawContent.slice(0, 3000), session.user.id);
 
   // Save file record
   const fileId = crypto.randomUUID();
@@ -222,6 +222,7 @@ async function generateFileDescription(
   fileName: string,
   fileType: string,
   contentPreview: string,
+  userId?: string,
 ): Promise<{ description: string; keywords: string[] }> {
   const apiKey = process.env.SILICONFLOW_API_KEY;
   if (!apiKey || !contentPreview || contentPreview.length < 20) {
@@ -246,6 +247,21 @@ async function generateFileDescription(
     if (res.ok) {
       const data = await res.json();
       const text = data.choices?.[0]?.message?.content?.trim() || "";
+      const tokenUsage = data.usage;
+      // Record token usage
+      if (userId && tokenUsage) {
+        import("@/lib/usage").then(({ recordUsage }) => {
+          recordUsage(userId, {
+            action: "llm_call",
+            provider: "siliconflow",
+            model: "Pro/zai-org/GLM-5",
+            inputTokens: tokenUsage.prompt_tokens || 0,
+            outputTokens: tokenUsage.completion_tokens || 0,
+            totalTokens: tokenUsage.total_tokens || 0,
+            label: "kb-describe",
+          }).catch(() => {});
+        });
+      }
       const json = JSON.parse(text.replace(/```json\s*\n?|\n?```/g, ""));
       return {
         description: json.description || fileName,

@@ -37,6 +37,10 @@ interface ChatCompletionInput {
   temperature?: number;
   maxTokens?: number;
   useAdvancedModel?: boolean;
+  /** Pass userId to auto-record token usage */
+  userId?: string;
+  /** Optional site context for usage tracking */
+  siteId?: string;
 }
 
 interface ChatCompletionResult {
@@ -241,11 +245,34 @@ export async function chatCompletion(input: ChatCompletionInput): Promise<ChatCo
     { role: "user", content: input.userPrompt },
   ];
 
+  const startTime = Date.now();
+
   // Try each provider in chain order
   let lastError: Error | null = null;
   for (const config of chain) {
     try {
-      return await callProvider(config, input, messages);
+      const result = await callProvider(config, input, messages);
+
+      // Auto-record usage when userId is provided
+      if (input.userId) {
+        const durationMs = Date.now() - startTime;
+        const usage = result.usage as Record<string, number> | undefined;
+        import("./usage").then(({ recordUsage }) => {
+          recordUsage(input.userId!, {
+            action: "llm_call",
+            provider: result.provider,
+            model: result.model,
+            inputTokens: usage?.prompt_tokens || usage?.input_tokens || 0,
+            outputTokens: usage?.completion_tokens || usage?.output_tokens || 0,
+            totalTokens: usage?.total_tokens || 0,
+            durationMs,
+            label: input.label,
+            siteId: input.siteId,
+          }).catch(() => {});
+        });
+      }
+
+      return result;
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
       // Only fallback on network errors; API errors (auth, rate limit) fall through too

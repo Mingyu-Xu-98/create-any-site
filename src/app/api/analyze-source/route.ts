@@ -414,6 +414,23 @@ Tags: routing, mapping`;
     responseLength: rawContent.length,
   });
 
+  // Record token usage
+  try {
+    const session = await auth();
+    if (session?.user?.id && tokenUsage) {
+      const { recordUsage } = await import("@/lib/usage");
+      recordUsage(session.user.id, {
+        action: "llm_call",
+        provider: "siliconflow",
+        model: "Pro/zai-org/GLM-5",
+        inputTokens: tokenUsage.prompt_tokens || 0,
+        outputTokens: tokenUsage.completion_tokens || 0,
+        totalTokens: tokenUsage.total_tokens || 0,
+        label: "knowledge-extract",
+      }).catch(() => {});
+    }
+  } catch {}
+
   // Parse Markdown into knowledge items and relations
   const { items, relations } = parseMarkdownToItemsAndRelations(rawContent);
 

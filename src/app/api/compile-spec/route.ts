@@ -121,6 +121,7 @@ ${activatedSkillContext ? `## 已激活的 Skill (Level 1 — 完整指令)\n\n$
   const startTime = Date.now();
   let completion;
   try {
+    const session = await (await import("@/lib/auth")).auth();
     completion = await chatCompletion({
       requestId,
       label: "compile-spec",
@@ -128,6 +129,7 @@ ${activatedSkillContext ? `## 已激活的 Skill (Level 1 — 完整指令)\n\n$
       userPrompt: userMessage,
       temperature: 0.3,
       maxTokens: 16384,
+      userId: session?.user?.id,
     });
   } catch (err) {
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);

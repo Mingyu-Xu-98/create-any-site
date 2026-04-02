@@ -29,6 +29,9 @@ export interface BuildConversationContext {
   currentSelections: unknown;
   /** When true, use streamlined Design Agent (one-step) instead of multi-step pipeline */
   useDesignAgent?: boolean;
+  /** For usage tracking */
+  userId?: string;
+  siteId?: string;
 }
 
 interface AgentRunResult {
@@ -86,6 +89,8 @@ async function callSiliconFlow(
   userPrompt: string,
   history: BuildChatMessage[] = [],
   useAdvancedModel = false,
+  userId?: string,
+  siteId?: string,
 ): Promise<AgentRunResult> {
   logger.info("build-agents", `[${requestId}] ${label}: prompt ${systemPrompt.length + userPrompt.length} chars${useAdvancedModel ? " (advanced model)" : ""}`);
 
@@ -98,6 +103,8 @@ async function callSiliconFlow(
     temperature: 0.35,
     maxTokens: useAdvancedModel ? 16384 : 8192,
     useAdvancedModel,
+    userId,
+    siteId,
   });
   const content = result.content;
   return { content, action: extractAction(content) };
@@ -305,7 +312,7 @@ ${ctx.currentPrd || "None"}
 ## Capability Manifest
 ${getCapabilityManifest()}`;
 
-  return callSiliconFlow(ctx.requestId, "orchestrator-agent", prompt, userPrompt);
+  return callSiliconFlow(ctx.requestId, "orchestrator-agent", prompt, userPrompt, [], false, ctx.userId, ctx.siteId);
 }
 
 async function runIdeationAgent(ctx: BuildConversationContext): Promise<AgentRunResult> {
@@ -339,7 +346,7 @@ ${ctx.messages.map(m => `${m.role.toUpperCase()}: ${m.content}`).join("\n\n")}`;
 
   // Edit mode (existing site): use advanced model for higher quality code modifications
   const isEditMode = Boolean(ctx.hasSiteCode && ctx.currentPrd);
-  return callSiliconFlow(ctx.requestId, "ideation-agent", prompt, userPrompt, [], isEditMode);
+  return callSiliconFlow(ctx.requestId, "ideation-agent", prompt, userPrompt, [], isEditMode, ctx.userId, ctx.siteId);
 }
 
 async function runPlanningAgent(
@@ -372,7 +379,7 @@ ${ctx.activatedContext ? `## Activated DB Skill Context\n${ctx.activatedContext}
 ## Current Selections
 ${JSON.stringify(ctx.currentSelections ?? {}, null, 2)}`;
 
-  return callSiliconFlow(ctx.requestId, "planning-agent", prompt, userPrompt);
+  return callSiliconFlow(ctx.requestId, "planning-agent", prompt, userPrompt, [], false, ctx.userId, ctx.siteId);
 }
 
 async function runExecutionAgent(
@@ -406,7 +413,7 @@ ${JSON.stringify(ctx.currentSelections ?? {}, null, 2)}
 - prefer values supported by the generator
 - use customTheme to preserve nuanced brand guidance from the PRD`;
 
-  return callSiliconFlow(ctx.requestId, "execution-agent", prompt, userPrompt);
+  return callSiliconFlow(ctx.requestId, "execution-agent", prompt, userPrompt, [], false, ctx.userId, ctx.siteId);
 }
 
 // ---- Design Agent (streamlined advanced mode: one-step design) ----
@@ -439,7 +446,7 @@ ${JSON.stringify(ctx.currentSelections ?? {}, null, 2)}
 ## Conversation History
 ${ctx.messages.slice(-4).map(m => `${m.role.toUpperCase()}: ${m.content}`).join("\n\n")}`;
 
-  return callSiliconFlow(ctx.requestId, "design-agent", prompt, userPrompt, [], true);
+  return callSiliconFlow(ctx.requestId, "design-agent", prompt, userPrompt, [], true, ctx.userId, ctx.siteId);
 }
 
 // ---- Code Agent (writes actual page code from DesignPlan) ----
@@ -499,7 +506,7 @@ ${assetCss || "(No asset CSS)"}
 6. Do NOT put SVG illustrations inside each project card. Instead, create ONE themed SVG animation in the hero or about section.
 7. For project cards with \`t.projects[].detail\` or \`highlights\`, add a modal/overlay detail view (use useState to toggle).`;
 
-  const result = await callSiliconFlow(ctx.requestId, "code-agent", prompt, userPrompt, [], true);
+  const result = await callSiliconFlow(ctx.requestId, "code-agent", prompt, userPrompt, [], true, ctx.userId, ctx.siteId);
 
   // Parse code blocks from response
   const pageTsx = extractCodeBlock(result.content, "page.tsx") || extractCodeBlock(result.content, "tsx") || "";
