@@ -313,6 +313,11 @@ export default function KnowledgeBaseDetail() {
                                       {q.status === "error" && (zh ? "失败" : "Failed")}
                                     </p>
                                   </div>
+                                  {q.status === "error" && (
+                                    <button onClick={() => setUploadQueue(prev => prev.filter(p => p.id !== q.id))} className="shrink-0 w-4 h-4 rounded-full hover:bg-red-100 flex items-center justify-center" title={zh ? "移除" : "Remove"}>
+                                      <svg className="w-2.5 h-2.5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                                    </button>
+                                  )}
                                 </div>
                               ))}
                             </div>
