@@ -43,12 +43,15 @@ export async function POST(req: NextRequest) {
 
     // Determine image size per model
     // Kolors only supports: 1024x1024, 960x1280, 768x1024, 720x1440, 720x1280
+    // Qwen-Image: use 1024x1024 as safe default
     // FLUX and other models support arbitrary sizes including 1024x576
     const isSquare = filename === "avatar.png" || filename === "chatbot-spirit.png";
 
     function getImageSize(model: string): string {
       if (isSquare) return "1024x1024";
-      if (model.toLowerCase().includes("kolors")) return "768x1024";
+      const m = model.toLowerCase();
+      if (m.includes("kolors")) return "768x1024";
+      if (m.includes("qwen")) return "1024x1024";
       return "1024x576";
     }
 
