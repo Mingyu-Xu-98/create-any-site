@@ -6,7 +6,8 @@ const SILICONFLOW_URL = "https://api.siliconflow.cn/v1/images/generations";
 const API_KEY = process.env.SILICONFLOW_API_KEY || "";
 const PREVIEW_PUBLISH_DIR = process.env.PREVIEW_PUBLISH_DIR?.trim() || "";
 const DRAFTS_SEGMENT = "drafts";
-const IMAGE_MODELS = (process.env.SILICONFLOW_IMAGE_MODELS?.trim() || process.env.SILICONFLOW_IMAGE_MODEL?.trim() || "")
+const DEFAULT_IMAGE_MODELS = "black-forest-labs/FLUX.1-schnell,Kwai-Kolors/Kolors";
+const IMAGE_MODELS = (process.env.SILICONFLOW_IMAGE_MODELS?.trim() || process.env.SILICONFLOW_IMAGE_MODEL?.trim() || DEFAULT_IMAGE_MODELS)
   .split(",")
   .map((item) => item.trim())
   .filter(Boolean);

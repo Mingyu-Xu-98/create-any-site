@@ -607,7 +607,7 @@ async function ensureStaticServer(): Promise<void> {
         res.writeHead(200, {
           "Content-Type": MIME_TYPES[ext] || "application/octet-stream",
           "Access-Control-Allow-Origin": "*",
-          "Cache-Control": "no-cache",
+          "Cache-Control": "no-store, must-revalidate",
         });
         res.end(content);
       } catch {
@@ -615,7 +615,7 @@ async function ensureStaticServer(): Promise<void> {
           const parts = decodeURIComponent((req.url || "/").split("?")[0]).split("/").filter(Boolean);
           if (parts.length > 0) {
             const index = await fs.readFile(path.join(SITES_DIR, parts[0], "out", "index.html"));
-            res.writeHead(200, { "Content-Type": "text/html", "Access-Control-Allow-Origin": "*" });
+            res.writeHead(200, { "Content-Type": "text/html", "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store, must-revalidate" });
             res.end(index);
             return;
           }
