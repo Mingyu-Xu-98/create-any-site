@@ -41,13 +41,22 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Determine image size: square for avatars/icons, 16:9 for backgrounds/projects
+    // Determine image size per model
+    // Kolors only supports: 1024x1024, 960x1280, 768x1024, 720x1440, 720x1280
+    // FLUX and other models support arbitrary sizes including 1024x576
     const isSquare = filename === "avatar.png" || filename === "chatbot-spirit.png";
-    const imageSize = isSquare ? "1024x1024" : "1024x576";
+
+    function getImageSize(model: string): string {
+      if (isSquare) return "1024x1024";
+      if (model.toLowerCase().includes("kolors")) return "768x1024";
+      return "1024x576";
+    }
 
     let imageResponse: Response | null = null;
     let lastError = "";
     for (const model of IMAGE_MODELS) {
+      const imageSize = getImageSize(model);
+      console.log(`[generate-image] trying model=${model}, size=${imageSize}`);
       const response = await fetch(SILICONFLOW_URL, {
         method: "POST",
         headers: {
