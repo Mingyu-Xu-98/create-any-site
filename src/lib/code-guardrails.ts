@@ -525,6 +525,123 @@ function fixTrailingGarbage(
       }
     }
   }
+
+  // Fallback: depth never returned to 0 → the component function's closing `}`
+  // is missing. The LLM emitted stray `)`, `</div>`, or duplicated fragments
+  // after the final `return ( ... );` without ever closing the function body.
+  //
+  // Strategy: find the LAST top-level `return (`, match its balanced `)`,
+  // drop everything after it, and append enough `}` to close the open blocks.
+  const lastReturnParenIdx = findLastReturnOpenParen(page, bodyStart);
+  if (lastReturnParenIdx === -1) return;
+
+  const returnCloseIdx = findMatchingCloseParen(page, lastReturnParenIdx);
+  if (returnCloseIdx === -1) return;
+
+  // Skip optional whitespace + semicolons after the `)`
+  let cutIdx = returnCloseIdx + 1;
+  while (cutIdx < page.length && /[\s;]/.test(page[cutIdx])) cutIdx++;
+
+  const tail = page.slice(cutIdx);
+  const braces = "}\n".repeat(Math.max(1, depth));
+
+  if (tail.length === 0) {
+    // Pure EOF — function body just never closed. Append braces.
+    files["src/app/page.tsx"] = page.slice(0, returnCloseIdx + 1) + ";\n" + braces;
+    fixes.push(`page.tsx: appended ${Math.max(1, depth)} missing } to close component`);
+    return;
+  }
+
+  // Drop the garbage tail, append closing braces.
+  files["src/app/page.tsx"] = page.slice(0, returnCloseIdx + 1) + ";\n" + braces;
+  fixes.push(
+    `page.tsx: salvaged unterminated component — dropped ${tail.length} chars of post-return garbage, appended ${Math.max(1, depth)} closing }`
+  );
+}
+
+/**
+ * Find the `(` that opens the LAST top-level `return (` inside a function body.
+ * Starts scanning from `bodyStart`. Skips strings and comments. Returns -1 if
+ * not found.
+ */
+function findLastReturnOpenParen(src: string, bodyStart: number): number {
+  let lastIdx = -1;
+  let i = bodyStart;
+  while (i < src.length) {
+    const ch = src[i];
+    // Skip strings
+    if (ch === '"' || ch === "'" || ch === "`") {
+      const quote = ch;
+      i++;
+      while (i < src.length && src[i] !== quote) {
+        if (src[i] === "\\") i++;
+        i++;
+      }
+      i++;
+      continue;
+    }
+    // Skip line comments
+    if (ch === "/" && src[i + 1] === "/") {
+      while (i < src.length && src[i] !== "\n") i++;
+      continue;
+    }
+    // Skip block comments
+    if (ch === "/" && src[i + 1] === "*") {
+      i += 2;
+      while (i < src.length - 1 && !(src[i] === "*" && src[i + 1] === "/")) i++;
+      i += 2;
+      continue;
+    }
+    // Match `return` as a whole word followed by whitespace then `(`
+    if (ch === "r" && src.slice(i, i + 6) === "return" && /\W/.test(src[i + 6] || "")) {
+      let j = i + 6;
+      while (j < src.length && /\s/.test(src[j])) j++;
+      if (src[j] === "(") {
+        lastIdx = j;
+        i = j + 1;
+        continue;
+      }
+    }
+    i++;
+  }
+  return lastIdx;
+}
+
+/**
+ * Given the index of an open `(`, find the matching close `)`, skipping strings,
+ * comments, and nested parens. Returns -1 if unbalanced.
+ */
+function findMatchingCloseParen(src: string, openIdx: number): number {
+  let depth = 0;
+  for (let i = openIdx; i < src.length; i++) {
+    const ch = src[i];
+    if (ch === '"' || ch === "'" || ch === "`") {
+      const quote = ch;
+      i++;
+      while (i < src.length && src[i] !== quote) {
+        if (src[i] === "\\") i++;
+        i++;
+      }
+      continue;
+    }
+    if (ch === "/" && src[i + 1] === "/") {
+      while (i < src.length && src[i] !== "\n") i++;
+      continue;
+    }
+    if (ch === "/" && src[i + 1] === "*") {
+      i += 2;
+      while (i < src.length - 1 && !(src[i] === "*" && src[i + 1] === "/")) i++;
+      i++;
+      continue;
+    }
+    // JSX content between tags contains `<` and `>` which are not parens — ignore
+    if (ch === "(") depth++;
+    else if (ch === ")") {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
 }
 
 /**
