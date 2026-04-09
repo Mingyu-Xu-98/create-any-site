@@ -7,6 +7,7 @@ import type { KnowledgeItem } from "@/lib/knowledge";
 import fs from "fs/promises";
 import path from "path";
 import { chatCompletion, getChatProviderSummary, hasChatProvider } from "@/lib/llm";
+import { requireAuth, unauthorized } from "@/lib/require-auth";
 
 const SPEC_PROMPT_PATH = path.join(process.cwd(), "src/prompts/compile-spec.md");
 
@@ -25,6 +26,9 @@ const SPEC_PROMPT_PATH = path.join(process.cwd(), "src/prompts/compile-spec.md")
  *   - gaps: missing information list
  */
 export async function POST(req: NextRequest) {
+  const userId = await requireAuth();
+  if (!userId) return unauthorized();
+
   const requestId = crypto.randomUUID().slice(0, 8);
   if (!hasChatProvider()) {
     return NextResponse.json({ error: "No LLM provider configured. Set OPENROUTER_API_KEY or SILICONFLOW_API_KEY." }, { status: 500 });

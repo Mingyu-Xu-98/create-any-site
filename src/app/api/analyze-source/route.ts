@@ -5,6 +5,7 @@ import type { KnowledgeItem, KnowledgeCategory } from "@/lib/knowledge";
 import { logger } from "@/lib/logger";
 import { saveUserImage, isImageFile } from "@/lib/asset-store";
 import { auth } from "@/lib/auth";
+import { requireAuth, unauthorized } from "@/lib/require-auth";
 import { parsePdfWithMinerU as sharedParsePdfWithMinerU, basicPdfExtract as sharedBasicPdfExtract, parsePdfSafe as sharedParsePdfSafe } from "@/lib/pdf-parser";
 
 // ─── PDF Parsing (delegates to shared module @/lib/pdf-parser) ───
@@ -569,6 +570,9 @@ async function parseZipPerFile(buffer: ArrayBuffer): Promise<ZipFileResult[]> {
 
 // ─── Main handler ───
 export async function POST(req: NextRequest) {
+  const authedUserId = await requireAuth();
+  if (!authedUserId) return unauthorized();
+
   const requestId = crypto.randomUUID().slice(0, 8);
 
   try {
