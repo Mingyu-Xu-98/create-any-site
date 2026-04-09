@@ -465,15 +465,13 @@ export function runAdvancedModeGuardrails(
  * after the component's final closing brace. This truncates everything
  * after the last balanced top-level `}` of `export default function`.
  */
-function fixTrailingGarbage(
+export function fixTrailingGarbage(
   files: Record<string, string>,
   fixes: string[],
 ) {
   const page = files["src/app/page.tsx"];
   if (!page) return;
 
-  // Strategy: find `export default function`, then track brace depth.
-  // When depth returns to 0, everything after that closing `}` is garbage.
   const exportIdx = page.indexOf("export default function");
   if (exportIdx === -1) return;
 
@@ -481,125 +479,186 @@ function fixTrailingGarbage(
   const bodyStart = page.indexOf("{", exportIdx);
   if (bodyStart === -1) return;
 
-  let depth = 0;
-  let endIdx = -1;
-  // Track whether we're inside a string or template literal to avoid counting braces in strings
-  for (let i = bodyStart; i < page.length; i++) {
-    const ch = page[i];
-    // Skip string literals
-    if (ch === '"' || ch === "'" || ch === "`") {
-      const quote = ch;
-      i++;
-      while (i < page.length && page[i] !== quote) {
-        if (page[i] === "\\") i++; // skip escaped char
-        i++;
-      }
-      continue;
+  // Primary path: scan brace depth through the whole file. If depth returns
+  // to 0, the function is properly closed — truncate anything after.
+  const closingIdx = findFunctionClose(page, bodyStart);
+  if (closingIdx !== -1) {
+    const remaining = page.slice(closingIdx).trim();
+    if (remaining.length > 0) {
+      files["src/app/page.tsx"] = page.slice(0, closingIdx) + "\n";
+      fixes.push(
+        `page.tsx: removed ${remaining.length} chars of trailing garbage after component`,
+      );
     }
-    // Skip line comments
-    if (ch === "/" && page[i + 1] === "/") {
-      while (i < page.length && page[i] !== "\n") i++;
-      continue;
-    }
-    // Skip block comments
-    if (ch === "/" && page[i + 1] === "*") {
-      i += 2;
-      while (i < page.length - 1 && !(page[i] === "*" && page[i + 1] === "/")) i++;
-      i++;
-      continue;
-    }
-    if (ch === "{") depth++;
-    else if (ch === "}") {
-      depth--;
-      if (depth === 0) {
-        endIdx = i + 1;
-        // Don't break yet — there may be legitimate code after (unlikely for page.tsx, but safe)
-        // Check if remaining content is just whitespace
-        const remaining = page.slice(endIdx).trim();
-        if (remaining.length > 0) {
-          // There's trailing content — truncate it
-          files["src/app/page.tsx"] = page.slice(0, endIdx) + "\n";
-          fixes.push(`page.tsx: removed ${remaining.length} chars of trailing garbage after component`);
-        }
-        return;
-      }
-    }
+    return;
   }
 
   // Fallback: depth never returned to 0 → the component function's closing `}`
   // is missing. The LLM emitted stray `)`, `</div>`, or duplicated fragments
   // after the final `return ( ... );` without ever closing the function body.
   //
-  // Strategy: find the LAST top-level `return (`, match its balanced `)`,
-  // drop everything after it, and append enough `}` to close the open blocks.
-  const lastReturnParenIdx = findLastReturnOpenParen(page, bodyStart);
+  // Strategy:
+  //   1. Find the LAST `return (` that sits at brace depth === 1 (directly
+  //      inside the component body, NOT inside a nested handler/arrow fn).
+  //   2. Match its balanced `)`.
+  //   3. Compute brace depth of the RETAINED slice only (so stray `{` in the
+  //      garbage tail can't poison the count).
+  //   4. Drop the tail, append exactly that many `}` to close open blocks.
+  const lastReturnParenIdx = findLastTopLevelReturnOpenParen(page, bodyStart);
   if (lastReturnParenIdx === -1) return;
 
   const returnCloseIdx = findMatchingCloseParen(page, lastReturnParenIdx);
   if (returnCloseIdx === -1) return;
 
-  // Skip optional whitespace + semicolons after the `)`
+  // Depth at the cut point — only counts braces in the slice we will KEEP.
+  const retainedDepth = scanBraceDepth(page, bodyStart, returnCloseIdx + 1);
+  if (retainedDepth <= 0) return; // nothing to close; bail out safely
+
+  // Drop optional trailing whitespace + semicolons so our diagnostic count
+  // reflects actual garbage size.
   let cutIdx = returnCloseIdx + 1;
   while (cutIdx < page.length && /[\s;]/.test(page[cutIdx])) cutIdx++;
+  const droppedLen = page.length - cutIdx;
 
-  const tail = page.slice(cutIdx);
-  const braces = "}\n".repeat(Math.max(1, depth));
-
-  if (tail.length === 0) {
-    // Pure EOF — function body just never closed. Append braces.
-    files["src/app/page.tsx"] = page.slice(0, returnCloseIdx + 1) + ";\n" + braces;
-    fixes.push(`page.tsx: appended ${Math.max(1, depth)} missing } to close component`);
-    return;
-  }
-
-  // Drop the garbage tail, append closing braces.
+  const braces = "}\n".repeat(retainedDepth);
   files["src/app/page.tsx"] = page.slice(0, returnCloseIdx + 1) + ";\n" + braces;
-  fixes.push(
-    `page.tsx: salvaged unterminated component — dropped ${tail.length} chars of post-return garbage, appended ${Math.max(1, depth)} closing }`
-  );
+
+  if (droppedLen === 0) {
+    fixes.push(
+      `page.tsx: appended ${retainedDepth} missing } to close component`,
+    );
+  } else {
+    fixes.push(
+      `page.tsx: salvaged unterminated component — dropped ${droppedLen} chars of post-return garbage, appended ${retainedDepth} closing }`,
+    );
+  }
 }
 
 /**
- * Find the `(` that opens the LAST top-level `return (` inside a function body.
- * Starts scanning from `bodyStart`. Skips strings and comments. Returns -1 if
- * not found.
+ * If `src[i]` begins a string literal, line comment, or block comment, return
+ * the index just past the end of that token. Otherwise return `i` unchanged.
+ * Used as the shared skip step for all brace/paren scanners below so they
+ * agree on what counts as "code".
  */
-function findLastReturnOpenParen(src: string, bodyStart: number): number {
+function advanceSkippable(src: string, i: number): number {
+  const ch = src[i];
+  if (ch === '"' || ch === "'" || ch === "`") {
+    const quote = ch;
+    let j = i + 1;
+    while (j < src.length && src[j] !== quote) {
+      if (src[j] === "\\") j++;
+      j++;
+    }
+    return j + 1;
+  }
+  if (ch === "/" && src[i + 1] === "/") {
+    let j = i + 2;
+    while (j < src.length && src[j] !== "\n") j++;
+    return j;
+  }
+  if (ch === "/" && src[i + 1] === "*") {
+    let j = i + 2;
+    while (j < src.length - 1 && !(src[j] === "*" && src[j + 1] === "/")) j++;
+    return j + 2;
+  }
+  return i;
+}
+
+/**
+ * Scan from `bodyStart` (the `{` opening the function body) and return the
+ * index just past the matching closing `}`. Returns -1 if the function body
+ * is never closed.
+ */
+function findFunctionClose(src: string, bodyStart: number): number {
+  let depth = 0;
+  let i = bodyStart;
+  while (i < src.length) {
+    const skipped = advanceSkippable(src, i);
+    if (skipped !== i) {
+      i = skipped;
+      continue;
+    }
+    const ch = src[i];
+    if (ch === "{") {
+      depth++;
+    } else if (ch === "}") {
+      depth--;
+      if (depth === 0) return i + 1;
+    }
+    i++;
+  }
+  return -1;
+}
+
+/**
+ * Compute brace depth across `src[from..to)`, starting from 0, skipping
+ * strings and comments. Used to know how many `}` need to be appended when
+ * we drop the post-return garbage tail.
+ */
+function scanBraceDepth(src: string, from: number, to: number): number {
+  let depth = 0;
+  let i = from;
+  while (i < to) {
+    const skipped = advanceSkippable(src, i);
+    if (skipped !== i) {
+      i = Math.min(skipped, to);
+      continue;
+    }
+    const ch = src[i];
+    if (ch === "{") depth++;
+    else if (ch === "}") depth--;
+    i++;
+  }
+  return depth;
+}
+
+/**
+ * Find the `(` that opens the LAST `return (` sitting at brace depth === 1
+ * — i.e. directly inside the component function body, NOT inside a nested
+ * handler like `const click = () => { return (...); }`. Returns -1 if none.
+ */
+function findLastTopLevelReturnOpenParen(src: string, bodyStart: number): number {
+  let depth = 0;
   let lastIdx = -1;
   let i = bodyStart;
   while (i < src.length) {
+    const skipped = advanceSkippable(src, i);
+    if (skipped !== i) {
+      i = skipped;
+      continue;
+    }
     const ch = src[i];
-    // Skip strings
-    if (ch === '"' || ch === "'" || ch === "`") {
-      const quote = ch;
-      i++;
-      while (i < src.length && src[i] !== quote) {
-        if (src[i] === "\\") i++;
-        i++;
-      }
+    if (ch === "{") {
+      depth++;
       i++;
       continue;
     }
-    // Skip line comments
-    if (ch === "/" && src[i + 1] === "/") {
-      while (i < src.length && src[i] !== "\n") i++;
+    if (ch === "}") {
+      depth--;
+      i++;
       continue;
     }
-    // Skip block comments
-    if (ch === "/" && src[i + 1] === "*") {
-      i += 2;
-      while (i < src.length - 1 && !(src[i] === "*" && src[i + 1] === "/")) i++;
-      i += 2;
-      continue;
-    }
-    // Match `return` as a whole word followed by whitespace then `(`
-    if (ch === "r" && src.slice(i, i + 6) === "return" && /\W/.test(src[i + 6] || "")) {
+    // Only accept `return (` when we're directly in the component body.
+    // depth === 1 means: past the opening `{` of the function, but not
+    // inside any nested block/arrow/handler.
+    if (
+      depth === 1 &&
+      ch === "r" &&
+      src.slice(i, i + 6) === "return" &&
+      /\W/.test(src[i + 6] || "")
+    ) {
       let j = i + 6;
       while (j < src.length && /\s/.test(src[j])) j++;
       if (src[j] === "(") {
         lastIdx = j;
-        i = j + 1;
-        continue;
+        // Jump past the whole `return ( ... )` so JSX expression braces
+        // inside don't get double-counted by this scanner. If unbalanced,
+        // fall back to advancing one char.
+        const close = findMatchingCloseParen(src, j);
+        if (close !== -1) {
+          i = close + 1;
+          continue;
+        }
       }
     }
     i++;
@@ -608,38 +667,25 @@ function findLastReturnOpenParen(src: string, bodyStart: number): number {
 }
 
 /**
- * Given the index of an open `(`, find the matching close `)`, skipping strings,
- * comments, and nested parens. Returns -1 if unbalanced.
+ * Given the index of an open `(`, find the matching close `)`, skipping
+ * strings, comments, and nested parens. Returns -1 if unbalanced.
  */
 function findMatchingCloseParen(src: string, openIdx: number): number {
   let depth = 0;
-  for (let i = openIdx; i < src.length; i++) {
+  let i = openIdx;
+  while (i < src.length) {
+    const skipped = advanceSkippable(src, i);
+    if (skipped !== i) {
+      i = skipped;
+      continue;
+    }
     const ch = src[i];
-    if (ch === '"' || ch === "'" || ch === "`") {
-      const quote = ch;
-      i++;
-      while (i < src.length && src[i] !== quote) {
-        if (src[i] === "\\") i++;
-        i++;
-      }
-      continue;
-    }
-    if (ch === "/" && src[i + 1] === "/") {
-      while (i < src.length && src[i] !== "\n") i++;
-      continue;
-    }
-    if (ch === "/" && src[i + 1] === "*") {
-      i += 2;
-      while (i < src.length - 1 && !(src[i] === "*" && src[i + 1] === "/")) i++;
-      i++;
-      continue;
-    }
-    // JSX content between tags contains `<` and `>` which are not parens — ignore
     if (ch === "(") depth++;
     else if (ch === ")") {
       depth--;
       if (depth === 0) return i;
     }
+    i++;
   }
   return -1;
 }
