@@ -612,7 +612,6 @@ function CreatePageInner() {
           loadedSkills: loadedSkillIds,
           siteId: siteIdRef.current,
           currentPrd: prdData,
-          useDesignAgent: true,
         }),
       });
       const d = await readJsonResponse<{

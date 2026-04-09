@@ -160,7 +160,6 @@ export async function POST(req: NextRequest) {
           ? JSON.stringify(requestPrd, null, 2)
           : persistedPrd,
       currentSelections,
-      useDesignAgent: Boolean(body.useDesignAgent),
       userId: session?.user?.id,
       siteId: siteId || undefined,
     });
