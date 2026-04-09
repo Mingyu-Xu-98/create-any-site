@@ -901,6 +901,15 @@ export async function runSiteBuild(input: RunSiteBuildInput): Promise<RunSiteBui
 
   let files: Record<string, string>;
 
+  // Context stashed for build-failure retry: lets us re-invoke the Code Agent
+  // with a repair hint without re-running the (expensive) design agent, KB
+  // loading, recipe resolution, etc. Only populated in advanced mode.
+  let repairCtx: {
+    codeCtx: import("./build-agents").BuildConversationContext;
+    designPlan: Record<string, unknown>;
+    assetCss: string;
+  } | null = null;
+
   // Advanced mode — Code Agent writes ALL code from scratch
   if (selections.compositionPlan) {
     const { generateBaseFiles } = await import("./shared-components");
@@ -979,11 +988,25 @@ export async function runSiteBuild(input: RunSiteBuildInput): Promise<RunSiteBui
     }
 
     logger.info("generate", `[${requestId}] Advanced mode: running Code Agent (${kbContent.length} chars knowledge)...`);
-    const codeResult = await runCodeAgent(
-      { requestId, messages: [], knowledgeContext: kbContent, knowledgeSummary: "", knowledgeGroupIndex: "", skillCatalog: "", activatedContext: "", codeContext: "", hasSiteCode: false, currentPrd: "", currentSelections: selections, userId: input.userId, siteId: input.siteId },
-      designPlan,
-      assetCss,
-    );
+    const codeCtx: import("./build-agents").BuildConversationContext = {
+      requestId,
+      messages: [],
+      knowledgeContext: kbContent,
+      knowledgeSummary: "",
+      knowledgeGroupIndex: "",
+      skillCatalog: "",
+      activatedContext: "",
+      codeContext: "",
+      hasSiteCode: false,
+      currentPrd: "",
+      currentSelections: selections,
+      userId: input.userId,
+      siteId: input.siteId,
+    };
+    // Stash for potential build-failure retries later.
+    repairCtx = { codeCtx, designPlan, assetCss };
+
+    const codeResult = await runCodeAgent(codeCtx, designPlan, assetCss);
 
     // Enrich WorkspaceData from KB content when legacy items are empty
     if (kbContent && (!data.name || data.name === "Your Name" || data.name === "")) {
@@ -1168,8 +1191,109 @@ export async function runSiteBuild(input: RunSiteBuildInput): Promise<RunSiteBui
   await progress("📦 准备依赖...");
   await ensureNodeModules(siteDir);
 
-  await progress("🔨 编译项目...");
-  await staticBuild(siteDir);
+  // Build with up to MAX_BUILD_RETRIES retries. On each failure, feed the
+  // build error back to the Code Agent as a repair hint so it can produce
+  // a corrected page.tsx. Only runs in advanced mode (where repairCtx is
+  // populated); the basic fallback path fails on first error as before.
+  const MAX_BUILD_RETRIES = 2;
+  let buildAttempt = 0;
+  while (true) {
+    await progress(
+      buildAttempt === 0
+        ? "🔨 编译项目..."
+        : `🔨 编译项目 (重试 ${buildAttempt}/${MAX_BUILD_RETRIES})...`,
+    );
+    try {
+      await staticBuild(siteDir);
+      break; // success
+    } catch (err) {
+      const errObj = err as { stdout?: string; stderr?: string; message?: string };
+      const stderrText = errObj.stderr || "";
+      const stdoutText = errObj.stdout || "";
+      const errSummary = summarizeBuildOutput(stdoutText, stderrText).join("\n");
+      logger.warn(
+        "generate",
+        `[${requestId}] staticBuild failed (attempt ${buildAttempt + 1}/${MAX_BUILD_RETRIES + 1}): ${errObj.message || "unknown"}\n${errSummary.slice(0, 800)}`,
+      );
+
+      const canRetry = repairCtx && buildAttempt < MAX_BUILD_RETRIES;
+      if (!canRetry) {
+        // Preserve stdout/stderr on the error so build-queue can persist them.
+        throw err;
+      }
+
+      buildAttempt++;
+      await progress(`⚠️ 构建失败，重新生成代码 (${buildAttempt}/${MAX_BUILD_RETRIES})...`);
+
+      const prevPage = files["src/app/page.tsx"] || "";
+      const prevCss = files["src/app/globals.css"] || "";
+
+      const { runCodeAgent: runCodeAgentRetry } = await import("./build-agents");
+      let repairResult;
+      try {
+        repairResult = await runCodeAgentRetry(
+          repairCtx!.codeCtx,
+          repairCtx!.designPlan,
+          repairCtx!.assetCss,
+          {
+            previousPageTsx: prevPage,
+            previousGlobalsCss: prevCss,
+            buildError: errSummary || errObj.message || "(no error output captured)",
+            attempt: buildAttempt,
+          },
+        );
+      } catch (repairErr) {
+        logger.error(
+          "generate",
+          `[${requestId}] Repair Code Agent call failed on attempt ${buildAttempt}: ${repairErr instanceof Error ? repairErr.message : String(repairErr)}`,
+        );
+        // Fall back to re-throwing the original build error — the repair
+        // itself crashed, nothing useful to retry with.
+        throw err;
+      }
+
+      if (!repairResult.valid || !repairResult.pageTsx) {
+        logger.warn(
+          "generate",
+          `[${requestId}] Repair attempt ${buildAttempt} produced invalid output: ${repairResult.errors.join(", ") || "empty"}`,
+        );
+        // Continue loop — the NEXT retry will try again with the still-
+        // failing code. If buildAttempt has hit MAX_BUILD_RETRIES the next
+        // iteration will throw via canRetry===false.
+        continue;
+      }
+
+      // Apply chatMode enforcement same as the first-pass path
+      let fixedPage = repairResult.pageTsx;
+      const chatMode = selections.compositionPlan?.chatMode || "cartoon";
+      if (chatMode === "cartoon" && fixedPage.includes("ChatBot") && !fixedPage.includes("CartoonAssistant")) {
+        fixedPage = fixedPage
+          .replace(/import\s+ChatBot\s+from\s+["'][^"']+["']/g, 'import CartoonAssistant from "@/components/CartoonAssistant"')
+          .replace(/<ChatBot\s*\/>/g, "<CartoonAssistant />");
+      }
+      files["src/app/page.tsx"] = fixedPage;
+
+      // Replace (not append) the Code Agent custom styles section so retries
+      // don't pile up duplicate blocks on top of each other.
+      if (repairResult.globalsCssExtra) {
+        const marker = "\n\n/* === Code Agent Custom Styles === */";
+        const baseCss = files["src/app/globals.css"] || "";
+        const markerIdx = baseCss.indexOf(marker);
+        const trimmed = markerIdx >= 0 ? baseCss.slice(0, markerIdx) : baseCss;
+        files["src/app/globals.css"] = trimmed + marker + "\n" + repairResult.globalsCssExtra;
+      }
+
+      // Re-run guardrails on the patched file set and write back to disk.
+      // writeFilesToSiteDir only wipes src/, so public/images/ and
+      // node_modules/ are preserved across retries — no need to recopy
+      // user images or reinstall deps.
+      files = runCodeGuardrails(files, siteId, previewBaseUrl, logger);
+      runAdvancedModeGuardrails(files, ALLOWED_DEPENDENCIES, logger);
+      await writeFilesToSiteDir(siteDir, files);
+      // Loop continues; next iteration will re-attempt staticBuild.
+    }
+  }
+
   if (!PREVIEW_PUBLISH_DIR) {
     await rewriteExportAssetPaths(path.join(siteDir, "out"), "", `/${siteId}`);
   }

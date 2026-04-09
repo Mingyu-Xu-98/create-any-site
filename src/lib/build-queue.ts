@@ -90,7 +90,11 @@ export async function processBuildJob(jobId: string, options?: { alreadyClaimed?
 
   try {
     const payload = JSON.parse(job.payload) as BuildPayload;
-    const BUILD_TIMEOUT_MS = 300_000; // 5 minutes max per build
+    // 15 minutes. Generous enough to accommodate up to 2 auto-retries of the
+    // Code Agent + staticBuild cycle when the first generation produces
+    // code that fails `next build`. A single pass typically finishes in
+    // 2–4 minutes; each retry adds roughly another 2–4 minutes.
+    const BUILD_TIMEOUT_MS = 900_000;
 
     const buildPromise = runSiteBuild({
       siteId: job.siteId,
