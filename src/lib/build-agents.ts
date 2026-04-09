@@ -458,14 +458,27 @@ export interface CodeAgentResult {
   errors: string[];
 }
 
+/**
+ * Repair hint passed on retry when a previous Code Agent output failed
+ * `next build`. Gives the model the broken code + the build error output
+ * so it can produce a fix instead of starting from scratch.
+ */
+export interface CodeAgentRepairHint {
+  previousPageTsx: string;
+  previousGlobalsCss?: string;
+  buildError: string;
+  attempt: number; // 1-indexed, how many repair attempts so far (1 = first repair)
+}
+
 export async function runCodeAgent(
   ctx: BuildConversationContext,
   designPlan: Record<string, unknown>,
   assetCss: string,
+  repairHint?: CodeAgentRepairHint,
 ): Promise<CodeAgentResult> {
   const prompt = await loadPrompt("code-agent.md");
 
-  const userPrompt = `## Design Plan
+  let userPrompt = `## Design Plan
 ${JSON.stringify(designPlan, null, 2)}
 
 ## Content Data (translations object structure)
@@ -506,7 +519,39 @@ ${assetCss || "(No asset CSS)"}
 6. Do NOT put SVG illustrations inside each project card. Instead, create ONE themed SVG animation in the hero or about section.
 7. For project cards with \`t.projects[].detail\` or \`highlights\`, add a modal/overlay detail view (use useState to toggle).`;
 
-  const result = await callSiliconFlow(ctx.requestId, "code-agent", prompt, userPrompt, [], true, ctx.userId, ctx.siteId);
+  if (repairHint) {
+    // Append a repair section. Keep the original instructions above so the
+    // model still knows the design intent, but make it crystal-clear that
+    // this is a fix request, not a fresh generation.
+    const errSlice = repairHint.buildError.slice(0, 2000);
+    const pageSlice = repairHint.previousPageTsx.slice(0, 20000);
+    const cssSlice = repairHint.previousGlobalsCss
+      ? repairHint.previousGlobalsCss.slice(0, 4000)
+      : "";
+    userPrompt += `
+
+## ⚠️ REPAIR MODE — Previous Attempt Failed to Build (attempt ${repairHint.attempt})
+Your previous generation produced code that did NOT compile with \`next build\`.
+Do NOT start from scratch. Study the failing code and the error output below,
+identify the bug, and produce a CORRECTED version. Preserve the design intent
+and layout — change only what is necessary to make it compile.
+
+### Build Error Output (last relevant lines)
+\`\`\`
+${errSlice}
+\`\`\`
+
+### Previous page.tsx (the one that failed)
+\`\`\`tsx
+${pageSlice}
+\`\`\`
+${cssSlice ? `\n### Previous globals.css extras\n\`\`\`css\n${cssSlice}\n\`\`\`\n` : ""}
+Output a COMPLETE corrected \`page.tsx\` (and \`globals.css\` if needed) in the
+same code-block format as a normal response. Do NOT output a diff or just
+describe the fix — output the full corrected file(s).`;
+  }
+
+  const result = await callSiliconFlow(ctx.requestId, repairHint ? `code-agent-repair-${repairHint.attempt}` : "code-agent", prompt, userPrompt, [], true, ctx.userId, ctx.siteId);
 
   // Parse code blocks from response
   const pageTsx = extractCodeBlock(result.content, "page.tsx") || extractCodeBlock(result.content, "tsx") || "";
