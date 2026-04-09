@@ -41,22 +41,51 @@ async function ensureSiteDir(siteId: string): Promise<string> {
 
 /**
  * Create an isolated build directory: `sites-data/{siteId}/builds/{buildId}/`.
- * Sets up a relative symlink for node_modules so the build can find deps
- * without duplicating them.
+ * node_modules is handled separately by ensureNodeModules — called on the
+ * build dir directly so that `next build` can resolve deps without issues.
  */
 async function prepareBuildDir(siteId: string, buildId: string): Promise<string> {
   const dir = siteBuildDir(siteId, buildId);
   await fs.mkdir(dir, { recursive: true });
+  return dir;
+}
 
-  // Relative symlink: builds/{buildId}/node_modules → ../../node_modules
-  const nmLink = path.join(dir, "node_modules");
+/**
+ * Ensure node_modules exists in the build dir. Uses a symlink to the
+ * site-root or shared node_modules so we don't duplicate 300+ MB.
+ * Falls back to copying from runtime-base if nothing exists yet.
+ *
+ * Called AFTER writeFilesToSiteDir so package.json is already in place.
+ */
+async function ensureBuildNodeModules(siteId: string, buildDir: string): Promise<void> {
+  const buildNm = path.join(buildDir, "node_modules");
+  // Already exists (e.g. retry or re-run) — skip
   try {
-    await fs.symlink("../../node_modules", nmLink);
+    await fs.access(buildNm);
+    return;
+  } catch { /* proceed to set up */ }
+
+  const rootNm = path.join(siteRoot(siteId), "node_modules");
+
+  if (USE_SHARED_NODE_MODULES) {
+    // Shared mode: root/node_modules is a symlink to _shared_node_modules.
+    // Make build/node_modules an absolute symlink to the same target.
+    try {
+      const realTarget = await fs.realpath(rootNm);
+      await fs.symlink(realTarget, buildNm);
+      return;
+    } catch { /* shared not set up yet — fall through */ }
+  }
+
+  // Non-shared mode or first-time: ensure root has node_modules, then
+  // symlink build dir to it with an absolute path.
+  await ensureNodeModules(siteRoot(siteId));
+  try {
+    const realTarget = await fs.realpath(path.join(siteRoot(siteId), "node_modules"));
+    await fs.symlink(realTarget, buildNm);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
   }
-
-  return dir;
 }
 
 /**
@@ -118,12 +147,14 @@ export async function migrateSiteLayout(siteId: string, buildId?: string): Promi
     }
   }
 
-  // Create node_modules symlink inside the build dir
+  // Create node_modules symlink inside the build dir (absolute path)
+  const rootNm = path.join(root, "node_modules");
   const nmLink = path.join(targetDir, "node_modules");
   try {
-    await fs.symlink("../../node_modules", nmLink);
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+    const realNm = await fs.realpath(rootNm);
+    await fs.symlink(realNm, nmLink);
+  } catch {
+    // node_modules might not exist yet — will be set up on next build
   }
 
   // Create the current symlink
@@ -1363,8 +1394,13 @@ export async function runSiteBuild(input: RunSiteBuildInput): Promise<RunSiteBui
   }
 
   await progress("📦 准备依赖...");
-  // Deps live at site root level; build dir uses relative symlink
-  await ensureNodeModules(input.buildId ? rootDir : buildDir);
+  if (input.buildId) {
+    // Immutable build: set up node_modules in the build dir via absolute symlink
+    await ensureBuildNodeModules(siteId, buildDir);
+  } else {
+    // Legacy path: deps live directly in site dir
+    await ensureNodeModules(buildDir);
+  }
   const siteDir = buildDir; // alias for backward compat in the rest of the function
 
   // Build with up to MAX_BUILD_RETRIES retries. On each failure, feed the
