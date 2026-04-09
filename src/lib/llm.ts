@@ -21,6 +21,8 @@
  *   IMAGE_MODEL=Kwai-Kolors/Kolors
  */
 
+import { startTrace } from "@/lib/llm-trace";
+
 type ChatRole = "system" | "user" | "assistant";
 
 export interface ChatMessage {
@@ -247,6 +249,16 @@ export async function chatCompletion(input: ChatCompletionInput): Promise<ChatCo
 
   const startTime = Date.now();
 
+  // Start a trace span — automatically records prompt, response, latency,
+  // outcome on success or error. The trace write is fire-and-forget and
+  // never blocks or crashes the LLM call.
+  const span = startTrace({
+    traceId: input.requestId,
+    phase: input.label,
+    userId: input.userId,
+    siteId: input.siteId,
+  });
+
   // Try each provider in chain order
   let lastError: Error | null = null;
   for (const config of chain) {
@@ -272,17 +284,52 @@ export async function chatCompletion(input: ChatCompletionInput): Promise<ChatCo
         });
       }
 
+      // Record successful trace
+      const usage = result.usage as Record<string, number> | undefined;
+      span.end({
+        provider: result.provider,
+        model: result.model,
+        systemPrompt: input.systemPrompt,
+        userPrompt: input.userPrompt,
+        messages: history.length > 0 ? JSON.stringify(history) : undefined,
+        rawResponse: result.content,
+        inputTokens: usage?.prompt_tokens || usage?.input_tokens || 0,
+        outputTokens: usage?.completion_tokens || usage?.output_tokens || 0,
+        totalTokens: usage?.total_tokens || 0,
+        temperature: input.temperature,
+        maxTokens: input.maxTokens,
+        outcome: "success",
+      });
+
       return result;
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
       // Only fallback on network errors; API errors (auth, rate limit) fall through too
       // so the user gets a clear error from the first provider that responds
       if (!isNetworkError(error) && chain.indexOf(config) === 0) {
+        span.error(lastError, {
+          provider: config.name,
+          model: config.model,
+          systemPrompt: input.systemPrompt,
+          userPrompt: input.userPrompt,
+          temperature: input.temperature,
+          maxTokens: input.maxTokens,
+        });
         throw lastError;
       }
       // Log and try next provider
     }
   }
+
+  // All providers failed — record error trace
+  span.error(lastError || new Error("All LLM providers failed"), {
+    provider: chain[chain.length - 1]?.name ?? "unknown",
+    model: chain[chain.length - 1]?.model ?? "unknown",
+    systemPrompt: input.systemPrompt,
+    userPrompt: input.userPrompt,
+    temperature: input.temperature,
+    maxTokens: input.maxTokens,
+  });
 
   throw lastError || new Error("All LLM providers failed");
 }

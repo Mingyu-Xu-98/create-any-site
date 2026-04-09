@@ -6,6 +6,7 @@ import { sites } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { internalErrorWithHeaders } from "@/lib/api-errors";
+import { startTrace } from "@/lib/llm-trace";
 
 // Rate limit configuration — override at deploy time via env vars.
 // Defaults are intentionally conservative for a public chatbot endpoint
@@ -174,6 +175,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ sit
 
 ${relevantKnowledge}`;
 
+  // ── Trace: start span before LLM call ──
+  const traceSpan = startTrace({
+    traceId: crypto.randomUUID().slice(0, 8),
+    phase: "site-chat",
+    siteId,
+  });
+
   const response = await fetch("https://api.siliconflow.cn/v1/chat/completions", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
@@ -190,13 +198,22 @@ ${relevantKnowledge}`;
     // Log upstream error body server-side but NEVER leak it to the
     // public chatbot caller — it can contain siliconflow internals.
     const upstreamBody = await response.text();
+    const upstreamErr = new Error(`siliconflow ${response.status}: ${upstreamBody.slice(0, 500)}`);
+    traceSpan.error(upstreamErr, {
+      provider: "siliconflow", model: "Pro/Qwen/Qwen2.5-7B-Instruct",
+      systemPrompt, userPrompt: lastUserMsg,
+      temperature: 0.7, maxTokens: 1024,
+    });
     return internalErrorWithHeaders(
-      new Error(`siliconflow ${response.status}: ${upstreamBody.slice(0, 500)}`),
+      upstreamErr,
       "site-chat",
       CORS_HEADERS,
       { clientMessage: "Chat service temporarily unavailable", status: 502 },
     );
   }
+
+  // Accumulate streamed content for the trace
+  let fullContent = "";
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
@@ -214,14 +231,36 @@ ${relevantKnowledge}`;
           const trimmed = line.trim();
           if (!trimmed || !trimmed.startsWith("data: ")) continue;
           const data = trimmed.slice(6);
-          if (data === "[DONE]") { controller.close(); return; }
+          if (data === "[DONE]") {
+            // ── Trace: record on stream complete ──
+            traceSpan.end({
+              provider: "siliconflow", model: "Pro/Qwen/Qwen2.5-7B-Instruct",
+              systemPrompt, userPrompt: lastUserMsg,
+              rawResponse: fullContent,
+              temperature: 0.7, maxTokens: 1024,
+              outcome: "success",
+            });
+            controller.close();
+            return;
+          }
           try {
             const parsed = JSON.parse(data);
             const content = parsed.choices?.[0]?.delta?.content;
-            if (content) controller.enqueue(encoder.encode(content));
+            if (content) {
+              fullContent += content;
+              controller.enqueue(encoder.encode(content));
+            }
           } catch {}
         }
       }
+      // Stream ended without [DONE] — still record what we got
+      traceSpan.end({
+        provider: "siliconflow", model: "Pro/Qwen/Qwen2.5-7B-Instruct",
+        systemPrompt, userPrompt: lastUserMsg,
+        rawResponse: fullContent,
+        temperature: 0.7, maxTokens: 1024,
+        outcome: "success",
+      });
       controller.close();
     },
   });

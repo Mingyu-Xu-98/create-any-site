@@ -4,6 +4,7 @@ import type { WorkspaceData } from "@/lib/types";
 import { requireAuth, unauthorized } from "@/lib/require-auth";
 import { DEFAULT_MAX_UPLOAD_BYTES, checkContentLength, checkFileSize } from "@/lib/upload-limits";
 import { internalError } from "@/lib/api-errors";
+import { startTrace } from "@/lib/llm-trace";
 
 // ─── Extract all readable text from a zip ───
 async function extractAllText(buffer: ArrayBuffer): Promise<{
@@ -177,6 +178,11 @@ async function aiAnalyze(
 
 ${allContent}${linksSection}`;
 
+  const span = startTrace({
+    traceId: crypto.randomUUID().slice(0, 8),
+    phase: "analyze",
+  });
+
   const response = await fetch("https://api.siliconflow.cn/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -196,11 +202,24 @@ ${allContent}${linksSection}`;
 
   if (!response.ok) {
     const errText = await response.text();
-    throw new Error(`AI analysis failed: ${response.status} ${errText}`);
+    const err = new Error(`AI analysis failed: ${response.status} ${errText}`);
+    span.error(err, { provider: "siliconflow", model: "Pro/zai-org/GLM-5", systemPrompt, userPrompt: userMessage, temperature: 0.3, maxTokens: 8192 });
+    throw err;
   }
 
   const result = await response.json();
   const rawContent = result.choices?.[0]?.message?.content || "";
+  const usage = result.usage as Record<string, number> | undefined;
+  span.end({
+    provider: "siliconflow", model: "Pro/zai-org/GLM-5",
+    systemPrompt, userPrompt: userMessage,
+    rawResponse: rawContent,
+    inputTokens: usage?.prompt_tokens ?? 0,
+    outputTokens: usage?.completion_tokens ?? 0,
+    totalTokens: usage?.total_tokens ?? 0,
+    temperature: 0.3, maxTokens: 8192,
+    outcome: "success",
+  });
 
   // Extract JSON from response (might be wrapped in markdown code blocks)
   let jsonStr = rawContent;

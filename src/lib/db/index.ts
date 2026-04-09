@@ -252,6 +252,38 @@ function initDb() {
     CREATE INDEX IF NOT EXISTS idx_usage_logs_user_time ON usage_logs(user_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_usage_logs_action ON usage_logs(action, created_at);
 
+    CREATE TABLE IF NOT EXISTS llm_traces (
+      id TEXT PRIMARY KEY,
+      trace_id TEXT NOT NULL,
+      parent_span_id TEXT,
+      phase TEXT NOT NULL,
+      provider TEXT,
+      model TEXT,
+      system_prompt TEXT,
+      user_prompt TEXT,
+      messages TEXT,
+      raw_response TEXT,
+      parsed_output TEXT,
+      input_tokens INTEGER DEFAULT 0,
+      output_tokens INTEGER DEFAULT 0,
+      total_tokens INTEGER DEFAULT 0,
+      latency_ms INTEGER,
+      temperature REAL,
+      max_tokens INTEGER,
+      outcome TEXT DEFAULT 'success',
+      outcome_tags TEXT,
+      error_message TEXT,
+      user_id TEXT,
+      site_id TEXT,
+      build_id TEXT,
+      created_at TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_llm_traces_trace ON llm_traces(trace_id);
+    CREATE INDEX IF NOT EXISTS idx_llm_traces_phase ON llm_traces(phase, created_at);
+    CREATE INDEX IF NOT EXISTS idx_llm_traces_user ON llm_traces(user_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_llm_traces_outcome ON llm_traces(outcome, created_at);
+
     CREATE TABLE IF NOT EXISTS templates (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
