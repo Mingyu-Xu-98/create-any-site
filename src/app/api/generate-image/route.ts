@@ -2,11 +2,26 @@ import { NextRequest, NextResponse } from "next/server";
 import fs from "fs/promises";
 import path from "path";
 import { requireAuth, unauthorized } from "@/lib/require-auth";
+import { requireAdmin } from "@/lib/admin";
+import { db } from "@/lib/db";
+import { sites } from "@/lib/db/schema";
+import { eq } from "drizzle-orm";
 
 const SILICONFLOW_URL = "https://api.siliconflow.cn/v1/images/generations";
 const API_KEY = process.env.SILICONFLOW_API_KEY || "";
 const PREVIEW_PUBLISH_DIR = process.env.PREVIEW_PUBLISH_DIR?.trim() || "";
 const DRAFTS_SEGMENT = "drafts";
+
+// siteId format: accept alnum + dash + underscore, 8–64 chars. Rejects
+// anything that could be a path segment (`..`, `/`, `\`, null bytes).
+// This is a belt-and-braces check on top of the ownership lookup below —
+// even if an attacker somehow gets past the DB check, the regex blocks
+// every path traversal primitive at the door.
+const SITE_ID_RE = /^[a-zA-Z0-9_-]{8,64}$/;
+
+// Raster-only whitelist. SVG is excluded on purpose — it can carry inline
+// <script> and would be served straight from public/ with no sanitization.
+const ALLOWED_IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif"]);
 const DEFAULT_IMAGE_MODELS = "black-forest-labs/FLUX.1-schnell,Kwai-Kolors/Kolors";
 const IMAGE_MODELS = (process.env.SILICONFLOW_IMAGE_MODELS?.trim() || process.env.SILICONFLOW_IMAGE_MODEL?.trim() || DEFAULT_IMAGE_MODELS)
   .split(",")
@@ -43,6 +58,60 @@ export async function POST(req: NextRequest) {
         { error: "Image generation is not enabled. Set SILICONFLOW_IMAGE_MODEL or SILICONFLOW_IMAGE_MODELS to an available model." },
         { status: 400 },
       );
+    }
+
+    // ─── Input validation ──────────────────────────────────────────────
+    if (typeof filename !== "string" || !filename.trim()) {
+      return NextResponse.json({ error: "filename is required" }, { status: 400 });
+    }
+    if (typeof prompt !== "string" || !prompt.trim()) {
+      return NextResponse.json({ error: "prompt is required" }, { status: 400 });
+    }
+
+    // Normalize filename: strip any directory components, then enforce a
+    // raster-image extension. basename alone is not enough — we also need
+    // to reject `shell.png\0.svg` style tricks and anything without one
+    // of our whitelisted extensions.
+    const safeFilename = path.basename(filename).replace(/\0/g, "");
+    const ext = path.extname(safeFilename).toLowerCase();
+    if (!ALLOWED_IMAGE_EXTS.has(ext)) {
+      return NextResponse.json(
+        { error: `Unsupported image extension. Allowed: ${[...ALLOWED_IMAGE_EXTS].join(", ")}` },
+        { status: 400 },
+      );
+    }
+
+    // ─── siteId handling ───────────────────────────────────────────────
+    // Two branches:
+    //   (a) siteId provided — must pass regex AND belong to the current
+    //       user. Writes into sites-data/<siteId>/...
+    //   (b) siteId missing  — writes to the app's own public/images/,
+    //       which is a shared app-level asset dir. Only admins may do
+    //       this; normal users can never write outside their own site.
+    if (siteId !== undefined && siteId !== null && siteId !== "") {
+      if (typeof siteId !== "string" || !SITE_ID_RE.test(siteId)) {
+        return NextResponse.json({ error: "Invalid siteId" }, { status: 400 });
+      }
+      const site = await db
+        .select({ userId: sites.userId })
+        .from(sites)
+        .where(eq(sites.id, siteId))
+        .get();
+      if (!site) {
+        return NextResponse.json({ error: "Site not found" }, { status: 404 });
+      }
+      if (site.userId !== userId) {
+        // Don't leak existence — same 404 as above.
+        return NextResponse.json({ error: "Site not found" }, { status: 404 });
+      }
+    } else {
+      const adminId = await requireAdmin();
+      if (!adminId) {
+        return NextResponse.json(
+          { error: "siteId is required for non-admin users" },
+          { status: 403 },
+        );
+      }
     }
 
     // Determine image size per model
@@ -114,7 +183,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const safeFilename = path.basename(filename);
     console.log("[generate-image] request", { filename: safeFilename, siteId: siteId || null });
     const buffer = Buffer.from(await imgRes.arrayBuffer());
     const targetDirs = new Set<string>();
