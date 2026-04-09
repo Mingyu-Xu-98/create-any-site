@@ -252,6 +252,17 @@ export const userQuotas = sqliteTable("user_quotas", {
   updatedAt: text("updated_at").$defaultFn(() => new Date().toISOString()),
 });
 
+// ---- Feature Flags ----
+
+export const featureFlags = sqliteTable("feature_flags", {
+  key: text("key").primaryKey(),
+  enabled: integer("enabled").default(0),        // 0 = off, 1 = on
+  description: text("description"),
+  allowList: text("allow_list"),                  // JSON array of user IDs
+  createdAt: text("created_at").$defaultFn(() => new Date().toISOString()),
+  updatedAt: text("updated_at").$defaultFn(() => new Date().toISOString()),
+});
+
 // ---- Usage Logs (per-call token tracking) ----
 
 export const usageLogs = sqliteTable("usage_logs", {
