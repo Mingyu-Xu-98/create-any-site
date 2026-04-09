@@ -4,6 +4,17 @@ import path from "path";
 import { db } from "@/lib/db";
 import { sites } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
+import { checkRateLimit } from "@/lib/rate-limit";
+
+// Rate limit configuration — override at deploy time via env vars.
+// Defaults are intentionally conservative for a public chatbot endpoint
+// that calls SiliconFlow on every POST. A normal human visitor sends at
+// most a few messages per minute; these limits leave plenty of headroom
+// for real use while blocking any automated abuse long before it becomes
+// expensive.
+const RL_IP_PER_MIN = Number(process.env.SITE_CHAT_RL_IP_PER_MIN || 15);
+const RL_SITE_PER_MIN = Number(process.env.SITE_CHAT_RL_SITE_PER_MIN || 60);
+const RL_SITE_PER_DAY = Number(process.env.SITE_CHAT_RL_SITE_PER_DAY || 1000);
 
 interface KnowledgeChunk {
   topic: string;
@@ -77,6 +88,48 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ sit
   const site = await db.select({ id: sites.id }).from(sites).where(eq(sites.id, siteId)).get();
   if (!site) {
     return new Response(JSON.stringify({ error: "Site not found" }), { status: 404, headers: { "Content-Type": "application/json", ...CORS_HEADERS } });
+  }
+
+  // ─── Rate limiting ─────────────────────────────────────────────────────
+  // Three layers, first hit rejects:
+  //   1. per-IP per-minute    — caps single-actor bursts
+  //   2. per-site per-minute  — caps concurrent traffic on one popular site
+  //   3. per-site per-day     — hard daily ceiling per site (runaway guard)
+  // All three counters share the in-memory store in src/lib/rate-limit.ts.
+  // State is per-process, single-instance — acceptable for the current
+  // single-Node deployment. Revisit when scaling web horizontally.
+  const ip =
+    req.headers.get("x-forwarded-for")?.split(",")[0].trim() ||
+    req.headers.get("x-real-ip") ||
+    "unknown";
+
+  const rateLimitChecks = [
+    { key: `site-chat:ip:${ip}`, limit: RL_IP_PER_MIN, windowMs: 60_000, layer: "ip-per-minute" },
+    { key: `site-chat:site:${siteId}`, limit: RL_SITE_PER_MIN, windowMs: 60_000, layer: "site-per-minute" },
+    { key: `site-chat:site-day:${siteId}`, limit: RL_SITE_PER_DAY, windowMs: 86_400_000, layer: "site-per-day" },
+  ];
+  for (const check of rateLimitChecks) {
+    const result = checkRateLimit(check.key, check.limit, check.windowMs);
+    if (!result.ok) {
+      return new Response(
+        JSON.stringify({
+          error: "Rate limit exceeded",
+          layer: check.layer,
+          limit: check.limit,
+          retryAfterSec: result.retryAfterSec,
+        }),
+        {
+          status: 429,
+          headers: {
+            "Content-Type": "application/json",
+            "Retry-After": String(result.retryAfterSec),
+            "X-RateLimit-Limit": String(check.limit),
+            "X-RateLimit-Layer": check.layer,
+            ...CORS_HEADERS,
+          },
+        },
+      );
+    }
   }
 
   const apiKey = process.env.SILICONFLOW_API_KEY;
