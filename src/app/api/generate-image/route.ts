@@ -7,6 +7,7 @@ import { db } from "@/lib/db";
 import { sites } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { internalError } from "@/lib/api-errors";
+import { siteRoot, siteCurrentLink } from "@/lib/site-paths";
 
 const SILICONFLOW_URL = "https://api.siliconflow.cn/v1/images/generations";
 const API_KEY = process.env.SILICONFLOW_API_KEY || "";
@@ -189,8 +190,8 @@ export async function POST(req: NextRequest) {
     const targetDirs = new Set<string>();
 
     if (siteId) {
-      targetDirs.add(path.join(process.cwd(), "sites-data", siteId, "public", "images"));
-      targetDirs.add(path.join(process.cwd(), "sites-data", siteId, "out", "images"));
+      targetDirs.add(path.join(siteRoot(siteId), "public", "images"));
+      targetDirs.add(path.join(siteCurrentLink(siteId), "out", "images"));
       if (PREVIEW_PUBLISH_DIR) {
         targetDirs.add(path.join(PREVIEW_PUBLISH_DIR, DRAFTS_SEGMENT, siteId, "images"));
       }

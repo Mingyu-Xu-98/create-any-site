@@ -1,7 +1,8 @@
 import { NextRequest } from "next/server";
 import fs from "fs/promises";
-import path from "path";
 import { db } from "@/lib/db";
+import { resolveSiteDir } from "@/lib/site-paths";
+import path from "path";
 import { sites } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { checkRateLimit } from "@/lib/rate-limit";
@@ -140,7 +141,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ sit
   }
 
   // Load site knowledge
-  const knowledgePath = path.join(process.cwd(), "sites-data", siteId, "src", "data", "knowledge.json");
+  const activeDir = await resolveSiteDir(siteId);
+  const knowledgePath = path.join(activeDir, "src", "data", "knowledge.json");
   let chunks: KnowledgeChunk[] = [];
   try {
     const raw = await fs.readFile(knowledgePath, "utf-8");
@@ -153,7 +155,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ sit
   // Load site name from translations — try multiple key patterns
   let siteName = "";
   try {
-    const transPath = path.join(process.cwd(), "sites-data", siteId, "src", "i18n", "translations.ts");
+    const transPath = path.join(activeDir, "src", "i18n", "translations.ts");
     const transRaw = await fs.readFile(transPath, "utf-8");
     // Try patterns in priority order: hero.name (advanced mode), heyIm (legacy), name at top level
     const patterns = [

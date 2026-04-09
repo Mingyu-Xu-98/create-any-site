@@ -3,9 +3,11 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { sites, siteBuilds } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
+import fs from "fs/promises";
 import path from "path";
 import { hasPublishedPreviewDirectory, publishDraftPreview, unpublishPreview, syncDraftPreview } from "@/lib/build-runtime";
 import { internalError } from "@/lib/api-errors";
+import { siteBuildDir, siteCurrentLink, siteRoot } from "@/lib/site-paths";
 
 // GET /api/sites/[id]
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -91,7 +93,35 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         .from(siteBuilds).where(eq(siteBuilds.id, site.publishedBuildId)).get();
 
       if (publishedBuild?.fileMapSnapshot) {
-        // 1. Update DB
+        // Try fast path: symlink swap (if build dir still exists on disk)
+        const buildDir = siteBuildDir(id, site.publishedBuildId);
+        let usedSymlinkSwap = false;
+        try {
+          await fs.access(path.join(buildDir, "out", "index.html"));
+          // Build dir exists — atomic symlink swap
+          const link = siteCurrentLink(id);
+          const tmpLink = `${link}_tmp_${Date.now()}`;
+          await fs.symlink(path.join("builds", site.publishedBuildId), tmpLink);
+          await fs.rename(tmpLink, link);
+          try { await syncDraftPreview(id, buildDir); } catch {}
+          usedSymlinkSwap = true;
+        } catch {
+          // Build dir pruned — fall back to file restore from snapshot
+        }
+
+        if (!usedSymlinkSwap) {
+          // Slow path: restore files from DB snapshot
+          const fileMap = JSON.parse(publishedBuild.fileMapSnapshot) as Record<string, string>;
+          const siteDir = siteRoot(id);
+          for (const [filePath, content] of Object.entries(fileMap)) {
+            const fullPath = path.join(siteDir, filePath);
+            await fs.mkdir(path.dirname(fullPath), { recursive: true });
+            await fs.writeFile(fullPath, content, "utf-8");
+          }
+          try { await syncDraftPreview(id, siteDir); } catch {}
+        }
+
+        // Update DB
         await db.update(sites).set({
           draftBuildId: site.publishedBuildId,
           fileMap: publishedBuild.fileMapSnapshot,
@@ -100,19 +130,6 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
           buildError: null,
           updatedAt: now,
         }).where(and(eq(sites.id, id), eq(sites.userId, session.user.id)));
-
-        // 2. Restore files on disk from the snapshot
-        const fileMap = JSON.parse(publishedBuild.fileMapSnapshot) as Record<string, string>;
-        const siteDir = path.join(process.cwd(), "sites-data", id);
-        const fsModule = await import("fs/promises");
-        for (const [filePath, content] of Object.entries(fileMap)) {
-          const fullPath = path.join(siteDir, filePath);
-          await fsModule.mkdir(path.dirname(fullPath), { recursive: true });
-          await fsModule.writeFile(fullPath, content, "utf-8");
-        }
-
-        // 3. Re-sync preview directory
-        try { await syncDraftPreview(id, siteDir); } catch {}
       }
 
       return NextResponse.json({ ok: true, site: { status: site.status, rolledBack: true } });
@@ -157,9 +174,7 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   try { await unpublishPreview(id); } catch {}
 
   // Clean up site files on disk
-  const fs = await import("fs/promises");
-  const path = await import("path");
-  const siteDir = path.default.join(process.cwd(), "sites-data", id);
+  const siteDir = siteRoot(id);
   try { await fs.rm(siteDir, { recursive: true, force: true }); } catch {}
 
   await db

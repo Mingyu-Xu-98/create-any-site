@@ -7,11 +7,10 @@ import fs from "fs/promises";
 import path from "path";
 import { exec } from "child_process";
 import { logger } from "@/lib/logger";
-import { syncDraftPreview, hasPublishedPreviewDirectory, rewriteExportAssetPaths, ALLOWED_DEPENDENCIES } from "@/lib/build-runtime";
+import { syncDraftPreview, hasPublishedPreviewDirectory, rewriteExportAssetPaths, ALLOWED_DEPENDENCIES, migrateSiteLayout } from "@/lib/build-runtime";
 import { runCodeGuardrails, runAdvancedModeGuardrails } from "@/lib/code-guardrails";
 import { internalError } from "@/lib/api-errors";
-
-const SITES_DIR = path.join(process.cwd(), "sites-data");
+import { resolveSiteDir } from "@/lib/site-paths";
 const TRANSLATIONS_FILE = "src/i18n/translations.ts";
 
 function getPreviewUrl(siteId: string): string {
@@ -152,7 +151,9 @@ export async function POST(req: NextRequest) {
       try { fileMap = { ...JSON.parse(site.fileMap), ...fileMap }; } catch {}
     }
 
-    const siteDir = path.join(SITES_DIR, siteId);
+    // Ensure site is migrated to versioned layout (no-op if already done)
+    await migrateSiteLayout(siteId, site?.draftBuildId || undefined);
+    const siteDir = await resolveSiteDir(siteId);
 
     // Apply each change
     const applied: string[] = [];
