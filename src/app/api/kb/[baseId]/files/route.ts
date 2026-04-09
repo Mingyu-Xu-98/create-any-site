@@ -5,6 +5,7 @@ import { knowledgeBases, knowledgeFiles } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { saveUserImage, isImageFile } from "@/lib/asset-store";
 import { DEFAULT_MAX_KB_UPLOAD_BYTES, checkContentLength, checkFileSize } from "@/lib/upload-limits";
+import { internalError } from "@/lib/api-errors";
 
 /**
  * POST /api/kb/[baseId]/files — upload a file or add a link to a knowledge base.
@@ -184,9 +185,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ bas
 
   return NextResponse.json({ fileId, name: fileName, description, keywords, contentLength: rawContent.length });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Unknown error";
-    console.error("[KB upload error]", msg, err);
-    return NextResponse.json({ error: `Upload failed: ${msg}` }, { status: 500 });
+    return internalError(err, "kb-upload", { clientMessage: "Upload failed" });
   }
 }
 

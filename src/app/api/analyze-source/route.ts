@@ -7,6 +7,7 @@ import { saveUserImage, isImageFile } from "@/lib/asset-store";
 import { auth } from "@/lib/auth";
 import { requireAuth, unauthorized } from "@/lib/require-auth";
 import { DEFAULT_MAX_UPLOAD_BYTES, checkContentLength, checkFileSize } from "@/lib/upload-limits";
+import { internalError } from "@/lib/api-errors";
 import { parsePdfWithMinerU as sharedParsePdfWithMinerU, basicPdfExtract as sharedBasicPdfExtract, parsePdfSafe as sharedParsePdfSafe } from "@/lib/pdf-parser";
 
 // ─── PDF Parsing (delegates to shared module @/lib/pdf-parser) ───
@@ -661,8 +662,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ items, relations: extractedRelations, sourceType: body.type });
     }
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown error";
-    logger.error("handler", `[${requestId}] Error: ${message}`);
-    return NextResponse.json({ error: message }, { status: 500 });
+    logger.error("handler", `[${requestId}] Error: ${err instanceof Error ? err.message : String(err)}`);
+    return internalError(err, "analyze-source");
   }
 }

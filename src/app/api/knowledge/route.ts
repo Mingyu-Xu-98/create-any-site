@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { knowledgeItems } from "@/lib/db/schema";
 import { eq, desc, and } from "drizzle-orm";
+import { internalError } from "@/lib/api-errors";
 
 // GET /api/knowledge - List current user's knowledge items
 export async function GET() {
@@ -66,9 +67,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ok: true, count: created.length, ids: created });
   } catch (err) {
-    console.error("POST /api/knowledge error:", err);
-    const message = err instanceof Error ? err.message : "Unknown error";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return internalError(err, "knowledge");
   }
 }
 

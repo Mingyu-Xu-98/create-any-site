@@ -9,6 +9,7 @@ import { exec } from "child_process";
 import { logger } from "@/lib/logger";
 import { syncDraftPreview, hasPublishedPreviewDirectory, rewriteExportAssetPaths, ALLOWED_DEPENDENCIES } from "@/lib/build-runtime";
 import { runCodeGuardrails, runAdvancedModeGuardrails } from "@/lib/code-guardrails";
+import { internalError } from "@/lib/api-errors";
 
 const SITES_DIR = path.join(process.cwd(), "sites-data");
 const TRANSLATIONS_FILE = "src/i18n/translations.ts";
@@ -297,8 +298,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ok: true, applied, buildSuccess, buildError: buildError || undefined, buildLogs, verification });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Unknown error";
-    logger.error("modify", `[${requestId}] Failed: ${msg}`);
-    return NextResponse.json({ error: msg }, { status: 500 });
+    logger.error("modify", `[${requestId}] Failed: ${err instanceof Error ? err.message : String(err)}`);
+    return internalError(err, "modify");
   }
 }

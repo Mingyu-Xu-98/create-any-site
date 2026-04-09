@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { sites } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { checkRateLimit } from "@/lib/rate-limit";
+import { internalErrorWithHeaders } from "@/lib/api-errors";
 
 // Rate limit configuration — override at deploy time via env vars.
 // Defaults are intentionally conservative for a public chatbot endpoint
@@ -186,8 +187,15 @@ ${relevantKnowledge}`;
   });
 
   if (!response.ok) {
-    const err = await response.text();
-    return new Response(JSON.stringify({ error: err }), { status: response.status, headers: { "Content-Type": "application/json", ...CORS_HEADERS } });
+    // Log upstream error body server-side but NEVER leak it to the
+    // public chatbot caller — it can contain siliconflow internals.
+    const upstreamBody = await response.text();
+    return internalErrorWithHeaders(
+      new Error(`siliconflow ${response.status}: ${upstreamBody.slice(0, 500)}`),
+      "site-chat",
+      CORS_HEADERS,
+      { clientMessage: "Chat service temporarily unavailable", status: 502 },
+    );
   }
 
   const encoder = new TextEncoder();
