@@ -8,6 +8,7 @@ import fs from "fs/promises";
 import path from "path";
 import { chatCompletion, getChatProviderSummary, hasChatProvider } from "@/lib/llm";
 import { requireAuth, unauthorized } from "@/lib/require-auth";
+import { internalError } from "@/lib/api-errors";
 
 const SPEC_PROMPT_PATH = path.join(process.cwd(), "src/prompts/compile-spec.md");
 
@@ -137,9 +138,8 @@ ${activatedSkillContext ? `## 已激活的 Skill (Level 1 — 完整指令)\n\n$
     });
   } catch (err) {
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-    const message = err instanceof Error ? err.message : "Unknown AI error";
-    logger.error("compile-spec", `[${requestId}] AI error (${elapsed}s): ${message}`);
-    return NextResponse.json({ error: message }, { status: 500 });
+    logger.error("compile-spec", `[${requestId}] AI error (${elapsed}s): ${err instanceof Error ? err.message : String(err)}`);
+    return internalError(err, "compile-spec");
   }
 
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);

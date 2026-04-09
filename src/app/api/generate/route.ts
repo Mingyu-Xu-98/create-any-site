@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import { siteBuilds, sites } from "@/lib/db/schema";
 import { scheduleBuildJob } from "@/lib/build-queue";
 import type { WorkspaceData, UserSelections } from "@/lib/types";
+import { internalError } from "@/lib/api-errors";
 
 function getPreviewBaseUrl(req: NextRequest): string {
   const configured = process.env.PREVIEW_BASE_URL?.trim();
@@ -115,7 +116,6 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ok: true, jobId, siteId, status: "queued" });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown error";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return internalError(err, "generate");
   }
 }

@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { knowledgeGroups, knowledgeItems } from "@/lib/db/schema";
 import { eq, desc } from "drizzle-orm";
+import { internalError } from "@/lib/api-errors";
 
 // GET - List user's knowledge groups with item counts
 export async function GET() {
@@ -83,7 +84,6 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ id, itemCount: items?.length || 0 });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Unknown error";
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return internalError(err, "knowledge-groups");
   }
 }

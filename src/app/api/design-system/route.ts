@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateDesignSystem } from "@/lib/design-intelligence";
 import { requireAuth, unauthorized } from "@/lib/require-auth";
+import { internalError } from "@/lib/api-errors";
 
 export async function POST(req: NextRequest) {
   const userId = await requireAuth();
@@ -19,7 +20,6 @@ export async function POST(req: NextRequest) {
     const designSystem = await generateDesignSystem(query.trim());
     return NextResponse.json(designSystem);
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Design system generation failed";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return internalError(err, "design-system");
   }
 }

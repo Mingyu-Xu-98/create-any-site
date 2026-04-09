@@ -3,6 +3,7 @@ import JSZip from "jszip";
 import type { WorkspaceData } from "@/lib/types";
 import { requireAuth, unauthorized } from "@/lib/require-auth";
 import { DEFAULT_MAX_UPLOAD_BYTES, checkContentLength, checkFileSize } from "@/lib/upload-limits";
+import { internalError } from "@/lib/api-errors";
 
 // ─── Extract all readable text from a zip ───
 async function extractAllText(buffer: ArrayBuffer): Promise<{
@@ -324,9 +325,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(data);
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown error";
-    console.error("Analyze error:", message);
-    return NextResponse.json({ error: message }, { status: 500 });
+    return internalError(err, "analyze");
   }
 }
 

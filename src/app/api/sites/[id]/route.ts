@@ -5,6 +5,7 @@ import { sites, siteBuilds } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import path from "path";
 import { hasPublishedPreviewDirectory, publishDraftPreview, unpublishPreview, syncDraftPreview } from "@/lib/build-runtime";
+import { internalError } from "@/lib/api-errors";
 
 // GET /api/sites/[id]
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -57,8 +58,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       try {
         publishedUrl = await publishDraftPreview(id);
       } catch (err) {
-        const msg = err instanceof Error ? err.message : "Failed to publish";
-        return NextResponse.json({ error: msg }, { status: 500 });
+        return internalError(err, "sites-publish", { clientMessage: "Failed to publish" });
       }
       await db
         .update(sites)
@@ -141,8 +141,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
     return NextResponse.json({ ok: true });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown error";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return internalError(err, "sites-patch");
   }
 }
 

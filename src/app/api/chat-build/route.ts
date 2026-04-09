@@ -7,6 +7,7 @@ import { eq, inArray } from "drizzle-orm";
 import { runBuildConversation } from "@/lib/build-agents";
 import { getChatProviderSummary, hasChatProvider } from "@/lib/llm";
 import { requireAuth, unauthorized } from "@/lib/require-auth";
+import { internalError } from "@/lib/api-errors";
 
 const CODE_CONTEXT_FILES = [
   "src/app/page.tsx", "src/app/globals.css", "src/app/layout.tsx",
@@ -170,8 +171,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(result);
   } catch (err) {
-    const errMsg = err instanceof Error ? err.message : "Unknown error";
-    logger.error("chat-build", `[${requestId}] AI error: ${errMsg}`);
-    return NextResponse.json({ error: errMsg }, { status: 500 });
+    logger.error("chat-build", `[${requestId}] AI error: ${err instanceof Error ? err.message : String(err)}`);
+    return internalError(err, "chat-build");
   }
 }

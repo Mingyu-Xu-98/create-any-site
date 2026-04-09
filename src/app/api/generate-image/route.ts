@@ -6,6 +6,7 @@ import { requireAdmin } from "@/lib/admin";
 import { db } from "@/lib/db";
 import { sites } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
+import { internalError } from "@/lib/api-errors";
 
 const SILICONFLOW_URL = "https://api.siliconflow.cn/v1/images/generations";
 const API_KEY = process.env.SILICONFLOW_API_KEY || "";
@@ -210,8 +211,6 @@ export async function POST(req: NextRequest) {
       siteId: siteId || null,
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown error";
-    console.error("Image generation error:", message);
-    return NextResponse.json({ error: message }, { status: 500 });
+    return internalError(err, "generate-image");
   }
 }
