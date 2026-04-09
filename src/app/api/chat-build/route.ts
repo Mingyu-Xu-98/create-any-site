@@ -6,6 +6,7 @@ import { skills, sites, knowledgeGroups } from "@/lib/db/schema";
 import { eq, inArray } from "drizzle-orm";
 import { runBuildConversation } from "@/lib/build-agents";
 import { getChatProviderSummary, hasChatProvider } from "@/lib/llm";
+import { requireAuth, unauthorized } from "@/lib/require-auth";
 
 const CODE_CONTEXT_FILES = [
   "src/app/page.tsx", "src/app/globals.css", "src/app/layout.tsx",
@@ -16,6 +17,9 @@ const CODE_CONTEXT_FILES = [
 ];
 
 export async function POST(req: NextRequest) {
+  const authedUserId = await requireAuth();
+  if (!authedUserId) return unauthorized();
+
   const requestId = crypto.randomUUID().slice(0, 8);
   try {
     if (!hasChatProvider()) {

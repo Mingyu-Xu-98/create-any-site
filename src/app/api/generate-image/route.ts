@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import fs from "fs/promises";
 import path from "path";
+import { requireAuth, unauthorized } from "@/lib/require-auth";
 
 const SILICONFLOW_URL = "https://api.siliconflow.cn/v1/images/generations";
 const API_KEY = process.env.SILICONFLOW_API_KEY || "";
@@ -19,6 +20,9 @@ const IMAGE_MODELS = (process.env.SILICONFLOW_IMAGE_MODELS?.trim() || process.en
  * Body: { prompt: string; filename: string; style: string; siteId?: string }
  */
 export async function POST(req: NextRequest) {
+  const userId = await requireAuth();
+  if (!userId) return unauthorized();
+
   try {
     const { prompt, filename, siteId } = (await req.json()) as {
       prompt: string;

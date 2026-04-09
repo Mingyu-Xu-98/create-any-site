@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import JSZip from "jszip";
 import type { WorkspaceData } from "@/lib/types";
+import { requireAuth, unauthorized } from "@/lib/require-auth";
 
 // ─── Extract all readable text from a zip ───
 async function extractAllText(buffer: ArrayBuffer): Promise<{
@@ -277,6 +278,9 @@ ${allContent}${linksSection}`;
 }
 
 export async function POST(req: NextRequest) {
+  const userId = await requireAuth();
+  if (!userId) return unauthorized();
+
   try {
     const formData = await req.formData();
     const file = formData.get("file") as File;
