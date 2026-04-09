@@ -284,6 +284,15 @@ function initDb() {
     CREATE INDEX IF NOT EXISTS idx_llm_traces_user ON llm_traces(user_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_llm_traces_outcome ON llm_traces(outcome, created_at);
 
+    CREATE TABLE IF NOT EXISTS feature_flags (
+      key TEXT PRIMARY KEY,
+      enabled INTEGER DEFAULT 0,
+      description TEXT,
+      allow_list TEXT,
+      created_at TEXT,
+      updated_at TEXT
+    );
+
     CREATE TABLE IF NOT EXISTS templates (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -351,3 +360,6 @@ function seedAdmin() {
 }
 
 seedAdmin();
+
+// Start the backup scheduler (side-effect import — timer is .unref()'d)
+import("@/lib/db-backup").catch(() => {});
