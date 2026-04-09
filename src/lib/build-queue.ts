@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { db, sqlite } from "@/lib/db";
 import { siteBuilds, sites } from "@/lib/db/schema";
 import { logger } from "@/lib/logger";
-import { runSiteBuild, summarizeBuildOutput } from "@/lib/build-runtime";
+import { runSiteBuild, summarizeBuildOutput, cleanupOldBuilds } from "@/lib/build-runtime";
 import type { WorkspaceData, UserSelections } from "@/lib/types";
 
 interface BuildPayload {
@@ -98,6 +98,7 @@ export async function processBuildJob(jobId: string, options?: { alreadyClaimed?
 
     const buildPromise = runSiteBuild({
       siteId: job.siteId,
+      buildId: jobId,
       userId: payload.userId,
       data: payload.data,
       selections: payload.selections,
@@ -168,6 +169,9 @@ export async function processBuildJob(jobId: string, options?: { alreadyClaimed?
       updatedAt: finishedAt,
     }).where(eq(sites.id, job.siteId));
   } finally {
+    // Clean up old build directories (fire-and-forget)
+    void cleanupOldBuilds(job.siteId).catch(() => {});
+
     if (shouldInlineBuildJobs()) {
       void kickInlineBuildQueue();
     }

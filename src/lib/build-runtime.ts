@@ -8,14 +8,19 @@ import { getInstalledNextVersion } from "@/lib/next-version";
 import { runCodeGuardrails, runAdvancedModeGuardrails } from "@/lib/code-guardrails";
 import { copyUserImagesToSite } from "@/lib/asset-store";
 import { routeKnowledge, buildRoutedChatbotContext } from "@/lib/knowledge-router";
-import { knowledgeItems as knowledgeItemsTable } from "@/lib/db/schema";
+import { knowledgeItems as knowledgeItemsTable, sites as sitesTable } from "@/lib/db/schema";
 import { db } from "@/lib/db";
 import { eq } from "drizzle-orm";
 import type { KnowledgeItem } from "@/lib/knowledge";
 import { getSpecSections } from "@/lib/site-spec";
 import { STYLE_CONFIG } from "@/lib/generator-config";
-
-const SITES_DIR = path.join(process.cwd(), "sites-data");
+import {
+  SITES_DIR,
+  siteRoot,
+  siteBuildDir,
+  siteCurrentLink,
+  siteBuildsRoot,
+} from "@/lib/site-paths";
 const RUNTIME_BASE_DIR = (process.env.RUNTIME_BASE_DIR?.trim() || path.join(SITES_DIR, "_runtime_base")).replace(/\/+$/, "");
 const SHARED_MODULES = path.join(SITES_DIR, "_shared_node_modules");
 const PREVIEW_PORT = 3002;
@@ -28,9 +33,102 @@ const USE_SHARED_NODE_MODULES = process.env.USE_SHARED_NODE_MODULES === "1";
 let staticServer: http.Server | null = null;
 
 async function ensureSiteDir(siteId: string): Promise<string> {
-  const siteDir = path.join(SITES_DIR, siteId);
-  await fs.mkdir(siteDir, { recursive: true });
-  return siteDir;
+  const dir = siteRoot(siteId);
+  await fs.mkdir(dir, { recursive: true });
+  await fs.mkdir(siteBuildsRoot(siteId), { recursive: true });
+  return dir;
+}
+
+/**
+ * Create an isolated build directory: `sites-data/{siteId}/builds/{buildId}/`.
+ * Sets up a relative symlink for node_modules so the build can find deps
+ * without duplicating them.
+ */
+async function prepareBuildDir(siteId: string, buildId: string): Promise<string> {
+  const dir = siteBuildDir(siteId, buildId);
+  await fs.mkdir(dir, { recursive: true });
+
+  // Relative symlink: builds/{buildId}/node_modules → ../../node_modules
+  const nmLink = path.join(dir, "node_modules");
+  try {
+    await fs.symlink("../../node_modules", nmLink);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+  }
+
+  return dir;
+}
+
+/**
+ * Atomically swap the `current` symlink to point at a new build.
+ * Uses symlink + rename for POSIX atomicity — the symlink never
+ * points at a partial build.
+ */
+async function swapCurrentSymlink(siteId: string, buildId: string): Promise<void> {
+  const link = siteCurrentLink(siteId);
+  const tmpLink = `${link}_tmp_${Date.now()}`;
+  // Relative target so the symlink stays valid if the repo moves
+  const target = path.join("builds", buildId);
+  await fs.symlink(target, tmpLink);
+  await fs.rename(tmpLink, link);
+}
+
+/**
+ * Migrate a site from the legacy flat layout to the versioned-builds layout.
+ * Idempotent — safe to call on every build/modify.
+ *
+ * Legacy: sites-data/{siteId}/src/ + out/ + package.json ...
+ * New:    sites-data/{siteId}/builds/{buildId}/... + current → builds/{buildId}
+ */
+export async function migrateSiteLayout(siteId: string, buildId?: string): Promise<void> {
+  const root = siteRoot(siteId);
+  const buildsDir = siteBuildsRoot(siteId);
+  const link = siteCurrentLink(siteId);
+
+  // Already migrated?
+  try {
+    await fs.lstat(link);
+    return; // symlink exists → done
+  } catch {
+    // No symlink yet — check if migration is needed
+  }
+
+  // Check if legacy layout exists (has src/ directly in site root)
+  const legacySrc = path.join(root, "src");
+  try {
+    await fs.access(legacySrc);
+  } catch {
+    // No src/ at root — either empty site or already partially migrated. Nothing to do.
+    return;
+  }
+
+  const id = buildId || `migrated_${Date.now()}`;
+  const targetDir = path.join(buildsDir, id);
+  await fs.mkdir(targetDir, { recursive: true });
+
+  // Move source files and build artifacts into the build dir
+  const toMove = ["src", "out", "package.json", "tsconfig.json", "next.config.mjs", "next.config.js"];
+  for (const name of toMove) {
+    const src = path.join(root, name);
+    const dest = path.join(targetDir, name);
+    try {
+      await fs.rename(src, dest);
+    } catch {
+      // File doesn't exist — skip
+    }
+  }
+
+  // Create node_modules symlink inside the build dir
+  const nmLink = path.join(targetDir, "node_modules");
+  try {
+    await fs.symlink("../../node_modules", nmLink);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+  }
+
+  // Create the current symlink
+  await fs.symlink(path.join("builds", id), link);
+  logger.info("generate", `Migrated site ${siteId} to versioned layout (build: ${id})`);
 }
 
 async function writeFilesToSiteDir(siteDir: string, files: Record<string, string>) {
@@ -47,6 +145,64 @@ async function writeFilesToSiteDir(siteDir: string, files: Record<string, string
     count++;
   }
   return count;
+}
+
+const MAX_RETAINED_BUILDS = Number(process.env.MAX_RETAINED_BUILDS || 5);
+
+/**
+ * Remove old build directories for a site, keeping the N most recent
+ * and always protecting builds referenced by draftBuildId / publishedBuildId.
+ * Fire-and-forget — errors are logged but never propagate.
+ */
+export async function cleanupOldBuilds(siteId: string): Promise<void> {
+  try {
+    const buildsDir = siteBuildsRoot(siteId);
+    let entries: string[];
+    try {
+      entries = await fs.readdir(buildsDir);
+    } catch {
+      return; // no builds dir
+    }
+    if (entries.length <= MAX_RETAINED_BUILDS) return;
+
+    // Find protected build IDs
+    const site = await db
+      .select({ draftBuildId: sitesTable.draftBuildId, publishedBuildId: sitesTable.publishedBuildId })
+      .from(sitesTable)
+      .where(eq(sitesTable.id, siteId))
+      .get();
+    const protectedIds = new Set<string>();
+    if (site?.draftBuildId) protectedIds.add(site.draftBuildId);
+    if (site?.publishedBuildId) protectedIds.add(site.publishedBuildId);
+
+    // Sort by creation time (oldest first) using directory stat
+    const withTimes = await Promise.all(
+      entries.map(async (name) => {
+        const dir = path.join(buildsDir, name);
+        try {
+          const stat = await fs.stat(dir);
+          return { name, mtimeMs: stat.mtimeMs };
+        } catch {
+          return { name, mtimeMs: 0 };
+        }
+      }),
+    );
+    withTimes.sort((a, b) => b.mtimeMs - a.mtimeMs); // newest first
+
+    // Skip the N most recent + protected ones; delete the rest
+    let kept = 0;
+    for (const entry of withTimes) {
+      if (protectedIds.has(entry.name) || kept < MAX_RETAINED_BUILDS) {
+        kept++;
+        continue;
+      }
+      const dir = path.join(buildsDir, entry.name);
+      await fs.rm(dir, { recursive: true, force: true });
+      logger.info("generate", `Cleaned up old build: ${siteId}/builds/${entry.name}`);
+    }
+  } catch (err) {
+    logger.warn("generate", `cleanupOldBuilds(${siteId}) failed: ${err instanceof Error ? err.message : "unknown"}`);
+  }
 }
 
 async function copyDirectory(sourceDir: string, targetDir: string): Promise<void> {
@@ -132,10 +288,22 @@ export async function publishDraftPreview(siteId: string): Promise<string> {
   try {
     await fs.access(draftDir);
   } catch {
-    const siteOutDir = path.join(SITES_DIR, siteId, "out");
+    // Try current symlink first, fall back to legacy flat layout
+    const currentOutDir = path.join(siteCurrentLink(siteId), "out");
+    const legacyOutDir = path.join(SITES_DIR, siteId, "out");
+    let fallbackSiteDir: string | null = null;
     try {
-      await fs.access(siteOutDir);
-      await syncDraftPreview(siteId, path.join(SITES_DIR, siteId));
+      await fs.access(currentOutDir);
+      fallbackSiteDir = siteCurrentLink(siteId);
+    } catch {
+      try {
+        await fs.access(legacyOutDir);
+        fallbackSiteDir = path.join(SITES_DIR, siteId);
+      } catch { /* neither exists */ }
+    }
+    try {
+      if (!fallbackSiteDir) throw new Error("no build output");
+      await syncDraftPreview(siteId, fallbackSiteDir);
     } catch {
       throw new Error(`Draft preview not found for site ${siteId}. Please rebuild first.`);
     }
@@ -578,7 +746,7 @@ async function ensureStaticServer(): Promise<void> {
         const healthMatch = rawUrl.match(/^\/([^/]+)\/__health$/);
         if (healthMatch) {
           const siteId = healthMatch[1];
-          const indexFile = path.join(SITES_DIR, siteId, "out", "index.html");
+          const indexFile = path.join(siteCurrentLink(siteId), "out", "index.html");
           try {
             const html = await fs.readFile(indexFile, "utf-8");
             res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
@@ -598,7 +766,7 @@ async function ensureStaticServer(): Promise<void> {
         if (filePath === "/") filePath = "/index.html";
         if (!path.extname(filePath)) filePath += ".html";
 
-        const outDir = path.join(SITES_DIR, siteId, "out");
+        const outDir = path.join(siteCurrentLink(siteId), "out");
         const fullPath = path.join(outDir, filePath);
         if (!fullPath.startsWith(outDir)) { res.writeHead(403); res.end("Forbidden"); return; }
 
@@ -614,7 +782,7 @@ async function ensureStaticServer(): Promise<void> {
         try {
           const parts = decodeURIComponent((req.url || "/").split("?")[0]).split("/").filter(Boolean);
           if (parts.length > 0) {
-            const index = await fs.readFile(path.join(SITES_DIR, parts[0], "out", "index.html"));
+            const index = await fs.readFile(path.join(siteCurrentLink(parts[0]), "out", "index.html"));
             res.writeHead(200, { "Content-Type": "text/html", "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store, must-revalidate" });
             res.end(index);
             return;
@@ -638,6 +806,7 @@ async function ensureStaticServer(): Promise<void> {
 
 export interface RunSiteBuildInput {
   siteId: string;
+  buildId?: string;          // When set, uses immutable build dir; otherwise legacy flat layout
   userId?: string;
   data: WorkspaceData;
   selections: UserSelections;
@@ -1179,17 +1348,24 @@ export async function runSiteBuild(input: RunSiteBuildInput): Promise<RunSiteBui
 
   const fileCount = Object.keys(files).length;
   await progress(`📄 写入 ${fileCount} 个文件`);
-  const siteDir = await ensureSiteDir(siteId);
-  await writeFilesToSiteDir(siteDir, files);
+
+  // Set up site directory — immutable build dir when buildId is provided
+  const rootDir = await ensureSiteDir(siteId);
+  const buildDir = input.buildId
+    ? await prepareBuildDir(siteId, input.buildId)
+    : rootDir;
+  await writeFilesToSiteDir(buildDir, files);
 
   // Copy user's uploaded images into the site's public/images/
   if (input.userId) {
-    const imgCount = await copyUserImagesToSite(input.userId, siteDir);
+    const imgCount = await copyUserImagesToSite(input.userId, buildDir);
     if (imgCount > 0) logger.info("generate", `[${requestId}] Copied ${imgCount} user images to site`);
   }
 
   await progress("📦 准备依赖...");
-  await ensureNodeModules(siteDir);
+  // Deps live at site root level; build dir uses relative symlink
+  await ensureNodeModules(input.buildId ? rootDir : buildDir);
+  const siteDir = buildDir; // alias for backward compat in the rest of the function
 
   // Build with up to MAX_BUILD_RETRIES retries. On each failure, feed the
   // build error back to the Code Agent as a repair hint so it can produce
@@ -1306,6 +1482,12 @@ export async function runSiteBuild(input: RunSiteBuildInput): Promise<RunSiteBui
     await syncDraftPreview(siteId, siteDir);
   } else {
     await ensureStaticServer();
+  }
+
+  // Swap the `current` symlink to this build (atomic — readers never see partial state)
+  if (input.buildId) {
+    await swapCurrentSymlink(siteId, input.buildId);
+    logger.info("generate", `[${requestId}] Symlink current → builds/${input.buildId}`);
   }
 
   const url = PREVIEW_PUBLISH_DIR
