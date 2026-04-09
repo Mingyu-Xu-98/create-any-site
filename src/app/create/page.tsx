@@ -298,28 +298,23 @@ function CreatePageInner() {
         }
       });
     } else if (sid) {
-      fetch("/api/conversations").then(r => r.json()).then(d => {
-        const conv = (d.conversations || []).find((c: ConvSummary) => c.siteId === sid);
-        if (conv) {
-          fetch(`/api/conversations/${conv.id}`).then(r => r.json()).then(cd => {
-            if (cd.conversation) {
-              convIdRef.current = conv.id; setConversationId(conv.id); siteIdRef.current = sid; setSiteId(sid);
-              setChatMessages(cd.conversation.messages || []);
-              fetch(`/api/sites/${sid}`).then(r => r.json()).then(sd => {
-                if (sd.site?.prd) { try { setPrdData(JSON.parse(sd.site.prd)); } catch {} }
-                if (sd.site?.publishedUrl) setPublishedUrl(sd.site.publishedUrl);
-                if (sd.site?.status) setSiteStatus(sd.site.status as "draft" | "published" | "archived");
-                if (sd.site?.editorState) {
-                  try {
-                    const editorState = JSON.parse(sd.site.editorState);
-                    if (editorState?.compiledSpec) setCompiledSpec(editorState.compiledSpec);
-                    if (Array.isArray(editorState?.knowledgeRefs)) setSiteResources(editorState.knowledgeRefs);
-                  } catch {}
-                }
-              });
-              if (cd.conversation.previewUrl) { setPreviewUrl(cd.conversation.previewUrl); setGenStatus("ready"); setShowPreview(true); }
-            }
-          });
+      // Load site data directly — conversation may have been cleaned up
+      // after a successful build. Enter edit mode with site state only.
+      siteIdRef.current = sid;
+      setSiteId(sid);
+      fetch(`/api/sites/${sid}`).then(r => r.json()).then(sd => {
+        if (sd.site) {
+          if (sd.site.prd) { try { setPrdData(JSON.parse(sd.site.prd)); } catch {} }
+          if (sd.site.publishedUrl) setPublishedUrl(sd.site.publishedUrl);
+          if (sd.site.previewUrl) { setPreviewUrl(sd.site.previewUrl); setGenStatus("ready"); setShowPreview(true); }
+          if (sd.site.status) setSiteStatus(sd.site.status as "draft" | "published" | "archived");
+          if (sd.site.editorState) {
+            try {
+              const editorState = JSON.parse(sd.site.editorState);
+              if (editorState?.compiledSpec) setCompiledSpec(editorState.compiledSpec);
+              if (Array.isArray(editorState?.knowledgeRefs)) setSiteResources(editorState.knowledgeRefs);
+            } catch {}
+          }
         }
       });
     }

@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { db, sqlite } from "@/lib/db";
-import { siteBuilds, sites } from "@/lib/db/schema";
+import { siteBuilds, sites, conversations } from "@/lib/db/schema";
 import { logger } from "@/lib/logger";
 import { runSiteBuild, summarizeBuildOutput, cleanupOldBuilds } from "@/lib/build-runtime";
 import type { WorkspaceData, UserSelections } from "@/lib/types";
@@ -146,6 +146,17 @@ export async function processBuildJob(jobId: string, options?: { alreadyClaimed?
       lastBuiltAt: finishedAt,
       updatedAt: finishedAt,
     }).where(eq(sites.id, job.siteId));
+
+    // Build succeeded — delete the build conversation.
+    // All build state (spec, PRD, fileMap, selections) is already persisted
+    // on sites + site_builds tables. The conversation is only chat history
+    // and is no longer needed. This forces future edits through the
+    // dedicated edit workspace instead of a stale, context-polluted chat.
+    try {
+      await db.delete(conversations).where(eq(conversations.siteId, job.siteId));
+    } catch {
+      // Non-critical — don't let conversation cleanup fail the build
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     const stdout = (err as { stdout?: string })?.stdout || "";
