@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import JSZip from "jszip";
 import type { WorkspaceData } from "@/lib/types";
 import { requireAuth, unauthorized } from "@/lib/require-auth";
+import { DEFAULT_MAX_UPLOAD_BYTES, checkContentLength, checkFileSize } from "@/lib/upload-limits";
 
 // ─── Extract all readable text from a zip ───
 async function extractAllText(buffer: ArrayBuffer): Promise<{
@@ -281,12 +282,18 @@ export async function POST(req: NextRequest) {
   const userId = await requireAuth();
   if (!userId) return unauthorized();
 
+  const tooLargeEarly = checkContentLength(req, DEFAULT_MAX_UPLOAD_BYTES);
+  if (tooLargeEarly) return tooLargeEarly;
+
   try {
     const formData = await req.formData();
     const file = formData.get("file") as File;
     if (!file) {
       return NextResponse.json({ error: "No file provided" }, { status: 400 });
     }
+
+    const tooLargeLate = checkFileSize(file, DEFAULT_MAX_UPLOAD_BYTES);
+    if (tooLargeLate) return tooLargeLate;
 
     const buffer = await file.arrayBuffer();
 

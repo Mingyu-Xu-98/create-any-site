@@ -6,6 +6,7 @@ import { logger } from "@/lib/logger";
 import { saveUserImage, isImageFile } from "@/lib/asset-store";
 import { auth } from "@/lib/auth";
 import { requireAuth, unauthorized } from "@/lib/require-auth";
+import { DEFAULT_MAX_UPLOAD_BYTES, checkContentLength, checkFileSize } from "@/lib/upload-limits";
 import { parsePdfWithMinerU as sharedParsePdfWithMinerU, basicPdfExtract as sharedBasicPdfExtract, parsePdfSafe as sharedParsePdfSafe } from "@/lib/pdf-parser";
 
 // ─── PDF Parsing (delegates to shared module @/lib/pdf-parser) ───
@@ -579,9 +580,15 @@ export async function POST(req: NextRequest) {
     const contentType = req.headers.get("content-type") || "";
 
     if (contentType.includes("multipart/form-data")) {
+      const tooLargeEarly = checkContentLength(req, DEFAULT_MAX_UPLOAD_BYTES);
+      if (tooLargeEarly) return tooLargeEarly;
+
       const formData = await req.formData();
       const file = formData.get("file") as File;
       if (!file) return NextResponse.json({ error: "No file provided" }, { status: 400 });
+
+      const tooLargeLate = checkFileSize(file, DEFAULT_MAX_UPLOAD_BYTES);
+      if (tooLargeLate) return tooLargeLate;
 
       const sourceName = file.name;
       const buffer = await file.arrayBuffer();
