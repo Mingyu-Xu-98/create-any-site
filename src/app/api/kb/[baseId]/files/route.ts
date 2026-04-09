@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { knowledgeBases, knowledgeFiles } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { saveUserImage, isImageFile } from "@/lib/asset-store";
+import { DEFAULT_MAX_KB_UPLOAD_BYTES, checkContentLength, checkFileSize } from "@/lib/upload-limits";
 
 /**
  * POST /api/kb/[baseId]/files — upload a file or add a link to a knowledge base.
@@ -34,10 +35,16 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ bas
   let mimeType: string | null = null;
 
   if (contentType.includes("multipart/form-data")) {
+    const tooLargeEarly = checkContentLength(req, DEFAULT_MAX_KB_UPLOAD_BYTES);
+    if (tooLargeEarly) return tooLargeEarly;
+
     // File upload
     const formData = await req.formData();
     const file = formData.get("file") as File;
     if (!file) return NextResponse.json({ error: "No file" }, { status: 400 });
+
+    const tooLargeLate = checkFileSize(file, DEFAULT_MAX_KB_UPLOAD_BYTES);
+    if (tooLargeLate) return tooLargeLate;
 
     fileName = file.name;
     const ext = fileName.split(".").pop()?.toLowerCase() || "";

@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { ingestionTasks } from "@/lib/db/schema";
 import { eq, or, gte } from "drizzle-orm";
 import { runIngestionTask } from "@/lib/ingestion-worker";
+import { DEFAULT_MAX_UPLOAD_BYTES, checkContentLength, checkFileSize } from "@/lib/upload-limits";
 
 /**
  * POST /api/ingestion — Submit a file for background processing.
@@ -22,9 +23,16 @@ export async function POST(req: NextRequest) {
   let urlType: string | null = null;
 
   if (contentType.includes("multipart/form-data")) {
+    const tooLargeEarly = checkContentLength(req, DEFAULT_MAX_UPLOAD_BYTES);
+    if (tooLargeEarly) return tooLargeEarly;
+
     const formData = await req.formData();
     const file = formData.get("file") as File;
     if (!file) return NextResponse.json({ error: "No file provided" }, { status: 400 });
+
+    const tooLargeLate = checkFileSize(file, DEFAULT_MAX_UPLOAD_BYTES);
+    if (tooLargeLate) return tooLargeLate;
+
     fileName = file.name;
     const ext = fileName.split(".").pop()?.toLowerCase() || "";
     const typeMap: Record<string, string> = { pdf: "pdf", docx: "docx", doc: "docx", txt: "txt", md: "md", zip: "zip", png: "image", jpg: "image", jpeg: "image", gif: "image", webp: "image", svg: "image" };
