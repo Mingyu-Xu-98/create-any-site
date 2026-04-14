@@ -80,8 +80,8 @@ export const heroCentered: SectionVariantFn = (ctx) => {
               <h1 className="showcase-title">{t.hero.lines[0]?.replace("> ", "") || t.ui.heyIm}</h1>
               <p className="showcase-subtitle">{t.hero.lines[1]?.replace("> ", "") || t.about.text}</p>
               <div className="showcase-actions">
-                <a href="#projects" className="showcase-btn showcase-btn-primary">{t.nav.projects}</a>
-                <a href="#contact" className="showcase-btn showcase-btn-secondary">{t.nav.contact}</a>
+                {t.nav.projects && <a href="#projects" className="showcase-btn showcase-btn-primary">{t.nav.projects}</a>}
+                {t.nav.contact && <a href="#contact" className="showcase-btn showcase-btn-secondary">{t.nav.contact}</a>}
               </div>
               <div className="showcase-tag-row">
                 {t.hero.tags.slice(0, 4).map((tag) => (<span key={tag} className="badge">{tag}</span>))}

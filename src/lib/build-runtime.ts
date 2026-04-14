@@ -1158,8 +1158,19 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 
 function generateAdvancedTranslations(data: WorkspaceData): string {
   const p = data;
+  // Build nav dynamically — only include sections that actually have content
+  const allNavZh: Record<string, string> = { about: "关于", projects: "项目", experience: "经历", skills: "技能", education: "教育", contact: "联系", posts: "文章", awards: "荣誉", publications: "论文" };
+  const allNavEn: Record<string, string> = { about: "About", projects: "Projects", experience: "Experience", skills: "Skills", education: "Education", contact: "Contact", posts: "Posts", awards: "Awards", publications: "Publications" };
+  const actualSections = ["about", ...(p.projects.length > 0 ? ["projects"] : []), ...(p.timeline.length > 0 ? ["experience"] : []), ...(p.skills.length > 0 ? ["skills"] : []), ...(p.education.length > 0 ? ["education"] : []), "contact"];
+  const navZh: Record<string, string> = {};
+  const navEn: Record<string, string> = {};
+  for (const s of actualSections) {
+    if (allNavZh[s]) navZh[s] = allNavZh[s];
+    if (allNavEn[s]) navEn[s] = allNavEn[s];
+  }
+
   const t = {
-    nav: { projects: "项目", experience: "经历", skills: "技能", education: "教育", contact: "联系", posts: "文章", awards: "荣誉", publications: "论文" },
+    nav: navZh,
     hero: { name: p.name, title: p.title, subtitle: "", tags: p.tags || [] },
     about: { text: p.bio || "", tags: p.bioTags || [] },
     projects: (p.projects || []).map(pr => {
@@ -1181,13 +1192,13 @@ function generateAdvancedTranslations(data: WorkspaceData): string {
     footer: `© ${new Date().getFullYear()} ${p.name}`,
     chatbot: { title: `${p.name} AI`, subtitle: "有什么想问的？", welcome: `你好！可以问我关于${p.name}的经历和技能。`, placeholder: "输入你的问题...", send: "发送", tooltip: "AI 对话", suggestions: p.projects.length > 0 ? [`介绍一下「${p.projects[0].title}」`, "你有哪些核心技能？", "你现在接受合作吗？"] : ["你是做什么的？", "介绍一下你的经历", "你有哪些技能？"] },
     share: { button: "分享", title: "分享", invite: `欢迎了解 ${p.name}`, desc: "个人网站", save: "保存", copy: "复制链接", copied: "已复制！" },
-    availableSections: ["about", ...(p.projects.length > 0 ? ["projects"] : []), ...(p.timeline.length > 0 ? ["experience"] : []), ...(p.skills.length > 0 ? ["skills"] : []), ...(p.education.length > 0 ? ["education"] : []), "contact"],
+    availableSections: actualSections,
     posts: [] as Array<{ title: string; slug: string; excerpt: string; content: string; category: string; tags: string[]; image: string; publishedAt: string; readingTime: string }>,
     links: (p.links || []).map(l => ({ label: l.label, url: l.url, icon: l.icon || "other" })),
   };
   const en = {
     ...JSON.parse(JSON.stringify(t)),
-    nav: { projects: "Projects", experience: "Experience", skills: "Skills", education: "Education", contact: "Contact", posts: "Posts", awards: "Awards", publications: "Publications" },
+    nav: navEn,
     hero: { name: p.nameEn || p.name, title: p.titleEn || p.title, subtitle: "", tags: t.hero.tags },
     about: { text: p.bioEn || p.bio || "", tags: t.about.tags },
     footer: `© ${new Date().getFullYear()} ${p.nameEn || p.name}`,
