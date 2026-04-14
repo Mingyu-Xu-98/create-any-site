@@ -770,9 +770,16 @@ function CreatePageInner() {
         if (!url) throw new Error("Build completed without preview URL");
         setThinkingSteps([zh ? "✅ 构建完成" : "✅ Build completed"]);
         if (genResult.siteId && data) {
+          setThinkingSteps([zh ? "🎨 正在生成配图..." : "🎨 Generating images..."]);
           const imageSummary = await generateImagesForSite({ siteId: genResult.siteId, theme, data });
           if (imageSummary?.attempted > 0) {
-            setChatMessages(prev => [...prev, { role: "assistant", content: zh ? `✅ 配图生成完成：${imageSummary.succeeded} 张` : `✅ ${imageSummary.succeeded} images generated` }]);
+            const msg = imageSummary.failed > 0
+              ? (zh ? `🎨 配图：${imageSummary.succeeded}/${imageSummary.attempted} 张成功` : `🎨 Images: ${imageSummary.succeeded}/${imageSummary.attempted} succeeded`)
+              : (zh ? `✅ 配图生成完成：${imageSummary.succeeded} 张` : `✅ ${imageSummary.succeeded} images generated`);
+            setChatMessages(prev => [...prev, { role: "assistant", content: msg }]);
+            if (imageSummary.errors.length > 0) {
+              console.warn("[image-gen] errors:", imageSummary.errors);
+            }
           }
         }
         setPreviewUrl(url); setGenStatus("ready"); setShowPreview(true); setPreviewTab("preview"); setPreviewKey(k => k + 1);
@@ -878,11 +885,13 @@ function CreatePageInner() {
         });
       }
       await updateSitePublishState("publish");
+      // Redirect to dashboard after successful publish
+      router.push("/dashboard");
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unknown error";
       alert(locale === "zh" ? `发布失败：${msg}` : `Publish failed: ${msg}`);
     }
-  }, [updateSitePublishState, prdData, locale]);
+  }, [updateSitePublishState, prdData, locale, router]);
 
   const handleUnpublish = useCallback(async () => {
     if (!siteIdRef.current) return;
