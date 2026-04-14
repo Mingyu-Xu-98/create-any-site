@@ -6,13 +6,22 @@ import { db } from "@/lib/db";
 import { knowledgeBases, knowledgeFiles } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 
+export interface KBFileEntry {
+  name: string;
+  content: string;
+  type: string;
+  assetPath?: string;
+  description?: string;
+  usageTag?: string;
+}
+
 export interface KBContext {
   /** Combined index.md from all user's knowledge bases */
   indexContent: string;
   /** Total file count */
   fileCount: number;
   /** All file contents, keyed by file ID */
-  fileContents: Map<string, { name: string; content: string; type: string }>;
+  fileContents: Map<string, KBFileEntry>;
 }
 
 /**
@@ -58,7 +67,7 @@ export async function loadFullKBContext(userId: string, knowledgeBaseId?: string
   }
 
   const indexContent = bases.map(b => b.indexMd || "").join("\n\n---\n\n");
-  const fileContents = new Map<string, { name: string; content: string; type: string }>();
+  const fileContents = new Map<string, KBFileEntry>();
 
   let fileCount = 0;
   for (const base of bases) {
@@ -68,6 +77,9 @@ export async function loadFullKBContext(userId: string, knowledgeBaseId?: string
       content: knowledgeFiles.content,
       type: knowledgeFiles.type,
       originalUrl: knowledgeFiles.originalUrl,
+      assetPath: knowledgeFiles.assetPath,
+      description: knowledgeFiles.description,
+      usageTag: knowledgeFiles.usageTag,
     }).from(knowledgeFiles)
       .where(eq(knowledgeFiles.baseId, base.id));
 
@@ -77,6 +89,9 @@ export async function loadFullKBContext(userId: string, knowledgeBaseId?: string
         name: f.name,
         content: f.content || "",
         type: f.type,
+        assetPath: f.assetPath || undefined,
+        description: f.description || undefined,
+        usageTag: f.usageTag || undefined,
       });
     }
   }
@@ -100,14 +115,23 @@ function stripHtml(html: string): string {
  * HTML tags from parsed PDFs/DOCs are stripped automatically.
  */
 export function formatFilesForPrompt(
-  fileContents: Map<string, { name: string; content: string; type: string }>,
+  fileContents: Map<string, KBFileEntry>,
   maxTotalChars = 60000,
 ): string {
   const parts: string[] = [];
   let totalChars = 0;
 
   for (const [id, file] of fileContents) {
-    if (file.type === "image") continue; // Skip images
+    // Include image metadata (not pixel data) so Code Agent knows available images
+    if (file.type === "image") {
+      const imgPath = file.assetPath || file.name;
+      parts.push(`### [${id}] ${file.name} [IMAGE]
+- Available at: /images/${imgPath}
+- Description: ${file.description || "User-uploaded image"}
+- Usage tag: ${file.usageTag || "unspecified"}
+(Use <Image src="/images/${imgPath}" /> in page.tsx to reference this image)`);
+      continue;
+    }
     if (!file.content || file.content.length < 10) continue;
 
     // Strip HTML tags from parsed documents (PDF parser often outputs raw HTML)

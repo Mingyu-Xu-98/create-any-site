@@ -21,7 +21,24 @@
  *   IMAGE_MODEL=Kwai-Kolors/Kolors
  */
 
+import { Agent } from "undici";
 import { startTrace } from "@/lib/llm-trace";
+
+// Node.js built-in fetch uses undici whose default headersTimeout/bodyTimeout
+// is 300 s. LLM code-generation calls routinely exceed that, so we create a
+// long-timeout dispatcher shared by all LLM fetches.
+const LLM_TIMEOUT_MS = 1_200_000; // 20 min — Code Agent on slow providers can take 8-15 min
+
+const llmDispatcher = new Agent({
+  headersTimeout: LLM_TIMEOUT_MS,   // wait for first byte
+  bodyTimeout: LLM_TIMEOUT_MS,      // wait for full body
+  connect: { timeout: 30_000 },     // 30 s connection timeout
+});
+
+/** fetch() wrapper that bypasses Node.js undici's default 300 s timeout. */
+function llmFetch(url: string, init: RequestInit): Promise<Response> {
+  return fetch(url, { ...init, dispatcher: llmDispatcher } as RequestInit);
+}
 
 type ChatRole = "system" | "user" | "assistant";
 
@@ -151,9 +168,9 @@ async function callAnthropic(config: ProviderConfig, input: ChatCompletionInput,
   const conversationMessages = messages.filter(m => m.role !== "system").map(m => ({ role: m.role, content: m.content }));
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 240_000);
+  const timeout = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);
   try {
-    const response = await fetch(`${config.baseUrl}/v1/messages`, {
+    const response = await llmFetch(`${config.baseUrl}/v1/messages`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -191,9 +208,9 @@ async function callOpenAICompatible(config: ProviderConfig, input: ChatCompletio
   };
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 240_000);
+  const timeout = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);
   try {
-    const response = await fetch(`${config.baseUrl}/chat/completions`, {
+    const response = await llmFetch(`${config.baseUrl}/chat/completions`, {
       method: "POST",
       headers,
       signal: controller.signal,
@@ -309,9 +326,12 @@ export async function chatCompletion(input: ChatCompletionInput): Promise<ChatCo
       return result;
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
+      const eligible = isFallbackEligible(error);
+      // Always log provider failures so we can see the fallback chain in action
+      console.warn(`[llm] ${input.label} failed on ${config.name}/${config.model}: ${lastError.message.slice(0, 200)}${eligible ? " → trying next provider" : " (non-retryable)"}`);
       // Fallback to next provider on network, billing, and rate-limit errors.
       // Auth errors (401/403) are not retried — they indicate misconfiguration.
-      if (!isFallbackEligible(error) && chain.indexOf(config) === 0) {
+      if (!eligible && chain.indexOf(config) === 0) {
         span.error(lastError, {
           provider: config.name,
           model: config.model,
@@ -322,7 +342,7 @@ export async function chatCompletion(input: ChatCompletionInput): Promise<ChatCo
         });
         throw lastError;
       }
-      // Log and try next provider
+      // Try next provider
     }
   }
 

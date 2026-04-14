@@ -24,13 +24,18 @@ interface BuildPayload {
 const runningJobs = new Set<string>();
 let kickScheduled = false;
 
-/** Write an incremental build step to the job's logs column so the frontend can show progress. */
-async function updateBuildStep(jobId: string, step: string) {
+/** Write an incremental build step to the job's logs column so the frontend can show progress.
+ *  When `replaceLast` is true, overwrite the last entry instead of appending (for timer ticks). */
+async function updateBuildStep(jobId: string, step: string, replaceLast = false) {
   try {
     const now = new Date().toISOString();
     const job = await db.select({ logs: siteBuilds.logs }).from(siteBuilds).where(eq(siteBuilds.id, jobId)).get();
     const steps: string[] = job?.logs ? JSON.parse(job.logs) : [];
-    steps.push(step);
+    if (replaceLast && steps.length > 0) {
+      steps[steps.length - 1] = step;
+    } else {
+      steps.push(step);
+    }
     await db.update(siteBuilds).set({ logs: JSON.stringify(steps), updatedAt: now }).where(eq(siteBuilds.id, jobId));
   } catch {
     // Non-critical — don't let progress reporting break the build
@@ -106,11 +111,10 @@ export async function processBuildJob(jobId: string, options?: { alreadyClaimed?
   }
 
   try {
-    // 15 minutes. Generous enough to accommodate up to 2 auto-retries of the
-    // Code Agent + staticBuild cycle when the first generation produces
-    // code that fails `next build`. A single pass typically finishes in
-    // 2–4 minutes; each retry adds roughly another 2–4 minutes.
-    const BUILD_TIMEOUT_MS = 900_000;
+    // 25 minutes. Code Agent LLM calls can take 2–10 minutes depending on
+    // provider load. With up to 2 retries of the Code Agent + staticBuild
+    // cycle, worst case is ~24 minutes. LLM timeout is 20 min per call.
+    const BUILD_TIMEOUT_MS = 1_500_000;
 
     const buildPromise = runSiteBuild({
       siteId: job.siteId,
@@ -123,7 +127,7 @@ export async function processBuildJob(jobId: string, options?: { alreadyClaimed?
       knowledgeBaseId: payload.knowledgeBaseId,
       knowledgeBaseIds: payload.knowledgeBaseIds,
       requestId,
-      onProgress: (step: string) => updateBuildStep(jobId, step),
+      onProgress: (step: string, opts?: { replaceLast?: boolean }) => updateBuildStep(jobId, step, opts?.replaceLast),
     });
 
     const timeoutPromise = new Promise<never>((_, reject) =>

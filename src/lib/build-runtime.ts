@@ -9,9 +9,9 @@ import { runCodeGuardrails, runAdvancedModeGuardrails } from "@/lib/code-guardra
 import { recordBuildError, recordGuardrailFixes } from "@/lib/error-collector";
 import { copyUserImagesToSite } from "@/lib/asset-store";
 import { routeKnowledge, buildRoutedChatbotContext } from "@/lib/knowledge-router";
-import { knowledgeItems as knowledgeItemsTable, sites as sitesTable } from "@/lib/db/schema";
+import { knowledgeItems as knowledgeItemsTable, sites as sitesTable, knowledgeFiles as knowledgeFilesTable } from "@/lib/db/schema";
 import { db } from "@/lib/db";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import type { KnowledgeItem } from "@/lib/knowledge";
 import { getSpecSections } from "@/lib/site-spec";
 import { STYLE_CONFIG } from "@/lib/generator-config";
@@ -855,7 +855,7 @@ export interface RunSiteBuildInput {
   knowledgeBaseId?: string;
   knowledgeBaseIds?: string[];
   requestId: string;
-  onProgress?: (step: string) => Promise<void>;
+  onProgress?: (step: string, options?: { replaceLast?: boolean }) => Promise<void>;
 }
 
 export interface RunSiteBuildResult {
@@ -1220,7 +1220,7 @@ export type Translations = TData;
 
 export async function runSiteBuild(input: RunSiteBuildInput): Promise<RunSiteBuildResult> {
   const { siteId, data, selections, spec, previewBaseUrl, requestId, onProgress } = input;
-  const progress = async (step: string) => { if (onProgress) await onProgress(step).catch(() => {}); };
+  const progress = async (step: string, opts?: { replaceLast?: boolean }) => { if (onProgress) await onProgress(step, opts).catch(() => {}); };
 
   logger.info("generate", `[${requestId}] Generate for site ${siteId}`, {
     name: data.name,
@@ -1304,7 +1304,10 @@ export async function runSiteBuild(input: RunSiteBuildInput): Promise<RunSiteBui
         for (const bid of allBaseIds) {
           const kbCtx = await loadFullKBContext(input.userId, bid);
           if (kbCtx.fileCount > 0) {
-            parts.push(`## KB: ${kbCtx.indexContent.split("\\n")[0] || bid}\n${kbCtx.indexContent}\n\n${formatFilesForPrompt(kbCtx.fileContents, Math.floor(60000 / allBaseIds.length))}`);
+            // Code Agent only needs structure/metadata (images, section hints), not full text.
+          // Actual content extraction is done separately in enrichWorkspaceDataFromKB.
+          // Keeping this compact (~15K total) significantly reduces LLM processing time.
+          parts.push(`## KB: ${kbCtx.indexContent.split("\\n")[0] || bid}\n${kbCtx.indexContent}\n\n${formatFilesForPrompt(kbCtx.fileContents, Math.floor(20000 / allBaseIds.length))}`);
             totalFiles += kbCtx.fileCount;
           }
         }
@@ -1351,7 +1354,24 @@ export async function runSiteBuild(input: RunSiteBuildInput): Promise<RunSiteBui
     // Stash for potential build-failure retries later.
     repairCtx = { codeCtx, designPlan, assetCss, componentReferences };
 
-    const codeResult = await runCodeAgent(codeCtx, designPlan, assetCss, undefined, componentReferences);
+    // --- Code Agent with live progress (timer overwrites the same line) ---
+    await progress("🧠 AI 正在生成页面代码...（预计 2-5 分钟）");
+    const codeAgentStart = Date.now();
+    const progressTimer = setInterval(async () => {
+      const elapsed = Math.round((Date.now() - codeAgentStart) / 1000);
+      const min = Math.floor(elapsed / 60);
+      const sec = elapsed % 60;
+      const timeStr = min > 0 ? `${min}分${sec}秒` : `${sec}秒`;
+      await progress(`🧠 AI 正在生成页面代码... 已等待 ${timeStr}`, { replaceLast: true });
+    }, 15_000);
+    let codeResult;
+    try {
+      codeResult = await runCodeAgent(codeCtx, designPlan, assetCss, undefined, componentReferences);
+    } finally {
+      clearInterval(progressTimer);
+    }
+    const codeAgentSec = ((Date.now() - codeAgentStart) / 1000).toFixed(1);
+    await progress(`✅ 代码生成完成（用时 ${codeAgentSec}s）`, { replaceLast: true });
 
     // Enrich WorkspaceData from KB content when legacy items are empty.
     // Strategy: use the KB index (structured summaries) as a guide + prioritized
@@ -1581,9 +1601,25 @@ export async function runSiteBuild(input: RunSiteBuildInput): Promise<RunSiteBui
   await writeFilesToSiteDir(buildDir, files);
 
   // Copy user's uploaded images into the site's public/images/
+  // Build tagMap from KB so images with usage tags get standard filename aliases (e.g., avatar.png)
   if (input.userId) {
-    const imgCount = await copyUserImagesToSite(input.userId, buildDir);
-    if (imgCount > 0) logger.info("generate", `[${requestId}] Copied ${imgCount} user images to site`);
+    let tagMap: Map<string, string> | undefined;
+    try {
+      const imageRecords = await db.select({
+        assetPath: knowledgeFilesTable.assetPath,
+        usageTag: knowledgeFilesTable.usageTag,
+      }).from(knowledgeFilesTable)
+        .where(and(
+          eq(knowledgeFilesTable.userId, input.userId),
+          eq(knowledgeFilesTable.type, "image"),
+        ));
+      const tagged = imageRecords.filter(r => r.assetPath && r.usageTag);
+      if (tagged.length > 0) {
+        tagMap = new Map(tagged.map(r => [r.assetPath!, r.usageTag!]));
+      }
+    } catch { /* non-fatal */ }
+    const imgCount = await copyUserImagesToSite(input.userId, buildDir, tagMap);
+    if (imgCount > 0) logger.info("generate", `[${requestId}] Copied ${imgCount} user images to site${tagMap ? ` (${tagMap.size} tagged)` : ""}`);
   }
 
   await progress("📦 准备依赖...");
@@ -1636,12 +1672,20 @@ export async function runSiteBuild(input: RunSiteBuildInput): Promise<RunSiteBui
       }
 
       buildAttempt++;
-      await progress(`⚠️ 构建失败，重新生成代码 (${buildAttempt}/${MAX_BUILD_RETRIES})...`);
+      await progress(`⚠️ 构建失败，AI 正在修复代码 (${buildAttempt}/${MAX_BUILD_RETRIES})...预计 2-5 分钟`);
 
       const prevPage = files["src/app/page.tsx"] || "";
       const prevCss = files["src/app/globals.css"] || "";
 
       const { runCodeAgent: runCodeAgentRetry } = await import("./build-agents");
+      const repairStart = Date.now();
+      const repairTimer = setInterval(async () => {
+        const elapsed = Math.round((Date.now() - repairStart) / 1000);
+        const min = Math.floor(elapsed / 60);
+        const sec = elapsed % 60;
+        const timeStr = min > 0 ? `${min}分${sec}秒` : `${sec}秒`;
+        await progress(`🔧 AI 修复代码中... 已等待 ${timeStr} (${buildAttempt}/${MAX_BUILD_RETRIES})`, { replaceLast: true });
+      }, 15_000);
       let repairResult;
       try {
         repairResult = await runCodeAgentRetry(
@@ -1657,6 +1701,7 @@ export async function runSiteBuild(input: RunSiteBuildInput): Promise<RunSiteBui
           repairCtx!.componentReferences,
         );
       } catch (repairErr) {
+        clearInterval(repairTimer);
         logger.error(
           "generate",
           `[${requestId}] Repair Code Agent call failed on attempt ${buildAttempt}: ${repairErr instanceof Error ? repairErr.message : String(repairErr)}`,
@@ -1665,6 +1710,10 @@ export async function runSiteBuild(input: RunSiteBuildInput): Promise<RunSiteBui
         // itself crashed, nothing useful to retry with.
         throw err;
       }
+
+      clearInterval(repairTimer);
+      const repairSec = ((Date.now() - repairStart) / 1000).toFixed(1);
+      await progress(`✅ 代码修复完成（用时 ${repairSec}s），重新编译...`, { replaceLast: true });
 
       if (!repairResult.valid || !repairResult.pageTsx) {
         logger.warn(

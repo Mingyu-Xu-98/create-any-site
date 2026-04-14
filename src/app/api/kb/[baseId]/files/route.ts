@@ -8,6 +8,38 @@ import { DEFAULT_MAX_KB_UPLOAD_BYTES, checkContentLength, checkFileSize } from "
 import { internalError } from "@/lib/api-errors";
 import { startTrace } from "@/lib/llm-trace";
 import { checkQuota } from "@/lib/usage";
+import { regenerateIndex } from "@/lib/kb-index";
+
+/**
+ * GET /api/kb/[baseId]/files — list all files in a knowledge base.
+ */
+export async function GET(_req: NextRequest, { params }: { params: Promise<{ baseId: string }> }) {
+  const { baseId } = await params;
+  const session = await auth();
+  if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const base = await db.select({ id: knowledgeBases.id }).from(knowledgeBases)
+    .where(and(eq(knowledgeBases.id, baseId), eq(knowledgeBases.userId, session.user.id))).get();
+  if (!base) return NextResponse.json({ error: "Knowledge base not found" }, { status: 404 });
+
+  const files = await db.select({
+    id: knowledgeFiles.id,
+    name: knowledgeFiles.name,
+    type: knowledgeFiles.type,
+    description: knowledgeFiles.description,
+    keywords: knowledgeFiles.keywords,
+    contentLength: knowledgeFiles.contentLength,
+    mimeType: knowledgeFiles.mimeType,
+    assetPath: knowledgeFiles.assetPath,
+    usageTag: knowledgeFiles.usageTag,
+    originalUrl: knowledgeFiles.originalUrl,
+    createdAt: knowledgeFiles.createdAt,
+  }).from(knowledgeFiles)
+    .where(and(eq(knowledgeFiles.baseId, baseId), eq(knowledgeFiles.userId, session.user.id)))
+    .orderBy(knowledgeFiles.createdAt);
+
+  return NextResponse.json({ files });
+}
 
 /**
  * POST /api/kb/[baseId]/files — upload a file or add a link to a knowledge base.
@@ -71,6 +103,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ bas
       const JSZip = (await import("jszip")).default;
       const zip = await JSZip.loadAsync(buffer);
       const results: Array<{ name: string; fileId: string }> = [];
+      const asyncDescriptionJobs: Array<{ fileId: string; fileName: string; fileType: string; content: string }> = [];
 
       for (const [filePath, entry] of Object.entries(zip.files)) {
         if (entry.dir) continue;
@@ -110,9 +143,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ bas
           entryType = entryExt === "md" ? "md" : "txt";
         }
 
-        // Generate description for this file
-        const desc = await generateFileDescription(entryName, entryType, entryContent.slice(0, 3000), session.user.id);
-
+        // Save file record immediately (description generated async)
         const entryFileId = crypto.randomUUID();
         await db.insert(knowledgeFiles).values({
           id: entryFileId,
@@ -120,8 +151,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ bas
           userId: session.user.id,
           name: entryName,
           type: entryType,
-          description: desc.description,
-          keywords: JSON.stringify(desc.keywords),
+          description: entryName, // placeholder — updated async
+          keywords: "[]",
           contentLength: entryContent.length,
           content: entryContent,
           mimeType: entryMime,
@@ -129,11 +160,34 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ bas
           createdAt: new Date().toISOString(),
         });
 
+        // Queue async description generation
+        if (entryContent.length >= 20) {
+          asyncDescriptionJobs.push({ fileId: entryFileId, fileName: entryName, fileType: entryType, content: entryContent.slice(0, 3000) });
+        }
+
         results.push({ name: entryName, fileId: entryFileId });
       }
 
-      // Update index and return
+      // Update index and return immediately
       await regenerateIndex(baseId, session.user.id);
+
+      // Fire-and-forget: generate descriptions for all extracted files
+      const zipUserId = session.user.id;
+      Promise.resolve().then(async () => {
+        for (const job of asyncDescriptionJobs) {
+          try {
+            const desc = await generateFileDescription(job.fileName, job.fileType, job.content, zipUserId);
+            await db.update(knowledgeFiles)
+              .set({ description: desc.description, keywords: JSON.stringify(desc.keywords) })
+              .where(eq(knowledgeFiles.id, job.fileId));
+          } catch { /* non-fatal: file saved, just no AI description */ }
+        }
+        // Regenerate index with real descriptions
+        if (asyncDescriptionJobs.length > 0) {
+          await regenerateIndex(baseId, zipUserId).catch(() => {});
+        }
+      });
+
       return NextResponse.json({ files: results, count: results.length, type: "zip" });
     }
     // PDF: parse with MinerU API
@@ -166,10 +220,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ bas
     rawContent = await fetchLinkContent(body.url, body.type || "url");
   }
 
-  // AI: generate one-line description + keywords (lightweight, fast)
-  const { description, keywords } = await generateFileDescription(fileName, fileType, rawContent.slice(0, 3000), session.user.id);
-
-  // Save file record
+  // Save file record immediately (description generated async in background)
   const fileId = crypto.randomUUID();
   await db.insert(knowledgeFiles).values({
     id: fileId,
@@ -177,8 +228,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ bas
     userId: session.user.id,
     name: fileName,
     type: fileType,
-    description,
-    keywords: JSON.stringify(keywords),
+    description: fileName, // placeholder — updated async below
+    keywords: "[]",
     originalUrl,
     contentLength: rawContent.length,
     content: rawContent,
@@ -187,10 +238,24 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ bas
     createdAt: new Date().toISOString(),
   });
 
-  // Update index.md
+  // Update index.md (with placeholder description — will be refreshed after AI)
   await regenerateIndex(baseId, session.user.id);
 
-  return NextResponse.json({ fileId, name: fileName, description, keywords, contentLength: rawContent.length });
+  // Fire-and-forget: generate AI description + keywords in background
+  const bgUserId = session.user.id;
+  if (rawContent.length >= 20) {
+    Promise.resolve().then(async () => {
+      try {
+        const { description, keywords } = await generateFileDescription(fileName, fileType, rawContent.slice(0, 3000), bgUserId);
+        await db.update(knowledgeFiles)
+          .set({ description, keywords: JSON.stringify(keywords) })
+          .where(eq(knowledgeFiles.id, fileId));
+        await regenerateIndex(baseId, bgUserId);
+      } catch { /* non-fatal */ }
+    });
+  }
+
+  return NextResponse.json({ fileId, name: fileName, description: fileName, keywords: [], contentLength: rawContent.length });
   } catch (err) {
     return internalError(err, "kb-upload", { clientMessage: "Upload failed" });
   }
@@ -319,66 +384,6 @@ async function generateFileDescription(
   return { description: fileName, keywords: [] };
 }
 
-async function regenerateIndex(baseId: string, userId: string) {
-  const files = await db.select().from(knowledgeFiles)
-    .where(and(eq(knowledgeFiles.baseId, baseId), eq(knowledgeFiles.userId, userId)))
-    .orderBy(knowledgeFiles.createdAt);
-
-  const base = await db.select({ name: knowledgeBases.name }).from(knowledgeBases)
-    .where(eq(knowledgeBases.id, baseId)).get();
-
-  let totalChars = 0;
-  const sections: string[] = [];
-
-  for (let i = 0; i < files.length; i++) {
-    const f = files[i];
-    totalChars += f.contentLength || 0;
-    const kw = f.keywords ? JSON.parse(f.keywords) : [];
-
-    // Content preview (first 200 chars)
-    const preview = f.content ? f.content.replace(/\s+/g, " ").slice(0, 200).trim() : "";
-
-    // Usage suggestion based on file type and content
-    const usage = inferUsageSuggestion(f.name, f.type, f.description || "", kw);
-
-    sections.push(`### ${i + 1}. ${f.name}
-- **文件ID**: ${f.id}
-- **类型**: ${f.type}
-- **内容概述**: ${f.description || "无描述"}
-- **关键词**: ${kw.join(", ") || "无"}
-- **内容长度**: ${f.contentLength || 0} 字
-- **建议用途**: ${usage}${f.originalUrl ? `\n- **原始链接**: ${f.originalUrl}（可直接嵌入网站或跳转）` : ""}${f.assetPath ? `\n- **图片路径**: /images/${f.assetPath}（可用于头像、项目封面等）` : ""}${preview ? `\n- **内容预览**: ${preview}...` : ""}`);
-  }
-
-  const indexMd = `# ${base?.name || "知识库"}
-
-> 本索引供 AI 构建网站时使用。请根据文件ID读取完整内容。
-
-- 更新时间: ${new Date().toISOString().split("T")[0]}
-- 文件数: ${files.length}
-- 总内容: ${totalChars} 字
-
-## 使用说明
-
-构建网站时：
-1. 先阅读本索引了解有哪些内容可用
-2. 根据网站 section 需要，按文件ID读取对应文件的完整内容
-3. 优先使用原文内容，不要编造或泛化
-4. 链接类文件保留原始URL，用于网站跳转
-5. 图片类文件使用图片路径，用于网站展示
-
-## 文件清单
-
-${sections.length > 0 ? sections.join("\n\n") : "*暂无文件*"}`;
-
-  await db.update(knowledgeBases).set({
-    indexMd,
-    fileCount: files.length,
-    totalChars,
-    updatedAt: new Date().toISOString(),
-  }).where(eq(knowledgeBases.id, baseId));
-}
-
 /**
  * Decode text with encoding fallback: UTF-8 → GBK/GB18030.
  * Windows Chinese users often save .txt as GBK. If UTF-8 produces replacement
@@ -414,20 +419,3 @@ function decodeTextWithFallback(bytes: Uint8Array): string {
   return utf8;
 }
 
-/** Infer how this file should be used on the website */
-function inferUsageSuggestion(name: string, type: string, desc: string, keywords: string[]): string {
-  const n = name.toLowerCase();
-  const d = desc.toLowerCase();
-  const allText = `${n} ${d} ${keywords.join(" ")}`.toLowerCase();
-
-  if (type === "image") return "网站头像、项目封面、背景图等视觉展示";
-  if (type === "link") return "嵌入网站作为外部链接跳转，或展示为链接卡片";
-  if (/resume|简历|cv/i.test(allText)) return "提取个人信息、工作经历、教育背景、技能列表用于网站各 section";
-  if (/project|项目|作品|portfolio|案例/i.test(allText)) return "用于项目展示 section，提取项目名称、描述、技术栈、成果";
-  if (/blog|文章|article|post/i.test(allText)) return "用于博客/文章 section，作为文章内容展示";
-  if (/skill|技能|tech|技术/i.test(allText)) return "用于技能展示 section";
-  if (/readme|介绍|about/i.test(allText)) return "用于关于页面或项目介绍";
-  if (/award|荣誉|证书|certification/i.test(allText)) return "用于荣誉/证书展示 section";
-  if (/paper|论文|publication|研究/i.test(allText)) return "用于学术成果/论文展示 section";
-  return "根据内容判断适合放在网站的哪个部分";
-}
