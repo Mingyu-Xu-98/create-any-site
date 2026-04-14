@@ -300,8 +300,8 @@ function genThemeShowcaseHero(theme: ThemeStyle, sectionClass = ""): string {
               <h1 className="showcase-title">{t.hero.lines[0]?.replace("> ", "") || t.ui.heyIm}</h1>
               <p className="showcase-subtitle">{t.hero.lines[1]?.replace("> ", "") || t.about.text}</p>
               <div className="showcase-actions">
-                <a href="#projects" className="showcase-btn showcase-btn-primary">{t.nav.projects}</a>
-                <a href="#contact" className="showcase-btn showcase-btn-secondary">{t.nav.contact}</a>
+                {t.nav.projects && <a href="#projects" className="showcase-btn showcase-btn-primary">{t.nav.projects}</a>}
+                {t.nav.contact && <a href="#contact" className="showcase-btn showcase-btn-secondary">{t.nav.contact}</a>}
               </div>
               <div className="showcase-tag-row">
                 {t.hero.tags.slice(0, 4).map((tag) => (<span key={tag} className="badge">{tag}</span>))}
@@ -474,8 +474,8 @@ export default function Home() {
               {lang === "zh" ? "${data.title}" : "${data.titleEn || data.title}"}
             </p>
             <div className="flex gap-4 flex-wrap">
-              <a href="#contact" className="btn-bold btn-bold-primary">{t.nav.contact}</a>
-              <a href="#projects" className="btn-bold btn-bold-outline">{t.nav.projects}</a>
+              {t.nav.contact && <a href="#contact" className="btn-bold btn-bold-primary">{t.nav.contact}</a>}
+              {t.nav.projects && <a href="#projects" className="btn-bold btn-bold-outline">{t.nav.projects}</a>}
             </div>
           </div>
           <div className="bold-hero-visual">
@@ -691,7 +691,7 @@ export default function Home() {
             {t.availableSections.filter(s => s !== "contact").map((id) => (
               <li key={id}><a href={\`#\${id === "timeline" ? "experience" : id}\`}>{t.sections[id as keyof typeof t.sections] || id}</a></li>
             ))}
-            <li><a href="#contact">{t.nav.contact}</a></li>
+            {t.nav.contact && <li><a href="#contact">{t.nav.contact}</a></li>}
             <li><button onClick={toggle}>{lang === "zh" ? "EN" : "\\u4e2d"}</button></li>
             <li>
               <button className="blog-theme-toggle" onClick={() => setDark(!dark)} aria-label="Toggle theme">

@@ -12,7 +12,7 @@ export const navBlog: SectionVariantFn = (ctx) => {
             {t.availableSections.filter(s => s !== "contact").map((id) => (
               <li key={id}><a href={\`#\${id === "timeline" ? "experience" : id}\`}>{t.sections[id as keyof typeof t.sections] || id}</a></li>
             ))}
-            <li><a href="#contact">{t.nav.contact}</a></li>
+            {t.nav.contact && <li><a href="#contact">{t.nav.contact}</a></li>}
             <li><button onClick={toggle}>{lang === "zh" ? "EN" : "\\u4e2d"}</button></li>
             <li>
               <button className="blog-theme-toggle" onClick={() => setDark(!dark)} aria-label="Toggle theme">

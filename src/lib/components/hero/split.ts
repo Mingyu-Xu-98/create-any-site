@@ -25,8 +25,8 @@ export const heroSplit: SectionVariantFn = (ctx) => {
               {lang === "zh" ? "${data.title}" : "${data.titleEn || data.title}"}
             </p>
             <div className="flex gap-4 flex-wrap">
-              <a href="#contact" className="btn-bold btn-bold-primary">{t.nav.contact}</a>
-              <a href="#projects" className="btn-bold btn-bold-outline">{t.nav.projects}</a>
+              {t.nav.contact && <a href="#contact" className="btn-bold btn-bold-primary">{t.nav.contact}</a>}
+              {t.nav.projects && <a href="#projects" className="btn-bold btn-bold-outline">{t.nav.projects}</a>}
             </div>
           </div>
           <div className="bold-hero-visual">
