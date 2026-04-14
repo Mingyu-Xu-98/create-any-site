@@ -53,11 +53,36 @@ export async function runEditSession(input: RunEditSessionInput): Promise<EditSe
     draftBuildId: sites.draftBuildId,
   }).from(sites).where(eq(sites.id, siteId)).get();
 
-  if (!site?.fileMap) {
-    throw new Error("Site has no fileMap — cannot edit");
+  if (!site) {
+    throw new Error("Site not found");
   }
 
-  const fileMap: Record<string, string> = JSON.parse(site.fileMap);
+  let fileMap: Record<string, string>;
+
+  if (site.fileMap) {
+    fileMap = JSON.parse(site.fileMap);
+  } else {
+    // Fallback: reconstruct fileMap from disk
+    logger.warn("edit-runtime", `Site ${siteId} has no fileMap in DB, reconstructing from disk...`);
+    const siteDir = await resolveSiteDir(siteId);
+    const srcDir = path.join(siteDir, "src");
+    const recovered: Record<string, string> = {};
+    const scanFiles = ["src/app/page.tsx", "src/app/layout.tsx", "src/app/globals.css", "src/i18n/translations.ts"];
+    for (const filePath of scanFiles) {
+      try {
+        recovered[filePath] = await fs.readFile(path.join(siteDir, filePath), "utf-8");
+      } catch { /* file doesn't exist */ }
+    }
+    if (Object.keys(recovered).length === 0) {
+      throw new Error("Site has no fileMap and no source files on disk — cannot edit");
+    }
+    fileMap = recovered;
+    // Save reconstructed fileMap to DB for future edits
+    await db.update(sites)
+      .set({ fileMap: JSON.stringify(recovered), updatedAt: new Date().toISOString() })
+      .where(eq(sites.id, siteId));
+    logger.info("edit-runtime", `Reconstructed fileMap for site ${siteId}: ${Object.keys(recovered).join(", ")}`);
+  }
 
   // ---------- AUTOFIX fast-path: run guardrails before Edit Agent ----------
   if (instruction === "__AUTOFIX__") {
