@@ -191,17 +191,26 @@ export async function POST(req: NextRequest) {
 
     if (siteId) {
       targetDirs.add(path.join(siteRoot(siteId), "public", "images"));
-      targetDirs.add(path.join(siteCurrentLink(siteId), "out", "images"));
+      // Write to current build's static output so preview picks it up
+      const currentOut = path.join(siteCurrentLink(siteId), "out", "images");
+      targetDirs.add(currentOut);
       if (PREVIEW_PUBLISH_DIR) {
         targetDirs.add(path.join(PREVIEW_PUBLISH_DIR, DRAFTS_SEGMENT, siteId, "images"));
+        // Also write to published dir if site is already published
+        targetDirs.add(path.join(PREVIEW_PUBLISH_DIR, siteId, "images"));
       }
     } else {
       targetDirs.add(path.join(process.cwd(), "public", "images"));
     }
 
     for (const imagesDir of targetDirs) {
-      await fs.mkdir(imagesDir, { recursive: true });
-      await fs.writeFile(path.join(imagesDir, safeFilename), buffer);
+      try {
+        await fs.mkdir(imagesDir, { recursive: true });
+        await fs.writeFile(path.join(imagesDir, safeFilename), buffer);
+      } catch (writeErr) {
+        // Non-fatal: some target dirs may not exist yet (e.g. current symlink not ready)
+        console.warn(`[generate-image] failed to write to ${imagesDir}:`, (writeErr as Error).message);
+      }
     }
 
     return NextResponse.json({
