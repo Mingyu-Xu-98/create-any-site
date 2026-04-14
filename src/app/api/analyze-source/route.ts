@@ -8,6 +8,7 @@ import { auth } from "@/lib/auth";
 import { requireAuth, unauthorized } from "@/lib/require-auth";
 import { DEFAULT_MAX_UPLOAD_BYTES, checkContentLength, checkFileSize } from "@/lib/upload-limits";
 import { internalError } from "@/lib/api-errors";
+import { startTrace } from "@/lib/llm-trace";
 import { parsePdfWithMinerU as sharedParsePdfWithMinerU, basicPdfExtract as sharedBasicPdfExtract, parsePdfSafe as sharedParsePdfSafe } from "@/lib/pdf-parser";
 
 // ─── PDF Parsing (delegates to shared module @/lib/pdf-parser) ───
@@ -265,6 +266,7 @@ async function aiExtractKnowledge(
   sourceContent: string,
   sourceName: string,
   sourceType: string,
+  traceCtx?: { traceId: string; userId?: string },
 ): Promise<{ items: KnowledgeItem[]; relations: ParsedRelation[] }> {
   const apiKey = process.env.SILICONFLOW_API_KEY;
   if (!apiKey) throw new Error("SILICONFLOW_API_KEY not configured");
@@ -351,6 +353,12 @@ Tags: routing, mapping`;
 
   const userMessage = `Source: ${sourceName}\nType: ${sourceType}\n\nContent:\n${sourceContent.slice(0, 60000)}`;
 
+  const traceSpan = startTrace({
+    traceId: traceCtx?.traceId ?? crypto.randomUUID().slice(0, 8),
+    phase: "analyze-source",
+    userId: traceCtx?.userId,
+  });
+
   const MAX_RETRIES = 2;
   let response: Response | null = null;
   let lastError = "";
@@ -405,12 +413,25 @@ Tags: routing, mapping`;
   }
 
   if (!response || !response.ok) {
-    throw new Error(`AI analysis failed after ${MAX_RETRIES + 1} attempts: ${lastError}`);
+    const err = new Error(`AI analysis failed after ${MAX_RETRIES + 1} attempts: ${lastError}`);
+    traceSpan.error(err, { provider: "siliconflow", model: "Pro/zai-org/GLM-5", systemPrompt, userPrompt: userMessage, temperature: 0.3, maxTokens: 8192 });
+    throw err;
   }
 
   const result = await response.json();
   const rawContent = result.choices?.[0]?.message?.content || "";
   const tokenUsage = result.usage;
+
+  traceSpan.end({
+    provider: "siliconflow", model: "Pro/zai-org/GLM-5",
+    systemPrompt, userPrompt: userMessage,
+    rawResponse: rawContent,
+    inputTokens: tokenUsage?.prompt_tokens ?? 0,
+    outputTokens: tokenUsage?.completion_tokens ?? 0,
+    totalTokens: tokenUsage?.total_tokens ?? 0,
+    temperature: 0.3, maxTokens: 8192,
+    outcome: "success",
+  });
 
   logger.info("ai", `AI response parsed`, {
     tokens: tokenUsage,
@@ -496,7 +517,7 @@ interface ZipFileResult {
   items: KnowledgeItem[];
 }
 
-async function parseZipPerFile(buffer: ArrayBuffer): Promise<ZipFileResult[]> {
+async function parseZipPerFile(buffer: ArrayBuffer, traceCtx?: { traceId: string; userId?: string }): Promise<ZipFileResult[]> {
   const zip = await JSZip.loadAsync(buffer);
   const results: ZipFileResult[] = [];
   const supportedExts = ["pdf", "docx", "doc", "txt", "md", "json", "csv", "yaml", "yml", "html"];
@@ -553,7 +574,7 @@ async function parseZipPerFile(buffer: ArrayBuffer): Promise<ZipFileResult[]> {
         return null;
       }
 
-      const { items } = await aiExtractKnowledge(content, fileName, ext);
+      const { items } = await aiExtractKnowledge(content, fileName, ext, traceCtx);
       logger.info("zip-per-file", `${fileName}: ${items.length} items extracted`);
       return { name: fileName, type: ext, items };
     }));
@@ -618,7 +639,7 @@ export async function POST(req: NextRequest) {
 
       if (fileType === "zip") {
         // ZIP: parse each file individually
-        const results = await parseZipPerFile(buffer);
+        const results = await parseZipPerFile(buffer, { traceId: requestId, userId: authedUserId });
         const allItems: KnowledgeItem[] = [];
         const fileResults: { name: string; type: string; itemCount: number }[] = [];
 
@@ -639,7 +660,7 @@ export async function POST(req: NextRequest) {
         }
 
         logger.info("handler", `[${requestId}] Content: ${content.length} chars, sending to AI...`);
-        const { items, relations: extractedRelations } = await aiExtractKnowledge(content, sourceName, fileType);
+        const { items, relations: extractedRelations } = await aiExtractKnowledge(content, sourceName, fileType, { traceId: requestId, userId: authedUserId });
         logger.info("handler", `[${requestId}] Complete. ${items.length} items from "${sourceName}"`);
 
         return NextResponse.json({ items, relations: extractedRelations, sourceType: fileType });
@@ -656,7 +677,7 @@ export async function POST(req: NextRequest) {
       const content = await fetchUrlContent(body.url, body.type);
 
       logger.info("handler", `[${requestId}] Content: ${content.length} chars, sending to AI...`);
-      const { items, relations: extractedRelations } = await aiExtractKnowledge(content, body.url, body.type);
+      const { items, relations: extractedRelations } = await aiExtractKnowledge(content, body.url, body.type, { traceId: requestId, userId: authedUserId });
       logger.info("handler", `[${requestId}] Complete. ${items.length} items`);
 
       return NextResponse.json({ items, relations: extractedRelations, sourceType: body.type });

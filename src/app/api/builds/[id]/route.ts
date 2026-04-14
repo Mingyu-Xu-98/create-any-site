@@ -4,6 +4,7 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { siteBuilds } from "@/lib/db/schema";
 import { scheduleBuildJob, shouldInlineBuildJobs } from "@/lib/build-queue";
+import { ensureStaticServer } from "@/lib/build-runtime";
 
 export async function GET(_req: NextRequest, context: { params: Promise<unknown> }) {
   const session = await auth();
@@ -22,6 +23,11 @@ export async function GET(_req: NextRequest, context: { params: Promise<unknown>
 
   if (shouldInlineBuildJobs() && (job.status === "queued" || job.status === "building")) {
     scheduleBuildJob(job.id);
+  }
+
+  // Ensure preview server is running when a build completes
+  if (job.status === "ready") {
+    void ensureStaticServer();
   }
 
   return NextResponse.json({

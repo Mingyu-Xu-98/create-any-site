@@ -16,7 +16,7 @@ export function runCodeGuardrails(
   siteId: string,
   previewBaseUrl: string,
   logger: Logger,
-): Record<string, string> {
+): { files: Record<string, string>; fixes: string[] } {
   const fixes: string[] = [];
 
   // 1. Fix ChatBot API URL — static export doesn't support API routes
@@ -56,7 +56,7 @@ export function runCodeGuardrails(
     logger.info("guardrails", `Applied ${fixes.length} auto-fixes for site ${siteId}`, { fixes });
   }
 
-  return files;
+  return { files, fixes };
 }
 
 /** Fix ChatBot / CartoonAssistant chat API URL for static export.
@@ -873,8 +873,16 @@ function fixTranslationKeySafety(
   files: Record<string, string>,
   fixes: string[],
 ) {
-  const page = files["src/app/page.tsx"];
+  let page = files["src/app/page.tsx"];
   if (!page) return;
+
+  // Strip any previously-injected guardrail defaults block to avoid duplicates
+  page = page.replace(
+    /\n\s*\/\/ Guardrail: safe defaults for unknown translation keys\n(?:\s*const _guardrail_\w+\s*=[^\n]*\n)+\n?/g,
+    "\n",
+  );
+  // Revert any _guardrail_xxx back to t.xxx so we get a clean slate
+  page = page.replace(/\b_guardrail_(\w+)\b/g, "t.$1");
 
   // Find all t.xxx top-level accesses (t.projects, t.hero, etc.)
   const accessRe = /\bt\.(\w+)/g;
@@ -892,33 +900,35 @@ function fixTranslationKeySafety(
     }
   }
 
-  if (missingKeys.length === 0) return;
+  if (missingKeys.length === 0) {
+    // Still write back the cleaned version (reverted duplicates)
+    files["src/app/page.tsx"] = page;
+    return;
+  }
 
   // Patch page.tsx: inject safe defaults after the useLanguage() call
-  // Find the line with useLanguage() and add defaults after it
   const langLine = page.match(/const\s*\{[^}]*\}\s*=\s*useLanguage\(\);?\s*\n/);
   if (!langLine) return;
 
   const defaults = missingKeys.map(key => {
-    // Heuristic: if key is plural-sounding, default to []; otherwise ""
     const isArray = /s$|list$|items$/i.test(key);
-    return `  const _guardrail_${key} = t.${key} ?? ${isArray ? "[]" : '""'};`;
+    return `  const _guardrail_${key} = (t as any).${key} ?? ${isArray ? "[]" : '""'};`;
   }).join("\n");
 
   const replacements = missingKeys.map(key => ({
-    // Replace t.keyName with the guardrail variable (but only for these missing keys)
     pattern: new RegExp(`\\bt\\.${key}\\b`, "g"),
     replacement: `_guardrail_${key}`,
   }));
 
   // Insert defaults block after useLanguage()
   const defaultsBlock = "\n  // Guardrail: safe defaults for unknown translation keys\n" + defaults + "\n\n";
-  let patched = page.replace(langLine[0], langLine[0] + defaultsBlock);
+  const langLineEnd = page.indexOf(langLine[0]) + langLine[0].length;
+  let patched = page.slice(0, langLineEnd) + defaultsBlock + page.slice(langLineEnd);
 
-  // Replace t.key → _guardrail_key, but NOT inside the defaults block itself
-  const insertPos = page.indexOf(langLine[0]) + langLine[0].length + defaultsBlock.length;
-  const before = patched.slice(0, insertPos);
-  let after = patched.slice(insertPos);
+  // Replace t.key → _guardrail_key ONLY after the defaults block
+  const afterBlockStart = langLineEnd + defaultsBlock.length;
+  const before = patched.slice(0, afterBlockStart);
+  let after = patched.slice(afterBlockStart);
   for (const { pattern, replacement } of replacements) {
     after = after.replace(pattern, replacement);
   }

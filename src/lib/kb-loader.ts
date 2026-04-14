@@ -84,9 +84,20 @@ export async function loadFullKBContext(userId: string, knowledgeBaseId?: string
   return { indexContent, fileCount, fileContents };
 }
 
+/** Strip HTML tags and decode common entities from parsed document content. */
+function stripHtml(html: string): string {
+  return html
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&nbsp;/g, " ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
 /**
  * Format file contents for Code Agent prompt.
  * Chunks long files, includes file IDs for reference.
+ * HTML tags from parsed PDFs/DOCs are stripped automatically.
  */
 export function formatFilesForPrompt(
   fileContents: Map<string, { name: string; content: string; type: string }>,
@@ -99,15 +110,18 @@ export function formatFilesForPrompt(
     if (file.type === "image") continue; // Skip images
     if (!file.content || file.content.length < 10) continue;
 
+    // Strip HTML tags from parsed documents (PDF parser often outputs raw HTML)
+    const raw = /<[a-z][^>]*>/i.test(file.content) ? stripHtml(file.content) : file.content;
+
     const available = maxTotalChars - totalChars;
     if (available <= 0) {
       parts.push(`\n... (${fileContents.size - parts.length} more files truncated)`);
       break;
     }
 
-    const content = file.content.length > available
-      ? file.content.slice(0, available) + "\n... (truncated)"
-      : file.content;
+    const content = raw.length > available
+      ? raw.slice(0, available) + "\n... (truncated)"
+      : raw;
 
     parts.push(`### [${id}] ${file.name}\n${content}`);
     totalChars += content.length;

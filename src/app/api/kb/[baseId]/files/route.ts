@@ -6,6 +6,8 @@ import { eq, and } from "drizzle-orm";
 import { saveUserImage, isImageFile } from "@/lib/asset-store";
 import { DEFAULT_MAX_KB_UPLOAD_BYTES, checkContentLength, checkFileSize } from "@/lib/upload-limits";
 import { internalError } from "@/lib/api-errors";
+import { startTrace } from "@/lib/llm-trace";
+import { checkQuota } from "@/lib/usage";
 
 /**
  * POST /api/kb/[baseId]/files — upload a file or add a link to a knowledge base.
@@ -21,6 +23,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ bas
   try {
   const session = await auth();
   if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const uploadQuota = await checkQuota(session.user.id, "file_upload");
+  if (!uploadQuota.allowed) {
+    return NextResponse.json({ error: uploadQuota.reason, quota: true, upgradeHint: uploadQuota.upgradeHint }, { status: 429 });
+  }
 
   // Verify base ownership
   const base = await db.select({ id: knowledgeBases.id }).from(knowledgeBases)
@@ -235,6 +242,15 @@ async function generateFileDescription(
     return { description: fileName, keywords: [] };
   }
 
+  const kbSystemPrompt = `You are a file analyzer. Given a file name and content preview, output a JSON object with:\n- "description": one sentence describing what this file contains (Chinese if content is Chinese)\n- "keywords": array of 3-8 keywords\n\nOutput ONLY valid JSON, no markdown.`;
+  const kbUserPrompt = `File: ${fileName} (${fileType})\n\nContent preview:\n${contentPreview.slice(0, 2000)}`;
+
+  const span = startTrace({
+    traceId: crypto.randomUUID().slice(0, 8),
+    phase: "kb-describe",
+    userId: userId ?? undefined,
+  });
+
   try {
     const res = await fetch("https://api.siliconflow.cn/v1/chat/completions", {
       method: "POST",
@@ -242,8 +258,8 @@ async function generateFileDescription(
       body: JSON.stringify({
         model: "Pro/zai-org/GLM-5",
         messages: [
-          { role: "system", content: `You are a file analyzer. Given a file name and content preview, output a JSON object with:\n- "description": one sentence describing what this file contains (Chinese if content is Chinese)\n- "keywords": array of 3-8 keywords\n\nOutput ONLY valid JSON, no markdown.` },
-          { role: "user", content: `File: ${fileName} (${fileType})\n\nContent preview:\n${contentPreview.slice(0, 2000)}` },
+          { role: "system", content: kbSystemPrompt },
+          { role: "user", content: kbUserPrompt },
         ],
         temperature: 0.1,
         max_tokens: 256,
@@ -268,13 +284,37 @@ async function generateFileDescription(
           }).catch(() => {});
         });
       }
+
+      span.end({
+        provider: "siliconflow", model: "Pro/zai-org/GLM-5",
+        systemPrompt: kbSystemPrompt, userPrompt: kbUserPrompt,
+        rawResponse: text,
+        inputTokens: tokenUsage?.prompt_tokens ?? 0,
+        outputTokens: tokenUsage?.completion_tokens ?? 0,
+        totalTokens: tokenUsage?.total_tokens ?? 0,
+        temperature: 0.1, maxTokens: 256,
+        outcome: "success",
+      });
+
       const json = JSON.parse(text.replace(/```json\s*\n?|\n?```/g, ""));
       return {
         description: json.description || fileName,
         keywords: Array.isArray(json.keywords) ? json.keywords : [],
       };
     }
-  } catch {}
+
+    span.error(new Error(`siliconflow ${res.status}`), {
+      provider: "siliconflow", model: "Pro/zai-org/GLM-5",
+      systemPrompt: kbSystemPrompt, userPrompt: kbUserPrompt,
+      temperature: 0.1, maxTokens: 256,
+    });
+  } catch (err) {
+    span.error(err, {
+      provider: "siliconflow", model: "Pro/zai-org/GLM-5",
+      systemPrompt: kbSystemPrompt, userPrompt: kbUserPrompt,
+      temperature: 0.1, maxTokens: 256,
+    });
+  }
 
   return { description: fileName, keywords: [] };
 }

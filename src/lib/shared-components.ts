@@ -92,6 +92,20 @@ export function generateBaseFiles(options: {
   // ProjectDemo — embed Bilibili / YouTube / GitHub / StackBlitz
   files["src/components/ProjectDemo.tsx"] = generateProjectDemo();
 
+  // global-error.tsx — prevents Next.js 15/16 static-export crash on /_global-error
+  files["src/app/global-error.tsx"] = `"use client";
+export default function GlobalError({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
+  return (
+    <html><body style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh", fontFamily: "system-ui" }}>
+      <div style={{ textAlign: "center" }}>
+        <h2>Something went wrong</h2>
+        <button onClick={() => reset()} style={{ marginTop: 16, padding: "8px 24px", cursor: "pointer" }}>Try again</button>
+      </div>
+    </body></html>
+  );
+}
+`;
+
   return files;
 }
 

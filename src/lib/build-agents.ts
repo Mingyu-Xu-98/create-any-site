@@ -7,6 +7,7 @@ import { getCapabilityManifest } from "./capability-registry";
 import { getAssetManifest } from "./assets";
 import { getRecipeManifest } from "./recipes/loader";
 import { getVariantCatalog } from "./components";
+import { getRelevantHints } from "./error-collector";
 
 type ChatRole = "system" | "user" | "assistant";
 
@@ -27,8 +28,6 @@ export interface BuildConversationContext {
   hasSiteCode: boolean;
   currentPrd: string;
   currentSelections: unknown;
-  /** When true, use streamlined Design Agent (one-step) instead of multi-step pipeline */
-  useDesignAgent?: boolean;
   /** For usage tracking */
   userId?: string;
   siteId?: string;
@@ -41,14 +40,11 @@ interface AgentRunResult {
 
 const PROMPTS_DIR = path.join(process.cwd(), "src/prompts/agents");
 const EXECUTION_CONFIRM_RE = /\b(confirm build|build it|go ahead|ship it|start build|开始构建|确认构建|开始生成|确认生成|开始开发)\b/i;
-const MAX_IDEATION_USER_TURNS = 3;
 
-/** All recognized action types — old + new */
+/** All recognized action types */
 const ACTION_TYPES = [
-  // Legacy
-  "options", "prd", "generate", "modify", "activate_skills", "update_prd", "handoff_to_planner",
-  // New: orchestrator + capability + build plan
-  "orchestrate", "build_plan", "activate_capabilities", "suggest_capability",
+  "options", "prd", "generate", "modify", "activate_skills", "update_prd",
+  "handoff_to_planner", "design_plan", "build_plan", "activate_capabilities",
 ].join("|");
 
 const ACTION_RE = new RegExp(`"type"\\s*:\\s*"(?:${ACTION_TYPES})"`, "");
@@ -117,42 +113,6 @@ function getLatestUserMessage(messages: BuildChatMessage[]): string {
   return "";
 }
 
-function countMeaningfulUserTurns(messages: BuildChatMessage[]): number {
-  return messages.filter((message) => {
-    if (message.role !== "user") return false;
-    const trimmed = message.content.trim();
-    if (!trimmed) return false;
-    if (/^\[.*\]\s*/.test(trimmed)) return true;
-    return trimmed.length >= 4;
-  }).length;
-}
-
-function buildForcedPlanningHandoff(ctx: BuildConversationContext, conceptOutput: string): Record<string, unknown> {
-  const currentPrd = ctx.currentPrd.trim();
-  const parsedSiteType = currentPrd.match(/"siteType"\s*:\s*"([^"]+)"/)?.[1] || currentPrd.match(/siteType[:\s]+([a-zA-Z-]+)/i)?.[1] || "portfolio";
-  const THEME_POOL = ["cyberpunk", "ghibli", "glassmorphism", "retro", "brutalist", "cinematic", "bold-creative", "editorial", "nature", "gradient-mesh", "neo-tokyo", "minimalist"];
-  const randomTheme = THEME_POOL[Math.floor(Math.random() * THEME_POOL.length)];
-  const parsedTheme = currentPrd.match(/"theme"\s*:\s*"([^"]+)"/)?.[1] || currentPrd.match(/theme[:\s]+([a-zA-Z-]+)/i)?.[1] || randomTheme;
-  const parsedLayout = currentPrd.match(/"layout"\s*:\s*"([^"]+)"/)?.[1] || currentPrd.match(/layout[:\s]+([a-zA-Z-]+)/i)?.[1] || "card-grid";
-  const latestUserMessage = getLatestUserMessage(ctx.messages);
-
-  return {
-    type: "handoff_to_planner",
-    siteType: parsedSiteType,
-    targetAudience: "Use the conversation and knowledge context to infer the target audience if still ambiguous.",
-    coreGoal: latestUserMessage || "Create a strong first website preview with the information already provided.",
-    brandPersonality: [],
-    storyNeeds: [],
-    themeDirection: parsedTheme,
-    layoutDirection: parsedLayout,
-    featurePriorities: ["hero", "about", "projects", "contact"],
-    constraints: ["Question limit reached. Produce a strong first PRD and preview without asking more questions."],
-    reasoning: `The conversation has already reached the hard question cap of ${MAX_IDEATION_USER_TURNS} user turns. Stop interviewing and create the best possible PRD from available information.`,
-    skillHints: ["storytelling", "ui-skill", "style-skills"],
-    conceptSummary: conceptOutput.slice(0, 4000),
-  };
-}
-
 function serializeCurrentPrd(currentPrd: string): string {
   if (!currentPrd) return "";
   return currentPrd;
@@ -161,7 +121,6 @@ function serializeCurrentPrd(currentPrd: string): string {
 export async function runBuildConversation(ctx: BuildConversationContext): Promise<AgentRunResult> {
   const latestUserMessage = getLatestUserMessage(ctx.messages);
   const currentPrd = serializeCurrentPrd(ctx.currentPrd);
-  const userTurnCount = countMeaningfulUserTurns(ctx.messages);
 
   // Inject capability manifest into context for agent awareness
   const capabilityManifest = getCapabilityManifest();
@@ -173,96 +132,7 @@ export async function runBuildConversation(ctx: BuildConversationContext): Promi
     ].filter(Boolean).join(""),
   };
 
-  // ===== Streamlined path: Design Agent (advanced mode, one-step) =====
-  if (ctx.useDesignAgent) {
-    // Edit existing site: go to ideation for modify
-    if (enrichedCtx.hasSiteCode && currentPrd) {
-      if (EXECUTION_CONFIRM_RE.test(latestUserMessage)) {
-        return runExecutionAgent(enrichedCtx, latestUserMessage);
-      }
-      const result = await runIdeationAgent(enrichedCtx);
-      if (result.action?.type === "modify") return result;
-      if (result.action?.type === "handoff_to_planner") {
-        return runPlanningAgent(enrichedCtx, result.content, result.action);
-      }
-      return result;
-    }
-
-    // New build: one-step Design Agent
-    const designResult = await runDesignAgent(enrichedCtx);
-
-    // If Design Agent asks a question (rare: only when knowledge is empty)
-    if (designResult.action?.type === "options") return designResult;
-
-    // If Design Agent outputs a design_plan, convert to generate action format
-    if (designResult.action?.type === "design_plan") {
-      return {
-        content: designResult.content,
-        action: {
-          type: "generate",
-          siteType: designResult.action.siteMode || "portfolio",
-          theme: designResult.action.theme || designResult.action.recipe || "minimalist",
-          compositionPlan: designResult.action.compositionPlan || null,
-          visualDirection: designResult.action.visualDirection || null,
-          contentMapping: designResult.action.contentMapping || null,
-          customTheme: designResult.action.customTheme || "",
-          // Recipe composition data (new)
-          recipe: designResult.action.recipe || null,
-          recipeLayers: designResult.action.layers || null,
-          recipeOverrides: designResult.action.overrides || null,
-        },
-      };
-    }
-
-    // Fallback: treat as regular content
-    return designResult;
-  }
-
-  // ===== Step 1: Orchestrator decides mode (first message only) =====
-  // On first user message with no PRD yet, run orchestrator to determine strategy
-  if (!currentPrd && userTurnCount <= 1 && ctx.messages.length <= 2) {
-    const orchResult = await runOrchestratorAgent(enrichedCtx);
-
-    // If orchestrator says skip ideation and go straight to planning
-    if (orchResult.action?.type === "orchestrate") {
-      const decision = orchResult.action as Record<string, unknown>;
-      const flow = decision.flow as Record<string, unknown> | undefined;
-
-      // Quick-draft mode: skip ideation entirely, build immediately
-      if (decision.mode === "quick-draft" || flow?.skipIdeation === true || flow?.skip_ideation === true) {
-        logger.info("build-agents", `Orchestrator: mode=${decision.mode}, skipping ideation → planning`);
-        const handoff = {
-          type: "handoff_to_planner",
-          siteType: (decision.site_intent as Record<string, unknown>)?.type || "portfolio",
-          coreGoal: (decision.site_intent as Record<string, unknown>)?.primary_goal || latestUserMessage,
-          themeDirection: "auto",
-          layoutDirection: "auto",
-          featurePriorities: ["hero", "about", "contact"],
-          reasoning: orchResult.content,
-          ...(decision.capabilities ? { capabilities: decision.capabilities } : {}),
-        };
-        return runPlanningAgent(enrichedCtx, orchResult.content, handoff);
-      }
-
-      // If orchestrator returned suggest_capability, pass it through
-      if (decision.mode === "edit-existing" && enrichedCtx.hasSiteCode) {
-        // Fall through to edit path below
-      }
-
-      // Otherwise, orchestrator is just providing context — continue to ideation
-      // but inject the orchestrator's analysis into the context
-      if (decision.agent_instructions) {
-        enrichedCtx.activatedContext += `\n\n## Orchestrator Instructions\n${decision.agent_instructions}`;
-      }
-    }
-
-    // If orchestrator suggests installing capabilities, return that to frontend
-    if (orchResult.action?.type === "suggest_capability") {
-      return orchResult;
-    }
-  }
-
-  // ===== Step 2: Edit mode (existing site) =====
+  // ===== Edit existing site: ideation for modify =====
   if (enrichedCtx.hasSiteCode && currentPrd) {
     if (EXECUTION_CONFIRM_RE.test(latestUserMessage)) {
       return runExecutionAgent(enrichedCtx, latestUserMessage);
@@ -275,44 +145,33 @@ export async function runBuildConversation(ctx: BuildConversationContext): Promi
     return result;
   }
 
-  // ===== Step 3: Execution confirmation =====
-  if (currentPrd && EXECUTION_CONFIRM_RE.test(latestUserMessage)) {
-    return runExecutionAgent(enrichedCtx, latestUserMessage);
+  // ===== New build: one-step Design Agent =====
+  const designResult = await runDesignAgent(enrichedCtx);
+
+  // If Design Agent asks a question (rare: only when knowledge is empty)
+  if (designResult.action?.type === "options") return designResult;
+
+  // If Design Agent outputs a design_plan, convert to generate action format
+  if (designResult.action?.type === "design_plan") {
+    return {
+      content: designResult.content,
+      action: {
+        type: "generate",
+        siteType: designResult.action.siteMode || "portfolio",
+        theme: designResult.action.theme || designResult.action.recipe || "minimalist",
+        compositionPlan: designResult.action.compositionPlan || null,
+        visualDirection: designResult.action.visualDirection || null,
+        contentMapping: designResult.action.contentMapping || null,
+        customTheme: designResult.action.customTheme || "",
+        recipe: designResult.action.recipe || null,
+        recipeLayers: designResult.action.layers || null,
+        recipeOverrides: designResult.action.overrides || null,
+      },
+    };
   }
 
-  // ===== Step 4: Ideation → Planning chain =====
-  const conceptResult = await runIdeationAgent(enrichedCtx);
-  if (conceptResult.action?.type === "handoff_to_planner") {
-    return runPlanningAgent(enrichedCtx, conceptResult.content, conceptResult.action);
-  }
-
-  if (conceptResult.action?.type === "options" && userTurnCount >= MAX_IDEATION_USER_TURNS) {
-    return runPlanningAgent(enrichedCtx, conceptResult.content, buildForcedPlanningHandoff(enrichedCtx, conceptResult.content));
-  }
-
-  return conceptResult;
-}
-
-// ---- Orchestrator Agent ----
-
-async function runOrchestratorAgent(ctx: BuildConversationContext): Promise<AgentRunResult> {
-  const prompt = await loadPrompt("orchestrator-agent.md");
-  const userPrompt = `## User Message
-${getLatestUserMessage(ctx.messages)}
-
-## Knowledge Summary
-${ctx.knowledgeSummary || "None"}
-
-## Current Site Code
-${ctx.hasSiteCode ? "Yes (existing site)" : "No (new build)"}
-
-## Current PRD
-${ctx.currentPrd || "None"}
-
-## Capability Manifest
-${getCapabilityManifest()}`;
-
-  return callSiliconFlow(ctx.requestId, "orchestrator-agent", prompt, userPrompt, [], false, ctx.userId, ctx.siteId);
+  // Fallback: treat as regular content
+  return designResult;
 }
 
 async function runIdeationAgent(ctx: BuildConversationContext): Promise<AgentRunResult> {
@@ -431,6 +290,10 @@ export async function runDesignAgent(ctx: BuildConversationContext): Promise<Age
   prompt = prompt.replace("RECIPE_MANIFEST_PLACEHOLDER", recipeManifest);
   prompt = prompt.replace("VARIANT_CATALOG_PLACEHOLDER", variantCatalog);
 
+  // Inject composition patterns catalog
+  const { getPatternCatalog } = await import("./components/composition-patterns");
+  prompt = prompt.replace("PATTERN_CATALOG_PLACEHOLDER", getPatternCatalog());
+
   const userPrompt = `## User Request
 ${getLatestUserMessage(ctx.messages)}
 
@@ -475,6 +338,8 @@ export async function runCodeAgent(
   designPlan: Record<string, unknown>,
   assetCss: string,
   repairHint?: CodeAgentRepairHint,
+  /** Formatted component reference block from reference-extractor */
+  componentReferences?: string,
 ): Promise<CodeAgentResult> {
   const prompt = await loadPrompt("code-agent.md");
 
@@ -509,6 +374,10 @@ ${assetCss || "(No asset CSS)"}
 - \`@/components/ChatBot\` — classic floating chat bubble (use when chatMode is "classic")
 - \`@/components/SharePoster\` — share feature
 - \`@/components/ProjectDemo\` — embed Bilibili/YouTube/GitHub/StackBlitz (props: url, title?, type?)
+
+${componentReferences || ""}
+
+${getRelevantHints({ theme: (designPlan as any).theme, siteType: (designPlan as any).siteType })}
 
 ## Instructions
 1. Write the complete page.tsx and additional globals.css based on the Design Plan above.

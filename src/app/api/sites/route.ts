@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { sites, conversations } from "@/lib/db/schema";
+import { sites } from "@/lib/db/schema";
 import { eq, desc } from "drizzle-orm";
 import { nanoid } from "nanoid";
 
@@ -38,13 +38,18 @@ export async function GET() {
     .where(eq(sites.userId, session.user.id))
     .orderBy(desc(sites.createdAt));
 
-  // Attach conversationId to each site
-  const sitesWithConv = await Promise.all(
-    userSites.map(async (s) => {
-      const conv = await db.select({ id: conversations.id }).from(conversations).where(eq(conversations.siteId, s.id)).get();
-      return { ...s, conversationId: conv?.id || null };
-    })
-  );
+  // Hide placeholder sites that never had a successful build, and unpublished drafts
+  const visibleSites = userSites.filter((s) => {
+    // Hide sites that failed on first build attempt (no successful build ever)
+    if (s.buildStatus === "failed" && !s.lastBuiltAt) return false;
+    // Hide unpublished drafts — user must publish from create page first
+    if (!s.publishedUrl && s.status !== "published") return false;
+    return true;
+  });
+
+  // conversationId no longer attached — build conversations are deleted
+  // after successful builds. Future edits go through the edit workspace.
+  const sitesWithConv = visibleSites.map((s) => ({ ...s, conversationId: null }));
 
   return NextResponse.json({ sites: sitesWithConv });
 }

@@ -252,6 +252,81 @@ function initDb() {
     CREATE INDEX IF NOT EXISTS idx_usage_logs_user_time ON usage_logs(user_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_usage_logs_action ON usage_logs(action, created_at);
 
+    CREATE TABLE IF NOT EXISTS llm_traces (
+      id TEXT PRIMARY KEY,
+      trace_id TEXT NOT NULL,
+      parent_span_id TEXT,
+      phase TEXT NOT NULL,
+      provider TEXT,
+      model TEXT,
+      system_prompt TEXT,
+      user_prompt TEXT,
+      messages TEXT,
+      raw_response TEXT,
+      parsed_output TEXT,
+      input_tokens INTEGER DEFAULT 0,
+      output_tokens INTEGER DEFAULT 0,
+      total_tokens INTEGER DEFAULT 0,
+      latency_ms INTEGER,
+      temperature REAL,
+      max_tokens INTEGER,
+      outcome TEXT DEFAULT 'success',
+      outcome_tags TEXT,
+      error_message TEXT,
+      user_id TEXT,
+      site_id TEXT,
+      build_id TEXT,
+      created_at TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_llm_traces_trace ON llm_traces(trace_id);
+    CREATE INDEX IF NOT EXISTS idx_llm_traces_phase ON llm_traces(phase, created_at);
+    CREATE INDEX IF NOT EXISTS idx_llm_traces_user ON llm_traces(user_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_llm_traces_outcome ON llm_traces(outcome, created_at);
+
+    CREATE TABLE IF NOT EXISTS feature_flags (
+      key TEXT PRIMARY KEY,
+      enabled INTEGER DEFAULT 0,
+      description TEXT,
+      allow_list TEXT,
+      created_at TEXT,
+      updated_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS edit_sessions (
+      id TEXT PRIMARY KEY,
+      site_id TEXT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      status TEXT DEFAULT 'active',
+      intent TEXT,
+      instruction TEXT NOT NULL,
+      changes TEXT,
+      build_id_before TEXT,
+      build_id_after TEXT,
+      build_success INTEGER,
+      build_error TEXT,
+      created_at TEXT,
+      completed_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_edit_sessions_site ON edit_sessions(site_id, created_at);
+
+    CREATE TABLE IF NOT EXISTS error_patterns (
+      id TEXT PRIMARY KEY,
+      fingerprint TEXT UNIQUE,
+      pattern TEXT NOT NULL,
+      category TEXT NOT NULL,
+      layer TEXT DEFAULT 'prompt',
+      raw_example TEXT,
+      bad_pattern TEXT,
+      fix_hint TEXT,
+      frequency INTEGER DEFAULT 1,
+      applicable_context TEXT,
+      last_seen_at TEXT,
+      created_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_error_patterns_fingerprint ON error_patterns(fingerprint);
+    CREATE INDEX IF NOT EXISTS idx_error_patterns_frequency ON error_patterns(frequency);
+
     CREATE TABLE IF NOT EXISTS templates (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -286,6 +361,7 @@ function initDb() {
     "ALTER TABLE knowledge_groups ADD COLUMN eureka_md TEXT",
     "ALTER TABLE sites ADD COLUMN is_public INTEGER DEFAULT 0",
     "ALTER TABLE sites ADD COLUMN public_desc TEXT",
+    "ALTER TABLE knowledge_bases ADD COLUMN profile_json TEXT",
   ];
 
   for (const statement of alterStatements) {
@@ -299,23 +375,5 @@ function initDb() {
 
 initDb();
 
-// Seed admin account
-function seedAdmin() {
-  try {
-    const existing = sqlite.prepare("SELECT id FROM users WHERE email = ?").get("admin@createanysite.com");
-    if (!existing) {
-      const bcrypt = require("bcryptjs");
-      const hash = bcrypt.hashSync("Admin@2024!", 12);
-      const id = crypto.randomUUID();
-      const now = new Date().toISOString();
-      sqlite.prepare(
-        "INSERT OR IGNORE INTO users (id, name, email, password, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
-      ).run(id, "Admin", "admin@createanysite.com", hash, "admin", now, now);
-      console.log("[seed] Admin account created: admin@createanysite.com");
-    }
-  } catch {
-    // Ignore seed errors (e.g. concurrent workers)
-  }
-}
-
-seedAdmin();
+// Start the backup scheduler (side-effect import — timer is .unref()'d)
+import("@/lib/db-backup").catch(() => {});

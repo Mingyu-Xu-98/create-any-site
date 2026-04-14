@@ -40,6 +40,8 @@ RECIPE_MANIFEST_PLACEHOLDER
 
 VARIANT_CATALOG_PLACEHOLDER
 
+PATTERN_CATALOG_PLACEHOLDER
+
 ## Output: design_plan
 
 ```action
@@ -81,7 +83,10 @@ VARIANT_CATALOG_PLACEHOLDER
   },
   "theme": "<same as recipe id, for backward compatibility>",
   "customTheme": "<detailed style description>",
-  "designReasoning": "<one sentence: why this combination>"
+  "designReasoning": "<one sentence: why this combination>",
+  "sectionRationale": {
+    "<kind>/<variant>": "<why this component was chosen for this user's content>"
+  }
 }
 ```
 
@@ -93,6 +98,8 @@ VARIANT_CATALOG_PLACEHOLDER
 - You can override ANY token — colors, typography, radius, shadows, semantics.
 - **Never say "this theme doesn't support that"** — you can always compose it via layers and overrides.
 - Set `"theme"` to the same value as `"recipe"` for backward compatibility with the existing pipeline.
+- **sectionRationale is REQUIRED** — for each chosen component (hero, sections, nav, footer), explain WHY it fits this user's content. Format: `"kind/variant": "reason"`. Example: `"hero/split": "User has an avatar photo + 3 core skill tags, split layout shows both effectively"`.
+- You may use a composition pattern from the catalog below as a starting point, but ALWAYS customize based on the user's actual content. Do not blindly copy patterns.
 
 ## Quick Preference Questions (ask ONE per response, up to 3 rounds)
 

@@ -1,9 +1,11 @@
 import { eq } from "drizzle-orm";
+import { nanoid } from "nanoid";
 import { db, sqlite } from "@/lib/db";
-import { siteBuilds, sites } from "@/lib/db/schema";
+import { siteBuilds, sites, conversations } from "@/lib/db/schema";
 import { logger } from "@/lib/logger";
-import { runSiteBuild, summarizeBuildOutput } from "@/lib/build-runtime";
+import { runSiteBuild, summarizeBuildOutput, cleanupOldBuilds } from "@/lib/build-runtime";
 import type { WorkspaceData, UserSelections } from "@/lib/types";
+import { recordUsage } from "@/lib/usage";
 
 interface BuildPayload {
   data: WorkspaceData;
@@ -15,6 +17,8 @@ interface BuildPayload {
   knowledgeBaseId?: string;
   knowledgeBaseIds?: string[];
   userId?: string;
+  isNew?: boolean;
+  siteName?: string;
 }
 
 const runningJobs = new Set<string>();
@@ -83,13 +87,25 @@ export async function processBuildJob(jobId: string, options?: { alreadyClaimed?
     if (job.status !== "queued") return;
   }
 
+  let payload: BuildPayload;
+  let isNewSite = false;
+  try {
+    payload = JSON.parse(job.payload) as BuildPayload;
+    isNewSite = payload.isNew === true;
+  } catch {
+    const finishedAt = new Date().toISOString();
+    logger.error("build-queue", `[${requestId}] Job ${jobId} failed: invalid payload JSON`);
+    await db.update(siteBuilds).set({ status: "failed", error: "Invalid payload JSON", finishedAt, updatedAt: finishedAt }).where(eq(siteBuilds.id, jobId));
+    await db.update(sites).set({ buildStatus: "failed", buildError: "Invalid payload JSON", updatedAt: finishedAt }).where(eq(sites.id, job.siteId));
+    return;
+  }
+
   if (!options?.alreadyClaimed) {
     await db.update(siteBuilds).set({ status: "building", startedAt: now, updatedAt: now, error: null, logs: null }).where(eq(siteBuilds.id, jobId));
     await db.update(sites).set({ buildStatus: "building", buildError: null, updatedAt: now }).where(eq(sites.id, job.siteId));
   }
 
   try {
-    const payload = JSON.parse(job.payload) as BuildPayload;
     // 15 minutes. Generous enough to accommodate up to 2 auto-retries of the
     // Code Agent + staticBuild cycle when the first generation produces
     // code that fails `next build`. A single pass typically finishes in
@@ -98,6 +114,7 @@ export async function processBuildJob(jobId: string, options?: { alreadyClaimed?
 
     const buildPromise = runSiteBuild({
       siteId: job.siteId,
+      buildId: jobId,
       userId: payload.userId,
       data: payload.data,
       selections: payload.selections,
@@ -132,7 +149,7 @@ export async function processBuildJob(jobId: string, options?: { alreadyClaimed?
       logs: JSON.stringify(result.verification?.checks || []),
     }).where(eq(siteBuilds.id, jobId));
 
-    await db.update(sites).set({
+    const siteFields = {
       previewUrl: result.url,
       workspaceData: JSON.stringify(payload.data),
       selections: JSON.stringify(payload.selections),
@@ -144,7 +161,41 @@ export async function processBuildJob(jobId: string, options?: { alreadyClaimed?
       buildError: null,
       lastBuiltAt: finishedAt,
       updatedAt: finishedAt,
-    }).where(eq(sites.id, job.siteId));
+    };
+
+    if (isNewSite) {
+      // First successful build: populate the placeholder site record
+      await db.update(sites).set({
+        slug: nanoid(10),
+        name: payload.siteName || `${payload.data?.name || "My"} - ${payload.selections?.siteType || "portfolio"}`,
+        siteType: payload.selections?.siteType || "portfolio",
+        theme: payload.selections?.theme || "cyberpunk",
+        layout: payload.selections?.layout || "card-grid",
+        status: "draft",
+        ...siteFields,
+      }).where(eq(sites.id, job.siteId));
+    } else {
+      await db.update(sites).set(siteFields).where(eq(sites.id, job.siteId));
+    }
+
+    // Record build usage for quota tracking
+    void recordUsage(job.userId, {
+      action: "build",
+      label: "site-build",
+      siteId: job.siteId,
+      durationMs: Date.now() - new Date(now).getTime(),
+    }).catch(() => {});
+
+    // Build succeeded — delete the build conversation.
+    // All build state (spec, PRD, fileMap, selections) is already persisted
+    // on sites + site_builds tables. The conversation is only chat history
+    // and is no longer needed. This forces future edits through the
+    // dedicated edit workspace instead of a stale, context-polluted chat.
+    try {
+      await db.delete(conversations).where(eq(conversations.siteId, job.siteId));
+    } catch {
+      // Non-critical — don't let conversation cleanup fail the build
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     const stdout = (err as { stdout?: string })?.stdout || "";
@@ -168,6 +219,9 @@ export async function processBuildJob(jobId: string, options?: { alreadyClaimed?
       updatedAt: finishedAt,
     }).where(eq(sites.id, job.siteId));
   } finally {
+    // Clean up old build directories (fire-and-forget)
+    void cleanupOldBuilds(job.siteId).catch(() => {});
+
     if (shouldInlineBuildJobs()) {
       void kickInlineBuildQueue();
     }

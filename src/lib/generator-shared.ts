@@ -200,7 +200,7 @@ export default function SharePoster() {
   const share = {
     button: rawShare.button || (lang === "zh" ? "分享" : "Share"),
     title: rawShare.title || (lang === "zh" ? "分享海报" : "Share Poster"),
-    invite: rawShare.invite || (t as any).hero?.lines?.[0]?.replace("> ", "") || (lang === "zh" ? "欢迎访问我的主页" : "Welcome to my site"),
+    invite: rawShare.invite || (t as any).hero?.subtitle || (t as any).hero?.title || (t as any).hero?.lines?.[0]?.replace("> ", "") || (lang === "zh" ? "欢迎访问我的主页" : "Welcome to my site"),
     desc: rawShare.desc && rawShare.desc.length > 10 ? rawShare.desc : ((t as any).about?.text?.slice(0, 120) || (lang === "zh" ? "这是我的个人网站" : "My personal website")),
     save: rawShare.save || (lang === "zh" ? "保存海报" : "Save Poster"),
     copy: rawShare.copy || (lang === "zh" ? "复制链接" : "Copy Link"),
@@ -230,44 +230,38 @@ export default function SharePoster() {
     const cx = W / 2;
     const cardX = 32, cardW = W - 64, cardY = 40;
 
-    // --- Pre-calculate content height ---
-    // Use an offscreen measurement pass
-    const measureCanvas = document.createElement("canvas");
-    measureCanvas.width = W; measureCanvas.height = 100;
-    const mCtx = measureCanvas.getContext("2d")!;
-
     const avatarR = 32;
-    // avatar top to name: cardY(40) + 50(avatarY offset) + avatarR(32) + 28 = 150
-    let contentH = 50 + avatarR * 2 + 28; // start from cardY
-    contentH += 26 + 46; // title + gap to divider
-    contentH += 34; // invite text
-    contentH += 30; // gap to desc
+    const skillTags = (share.skillTags || []).slice(0, 6);
+
+    // --- Calculate exact height using measurement canvas ---
+    const mCanvas = document.createElement("canvas");
+    mCanvas.width = W; mCanvas.height = 10;
+    const mCtx = mCanvas.getContext("2d")!;
+
+    const avatarY0 = cardY + 50;
+    const nameY0 = avatarY0 + avatarR + 28;
+    const divY0 = nameY0 + 46;
+    const inviteY0 = divY0 + 34;
 
     mCtx.font = \`13px \${fontBase}\`;
-    const descLines = wrapText(mCtx, share.desc, cardW - 80);
-    const descLineCount = Math.min(descLines.length, 2);
-    contentH += descLineCount * 20 + 20; // desc lines + gap
+    const descLinesCount = Math.min(wrapText(mCtx, share.desc, cardW - 80).length, 2);
+    let measuredY = inviteY0 + 30 + descLinesCount * 20 + 20;
 
-    const skillTags = (share.skillTags || []).slice(0, 6);
     if (skillTags.length > 0) {
-      contentH += 18; // "Skills" header
+      measuredY += 18; // header
       mCtx.font = \`12px \${fontBase}\`;
-      const maxLineW = cardW - 60;
-      let lineW = 0;
-      let tagRows = 1;
-      skillTags.forEach((tag) => {
-        const tw = mCtx.measureText(tag).width + 20 + 5;
-        if (lineW + tw > maxLineW && lineW > 0) { tagRows++; lineW = tw; }
-        else { lineW += tw; }
+      const maxLW = cardW - 60;
+      let lw = 0, rows = 1;
+      skillTags.forEach((tag: string) => {
+        const tw = mCtx.measureText(tag).width + 25;
+        if (lw + tw > maxLW && lw > 0) { rows++; lw = tw; } else { lw += tw; }
       });
-      contentH += tagRows * 28 + 12; // tag rows + gap
+      measuredY += rows * 28 + 12;
     }
+    measuredY += 8 + 90 + 8 + 20 + 40; // QR block + bottom padding
 
-    // QR code block: 8 padding + 90 qr + 8 padding + 20 text + 24 bottom
-    contentH += 8 + 90 + 8 + 20 + 24;
-
-    const cardH = contentH;
-    const H = cardY * 2 + cardH;
+    const cardH = measuredY - cardY;
+    const H = cardY + cardH + cardY;
 
     canvas.width = W * dpr;
     canvas.height = H * dpr;
@@ -299,7 +293,6 @@ export default function SharePoster() {
     ctx.stroke();
     ctx.restore();
 
-    // --- Draw rest after avatar loads ---
     const drawContent = async (avatarImg?: HTMLImageElement) => {
       const avatarY = cardY + 50;
 
@@ -330,13 +323,13 @@ export default function SharePoster() {
       ctx.fillStyle = textColor;
       ctx.font = \`bold 26px \${fontBase}\`;
       ctx.textAlign = "center";
-      const name = lang === "zh" ? t.hero.lines[1]?.replace("> ", "") : t.hero.lines[1]?.replace("> ", "");
-      ctx.fillText(name || "", cx, nameY);
+      const name = (t as any).hero?.name || (t as any).hero?.lines?.[1]?.replace("> ", "") || "";
+      ctx.fillText(name, cx, nameY);
 
       // --- Title ---
       ctx.fillStyle = mutedColor;
       ctx.font = \`14px \${fontBase}\`;
-      const title = t.hero.lines[2]?.replace("> ", "") || "";
+      const title = (t as any).hero?.title || (t as any).hero?.lines?.[2]?.replace("> ", "") || "";
       ctx.fillText(title, cx, nameY + 26);
 
       // --- Divider ---
