@@ -134,6 +134,7 @@ function initDb() {
       content TEXT,
       mime_type TEXT,
       asset_path TEXT,
+      usage_tag TEXT,
       created_at TEXT
     );
 
@@ -362,6 +363,7 @@ function initDb() {
     "ALTER TABLE sites ADD COLUMN is_public INTEGER DEFAULT 0",
     "ALTER TABLE sites ADD COLUMN public_desc TEXT",
     "ALTER TABLE knowledge_bases ADD COLUMN profile_json TEXT",
+    "ALTER TABLE knowledge_files ADD COLUMN usage_tag TEXT",
   ];
 
   for (const statement of alterStatements) {

@@ -15,8 +15,17 @@ interface KBFile {
   originalUrl: string | null;
   contentLength: number;
   assetPath: string | null;
+  usageTag: string | null;
   createdAt: string;
 }
+
+const USAGE_TAG_OPTIONS = [
+  { value: "", label: { zh: "不指定", en: "Unspecified" } },
+  { value: "avatar", label: { zh: "头像", en: "Avatar" } },
+  { value: "hero-bg", label: { zh: "Hero 背景", en: "Hero BG" } },
+  { value: "project-cover", label: { zh: "项目封面", en: "Project Cover" } },
+  { value: "gallery", label: { zh: "画廊展示", en: "Gallery" } },
+];
 
 interface KBBase {
   id: string;
@@ -40,20 +49,7 @@ export default function KnowledgeBaseDetail() {
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState("");
-  const [uploadQueue, setUploadQueue] = useState<Array<{ id: string; name: string; status: "waiting" | "processing" | "done" | "error" }>>(() => {
-    // Restore from localStorage on mount
-    if (typeof window === "undefined") return [];
-    try {
-      const saved = localStorage.getItem(`kb-upload-queue-${baseId}`);
-      if (saved) {
-        const parsed = JSON.parse(saved) as Array<{ id: string; name: string; status: string }>;
-        // Only restore non-done items (still processing or waiting)
-        return parsed.filter(q => q.status === "processing" || q.status === "waiting")
-          .map(q => ({ ...q, status: "processing" as const }));
-      }
-    } catch {}
-    return [];
-  });
+  const [uploadQueue, setUploadQueue] = useState<Array<{ id: string; name: string; status: "waiting" | "processing" | "done" | "error" }>>([]);
   const [detailTab, setDetailTab] = useState<"files" | "index">("files");
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [urlInput, setUrlInput] = useState("");
@@ -76,40 +72,15 @@ export default function KnowledgeBaseDetail() {
 
   useEffect(() => { if (session?.user) loadData(); }, [session, loadData]);
 
-  // Persist upload queue to localStorage
+  // Auto-clean completed queue items after 2s
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    const active = uploadQueue.filter(q => q.status !== "done");
-    if (active.length > 0) {
-      localStorage.setItem(`kb-upload-queue-${baseId}`, JSON.stringify(active));
-    } else {
-      localStorage.removeItem(`kb-upload-queue-${baseId}`);
-    }
-  }, [uploadQueue, baseId]);
-
-  // Poll for restored processing items — check if they've finished (appeared in file list)
-  useEffect(() => {
-    const restored = uploadQueue.filter(q => q.status === "processing");
-    if (restored.length === 0) return;
-    const interval = setInterval(async () => {
-      await loadData();
-      // Check if any restored items' names now appear in the file list
-      setUploadQueue(prev => {
-        const fileNames = new Set(files.map(f => f.name));
-        let changed = false;
-        const updated = prev.map(q => {
-          if (q.status === "processing" && fileNames.has(q.name)) {
-            changed = true;
-            setTimeout(() => setUploadQueue(p => p.filter(x => x.id !== q.id)), 2000);
-            return { ...q, status: "done" as const };
-          }
-          return q;
-        });
-        return changed ? updated : prev;
-      });
-    }, 3000);
-    return () => clearInterval(interval);
-  }, [uploadQueue.length, files, loadData]); // eslint-disable-line react-hooks/exhaustive-deps
+    const doneItems = uploadQueue.filter(q => q.status === "done");
+    if (doneItems.length === 0) return;
+    const timer = setTimeout(() => {
+      setUploadQueue(prev => prev.filter(q => q.status !== "done"));
+    }, 2000);
+    return () => clearTimeout(timer);
+  }, [uploadQueue]);
 
   const uploadFiles = async (fileList: File[]) => {
     if (fileList.length === 0) return;
@@ -130,8 +101,6 @@ export default function KnowledgeBaseDetail() {
           throw new Error(errData.error || `Upload failed (${res.status})`);
         }
         setUploadQueue(prev => prev.map(q => q.id === itemId ? { ...q, status: "done" } : q));
-        // Auto-remove completed item after 2s
-        setTimeout(() => setUploadQueue(prev => prev.filter(q => q.id !== itemId)), 2000);
       } catch {
         setUploadQueue(prev => prev.map(q => q.id === itemId ? { ...q, status: "error" } : q));
       }
@@ -166,6 +135,18 @@ export default function KnowledgeBaseDetail() {
     if (!confirm(zh ? "确认删除此文件？" : "Delete this file?")) return;
     await fetch(`/api/kb/${baseId}/files/${fileId}`, { method: "DELETE" });
     await loadData();
+  };
+
+  const updateFileMetadata = async (fileId: string, updates: { name?: string; description?: string; usageTag?: string }) => {
+    const res = await fetch(`/api/kb/${baseId}/files/${fileId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(updates),
+    });
+    if (res.ok) {
+      // Optimistic update
+      setFiles(prev => prev.map(f => f.id === fileId ? { ...f, ...updates } : f));
+    }
   };
 
   const viewFileContent = async (fileId: string, fileName: string) => {
@@ -423,13 +404,14 @@ export default function KnowledgeBaseDetail() {
                       <h3 className="text-sm font-semibold text-gray-700">{zh ? "图片素材" : "Images"} <span className="text-gray-400 font-normal">({images.length})</span></h3>
                       <svg className={`w-4 h-4 text-gray-400 ml-auto transition-transform ${collapsed.images ? "-rotate-90" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
                     </button>
-                    {!collapsed.images && <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3">
+                    {!collapsed.images && <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
                       {images.map(f => {
                         const imgSrc = f.assetPath ? `/api/user-assets/${f.assetPath}` : f.originalUrl || (f.name.startsWith("/") ? f.name : `/api/user-assets/${f.name}`);
                         const displayName = f.description || f.name.replace(/\.\w+$/, "") || (zh ? "图片" : "Image");
+                        const currentTag = f.usageTag || "";
                         return (
                           <div key={f.id} className="group relative rounded-xl border border-gray-200 bg-white overflow-hidden hover:border-accent/30 hover:shadow-md transition-all">
-                            <div className="aspect-square bg-gray-50 flex items-center justify-center overflow-hidden">
+                            <div className="aspect-[4/3] bg-gray-50 flex items-center justify-center overflow-hidden">
                               <img
                                 src={imgSrc}
                                 alt={displayName}
@@ -437,9 +419,29 @@ export default function KnowledgeBaseDetail() {
                                 onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; (e.target as HTMLImageElement).parentElement!.innerHTML = '<span class="text-2xl opacity-20">🖼️</span>'; }}
                               />
                             </div>
-                            <div className="px-2 py-1.5">
-                              <p className="text-[10px] text-gray-600 truncate font-medium">{displayName}</p>
-                              <p className="text-[9px] text-gray-400">{(f.contentLength / 1024).toFixed(0)}KB</p>
+                            <div className="px-2.5 py-2 space-y-1.5">
+                              <p className="text-[11px] text-gray-700 truncate font-medium">{displayName}</p>
+                              <select
+                                value={currentTag}
+                                onChange={(e) => updateFileMetadata(f.id, { usageTag: e.target.value })}
+                                className="w-full text-[10px] px-1.5 py-1 rounded-md border border-gray-200 bg-gray-50 text-gray-600 focus:outline-none focus:ring-1 focus:ring-accent/30"
+                              >
+                                {USAGE_TAG_OPTIONS.map(opt => (
+                                  <option key={opt.value} value={opt.value}>
+                                    {zh ? opt.label.zh : opt.label.en}
+                                  </option>
+                                ))}
+                              </select>
+                              {currentTag && (
+                                <span className={`inline-block text-[9px] px-1.5 py-0.5 rounded-full font-medium ${
+                                  currentTag === "avatar" ? "bg-blue-50 text-blue-600" :
+                                  currentTag === "hero-bg" ? "bg-purple-50 text-purple-600" :
+                                  currentTag === "project-cover" ? "bg-green-50 text-green-600" :
+                                  "bg-gray-50 text-gray-600"
+                                }`}>
+                                  {USAGE_TAG_OPTIONS.find(o => o.value === currentTag)?.[zh ? "label" : "label"]?.[zh ? "zh" : "en"] || currentTag}
+                                </span>
+                              )}
                             </div>
                             <button
                               onClick={() => deleteFile(f.id)}

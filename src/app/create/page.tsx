@@ -162,7 +162,32 @@ function CreatePageInner() {
       : [];
 
     const userName = typeof args.data.name === "string" ? args.data.name : "Creator";
-    const tasks = getImageTasks(theme || pickRandomTheme(), userName, projects);
+    let tasks = getImageTasks(theme || pickRandomTheme(), userName, projects);
+
+    // Skip AI image generation for slots that user already provided via KB
+    try {
+      const userTags = new Set<string>();
+      for (const bid of selectedBaseIds) {
+        const res = await fetch(`/api/kb/${bid}/files`);
+        if (res.ok) {
+          const data = await res.json();
+          for (const f of data.files || []) {
+            if (f.type === "image" && f.usageTag) userTags.add(f.usageTag);
+          }
+        }
+      }
+      if (userTags.has("avatar")) {
+        tasks = tasks.filter(t => t.filename !== "avatar.png");
+      }
+      if (userTags.has("hero-bg")) {
+        tasks = tasks.filter(t => !t.filename.includes("hero-bg") && !t.filename.includes("ghibli-background"));
+      }
+      // project-cover: skip project images if user tagged enough
+      if (userTags.has("project-cover")) {
+        // Keep project images for now — user may not have enough covers for all projects
+      }
+    } catch { /* non-fatal: generate all images if check fails */ }
+
     if (tasks.length === 0) {
       return { attempted: 0, succeeded: 0, failed: 0, errors: [] as string[] };
     }
@@ -507,7 +532,7 @@ function CreatePageInner() {
 
     try {
       const chatAbort = new AbortController();
-      const chatTimeout = setTimeout(() => chatAbort.abort(), 300_000); // 5 min
+      const chatTimeout = setTimeout(() => chatAbort.abort(), 1_200_000); // 20 min
       let r: Response;
       try {
         r = await fetch("/api/chat-build", {
@@ -654,9 +679,11 @@ function CreatePageInner() {
       }
     } catch (err) {
       const isAbort = err instanceof DOMException && err.name === "AbortError";
-      const errMsg = isAbort
-        ? (locale === "zh" ? "AI 响应超时（5分钟），请重试或简化请求" : "AI response timed out (5 min), please retry or simplify your request")
-        : (err instanceof Error ? err.message : "Unknown error");
+      const rawMsg = err instanceof Error ? err.message : "Unknown error";
+      const isAbortLike = isAbort || /aborted|abort/i.test(rawMsg);
+      const errMsg = isAbortLike
+        ? (locale === "zh" ? "AI 服务响应超时，可能是模型负载较高。请稍后重试" : "AI service timed out — the model may be under heavy load. Please retry shortly")
+        : rawMsg;
       setChatMessages(p => [...p, { role: "assistant", content: locale === "zh" ? `❌ 请求失败：${errMsg}。请重试。` : `❌ Request failed: ${errMsg}. Please retry.` }]);
     }
     finally { clearInterval(statusTimer); setWorkingStatus(""); setChatLoading(false); }
@@ -728,11 +755,17 @@ function CreatePageInner() {
       });
       await handleGenerateResult(r, zh, theme, data);
     } catch (err) {
-      const errMsg = err instanceof Error ? err.message : "Unknown error";
+      let errMsg = err instanceof Error ? err.message : "Unknown error";
+      // Make abort errors user-friendly
+      if (/aborted|abort/i.test(errMsg)) {
+        errMsg = locale === "zh"
+          ? "AI 服务响应超时，可能是模型负载较高。请稍后重试。"
+          : "AI service timed out — the model may be under heavy load. Please retry shortly.";
+      }
       setGenStatus("idle"); setThinkingSteps([]);
       setChatMessages(p => [...p, { role: "assistant", content: locale === "zh"
-        ? `❌ 生成失败：${errMsg}\n\n请根据上面的真实错误信息调整后重试。`
-        : `❌ Generation failed: ${errMsg}\n\nPlease retry after addressing the specific error above.` }]);
+        ? `❌ 生成失败：${errMsg}\n\n请稍后重试。`
+        : `❌ Generation failed: ${errMsg}\n\nPlease retry shortly.` }]);
     }
   };
 
@@ -750,7 +783,7 @@ function CreatePageInner() {
 
     const pollStart = Date.now();
     let finished = false;
-    while (!finished && Date.now() - pollStart < 300000) {
+    while (!finished && Date.now() - pollStart < 1_500_000) { // 25 min — matches build queue timeout
       await new Promise(resolve => setTimeout(resolve, 1500));
       const jobRes = await fetch(`/api/builds/${genResult.jobId}`, { cache: "no-store" });
       const jobResult = await readJsonResponse<{ error?: string; job?: { status: string; previewUrl?: string | null; error?: string | null; logs?: string[] } }>(jobRes);

@@ -136,6 +136,7 @@ export const knowledgeFiles = sqliteTable("knowledge_files", {
   content: text("content"),               // Raw full text (parsed from PDF/DOCX, or link content)
   mimeType: text("mime_type"),            // For images: image/png etc
   assetPath: text("asset_path"),          // For images: path in user-assets
+  usageTag: text("usage_tag"),            // For images: "avatar" | "hero-bg" | "project-cover" | "gallery" | null
   createdAt: text("created_at").$defaultFn(() => new Date().toISOString()),
 });
 

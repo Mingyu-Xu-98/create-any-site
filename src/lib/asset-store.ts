@@ -74,8 +74,16 @@ export async function listUserImages(userId: string): Promise<Array<{ filename: 
   }
 }
 
-/** Copy all user images into a site's public/images/ directory */
-export async function copyUserImagesToSite(userId: string, siteDir: string): Promise<number> {
+/**
+ * Copy all user images into a site's public/images/ directory.
+ * When tagMap is provided, also creates standard filename aliases
+ * (e.g., "avatar.png" for images tagged as "avatar").
+ */
+export async function copyUserImagesToSite(
+  userId: string,
+  siteDir: string,
+  tagMap?: Map<string, string>,  // assetPath -> usageTag
+): Promise<number> {
   const images = await listUserImages(userId);
   if (images.length === 0) return 0;
 
@@ -88,6 +96,14 @@ export async function copyUserImagesToSite(userId: string, siteDir: string): Pro
     try {
       await fs.copyFile(img.path, target);
       count++;
+
+      // Create standard filename alias based on usage tag
+      const tag = tagMap?.get(img.filename);
+      if (tag === "avatar") {
+        await fs.copyFile(img.path, path.join(targetDir, "avatar.png"));
+      } else if (tag === "hero-bg") {
+        await fs.copyFile(img.path, path.join(targetDir, "hero-bg.png"));
+      }
     } catch { /* skip broken files */ }
   }
 

@@ -90,6 +90,7 @@ async function callSiliconFlow(
 ): Promise<AgentRunResult> {
   logger.info("build-agents", `[${requestId}] ${label}: prompt ${systemPrompt.length + userPrompt.length} chars${useAdvancedModel ? " (advanced model)" : ""}`);
 
+  const startMs = Date.now();
   const result = await chatCompletion({
     requestId,
     label,
@@ -102,6 +103,8 @@ async function callSiliconFlow(
     userId,
     siteId,
   });
+  const elapsedSec = ((Date.now() - startMs) / 1000).toFixed(1);
+  logger.info("build-agents", `[${requestId}] ${label}: completed in ${elapsedSec}s via ${result.provider}/${result.model} (${result.content.length} chars output)`);
   const content = result.content;
   return { content, action: extractAction(content) };
 }
@@ -360,7 +363,7 @@ ALL text content MUST come from \`t.*\`, never hardcoded. Key fields:
 - \`t.contact.email\`, \`t.contact.links[]\`
 
 ## Knowledge Content (the user's ACTUAL data — read this to understand what the site is about)
-${ctx.knowledgeContext?.slice(0, 40000) || "(Empty — generate a creative placeholder site)"}
+${ctx.knowledgeContext?.slice(0, 15000) || "(Empty — generate a creative placeholder site)"}
 
 ## Asset CSS (already resolved, use these classes)
 ${assetCss || "(No asset CSS)"}
@@ -386,7 +389,13 @@ ${getRelevantHints({ theme: (designPlan as any).theme, siteType: (designPlan as 
 4. The hero MUST display \`t.hero.name\` prominently. Do NOT skip the user's name.
 5. If the Knowledge Content has projects/skills/experience, ensure the page has sections for them.
 6. Do NOT put SVG illustrations inside each project card. Instead, create ONE themed SVG animation in the hero or about section.
-7. For project cards with \`t.projects[].detail\` or \`highlights\`, add a modal/overlay detail view (use useState to toggle).`;
+7. For project cards with \`t.projects[].detail\` or \`highlights\`, add a modal/overlay detail view (use useState to toggle).
+8. If the Knowledge Content includes [IMAGE] entries, USE those images in your code:
+   - usageTag "avatar" → use as profile/avatar: <Image src="/images/{assetPath}" ... unoptimized />
+   - usageTag "hero-bg" → use as hero section background image
+   - usageTag "project-cover" → use as project card cover image
+   - No tag → use the description to decide appropriate placement
+   - Always use Next.js Image component with the \`unoptimized\` prop for user images`;
 
   if (repairHint) {
     // Append a repair section. Keep the original instructions above so the
