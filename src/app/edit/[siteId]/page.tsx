@@ -115,6 +115,10 @@ export default function EditWorkspacePage() {
     setIsEditing(true);
     setEditStatus("分析编辑意图...");
 
+    // Show progress updates during the LLM call
+    const progressTimer = setTimeout(() => setEditStatus("AI 正在修改代码..."), 3000);
+    const progressTimer2 = setTimeout(() => setEditStatus("正在构建并验证修改..."), 15000);
+
     try {
       const res = await fetch("/api/edit", {
         method: "POST",
@@ -124,20 +128,25 @@ export default function EditWorkspacePage() {
 
       const result = await res.json();
 
-      if (result.buildSuccess) {
+      // Handle API-level errors (500, 400, etc.)
+      if (!res.ok || result.error) {
+        setEditStatus(`编辑失败: ${result.error || `HTTP ${res.status}`}`);
+      } else if (result.buildSuccess) {
         setEditStatus("编辑成功！点击右上角「更新发布」使改动生效");
         setPreviewKey((k) => k + 1); // Refresh preview
-        // Update buildStatus to ready so publish button is enabled
         setSite((prev) => prev ? { ...prev, buildStatus: "ready" } : prev);
+        setInstruction("");
       } else {
-        setEditStatus(`编辑失败: ${result.buildError?.slice(0, 100) || "未知错误"}`);
+        setEditStatus(`编辑失败: ${result.buildError?.slice(0, 200) || result.summary || "未知错误"}`);
+        setInstruction("");
       }
 
-      setInstruction("");
       loadHistory();
     } catch (err) {
       setEditStatus(`请求失败: ${err instanceof Error ? err.message : "未知错误"}`);
     } finally {
+      clearTimeout(progressTimer);
+      clearTimeout(progressTimer2);
       setIsEditing(false);
       setTimeout(() => setEditStatus(null), 5000);
     }
