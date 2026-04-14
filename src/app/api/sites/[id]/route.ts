@@ -111,8 +111,16 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
         if (!usedSymlinkSwap) {
           // Slow path: restore files from DB snapshot
+          // First, clean the site directory to remove residual files from the current build
           const fileMap = JSON.parse(publishedBuild.fileMapSnapshot) as Record<string, string>;
           const siteDir = siteRoot(id);
+          try {
+            const srcDir = path.join(siteDir, "src");
+            await fs.rm(srcDir, { recursive: true, force: true });
+          } catch {
+            // src dir may not exist
+          }
+          // Then write back all files from the snapshot
           for (const [filePath, content] of Object.entries(fileMap)) {
             const fullPath = path.join(siteDir, filePath);
             await fs.mkdir(path.dirname(fullPath), { recursive: true });
@@ -151,9 +159,22 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       return NextResponse.json({ ok: true, site: { status: "draft", publishedUrl: null, publishedBuildId: null } });
     }
 
+    // Whitelist: only allow safe fields to be updated by the client
+    const ALLOWED_FIELDS = new Set([
+      "name", "slug", "siteType", "theme", "layout",
+      "workspaceData", "selections", "fileMap", "editorState",
+      "prd", "prdHistory", "isPublic", "publicDesc",
+    ]);
+    const safeUpdate: Record<string, unknown> = { updatedAt: now };
+    for (const [key, value] of Object.entries(body)) {
+      if (ALLOWED_FIELDS.has(key)) {
+        safeUpdate[key] = value;
+      }
+    }
+
     await db
       .update(sites)
-      .set({ ...body, updatedAt: now })
+      .set(safeUpdate)
       .where(and(eq(sites.id, id), eq(sites.userId, session.user.id)));
 
     return NextResponse.json({ ok: true });

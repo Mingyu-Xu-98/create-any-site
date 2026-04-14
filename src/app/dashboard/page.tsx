@@ -213,7 +213,7 @@ export default function DashboardPage() {
                   {/* Actions */}
                   <div className="pt-4 border-t border-gray-100 flex flex-wrap items-center gap-2">
                     <Link
-                      href={`/create?siteId=${site.id}`}
+                      href={`/edit/${site.id}`}
                       className="px-3 py-1.5 rounded-lg bg-accent text-xs text-white font-medium hover:bg-accent/90 transition-all"
                     >
                       {locale === "zh" ? "编辑" : "Edit"}

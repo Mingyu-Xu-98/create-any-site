@@ -7,6 +7,7 @@ import { getCapabilityManifest } from "./capability-registry";
 import { getAssetManifest } from "./assets";
 import { getRecipeManifest } from "./recipes/loader";
 import { getVariantCatalog } from "./components";
+import { getRelevantHints } from "./error-collector";
 
 type ChatRole = "system" | "user" | "assistant";
 
@@ -289,6 +290,10 @@ export async function runDesignAgent(ctx: BuildConversationContext): Promise<Age
   prompt = prompt.replace("RECIPE_MANIFEST_PLACEHOLDER", recipeManifest);
   prompt = prompt.replace("VARIANT_CATALOG_PLACEHOLDER", variantCatalog);
 
+  // Inject composition patterns catalog
+  const { getPatternCatalog } = await import("./components/composition-patterns");
+  prompt = prompt.replace("PATTERN_CATALOG_PLACEHOLDER", getPatternCatalog());
+
   const userPrompt = `## User Request
 ${getLatestUserMessage(ctx.messages)}
 
@@ -333,6 +338,8 @@ export async function runCodeAgent(
   designPlan: Record<string, unknown>,
   assetCss: string,
   repairHint?: CodeAgentRepairHint,
+  /** Formatted component reference block from reference-extractor */
+  componentReferences?: string,
 ): Promise<CodeAgentResult> {
   const prompt = await loadPrompt("code-agent.md");
 
@@ -367,6 +374,10 @@ ${assetCss || "(No asset CSS)"}
 - \`@/components/ChatBot\` — classic floating chat bubble (use when chatMode is "classic")
 - \`@/components/SharePoster\` — share feature
 - \`@/components/ProjectDemo\` — embed Bilibili/YouTube/GitHub/StackBlitz (props: url, title?, type?)
+
+${componentReferences || ""}
+
+${getRelevantHints({ theme: (designPlan as any).theme, siteType: (designPlan as any).siteType })}
 
 ## Instructions
 1. Write the complete page.tsx and additional globals.css based on the Design Plan above.

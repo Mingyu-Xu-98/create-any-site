@@ -227,9 +227,14 @@ async function callProvider(config: ProviderConfig, input: ChatCompletionInput, 
   return callOpenAICompatible(config, input, messages);
 }
 
-function isNetworkError(error: unknown): boolean {
+function isFallbackEligible(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
-  return /terminated|fetch failed|socket|econnreset|timeout|timed out|network|aborted|aborterror|this operation was aborted/i.test(message);
+  // Network errors
+  if (/terminated|fetch failed|socket|econnreset|timeout|timed out|network|aborted|aborterror|this operation was aborted/i.test(message)) return true;
+  // Provider-specific billing/rate errors — next provider may succeed
+  if (/\b(402|429|503|529)\b/.test(message)) return true;
+  if (/credits|quota|rate.?limit|overloaded|capacity/i.test(message)) return true;
+  return false;
 }
 
 // ---- Main entry point ----
@@ -304,9 +309,9 @@ export async function chatCompletion(input: ChatCompletionInput): Promise<ChatCo
       return result;
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
-      // Only fallback on network errors; API errors (auth, rate limit) fall through too
-      // so the user gets a clear error from the first provider that responds
-      if (!isNetworkError(error) && chain.indexOf(config) === 0) {
+      // Fallback to next provider on network, billing, and rate-limit errors.
+      // Auth errors (401/403) are not retried — they indicate misconfiguration.
+      if (!isFallbackEligible(error) && chain.indexOf(config) === 0) {
         span.error(lastError, {
           provider: config.name,
           model: config.model,

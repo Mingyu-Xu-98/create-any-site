@@ -133,10 +133,20 @@ export async function checkQuota(
   userId: string,
   _action: "llm_call" | "build" | "file_upload",
 ): Promise<QuotaCheckResult> {
-  // Currently always allows. To enable limits:
-  // 1. Uncomment the checks below
-  // 2. Call checkQuota() before expensive operations in API routes
-  // 3. Return 429 with { error: result.reason, quota: true } on denial
+  // Currently disabled — usage is still recorded via recordUsage().
+  // When an external points/credits system is ready, replace this
+  // function body with an API call:
+  //
+  //   const resp = await fetch(POINTS_API_URL + "/check", {
+  //     method: "POST",
+  //     headers: { "Authorization": `Bearer ${POINTS_API_KEY}` },
+  //     body: JSON.stringify({ userId, action, ... }),
+  //   });
+  //   const { allowed, remaining, reason } = await resp.json();
+  //   return { allowed, remaining, reason };
+  //
+  // The call sites (chat-build, generate, ingestion, kb/files) are
+  // already wired — no route changes needed when enabling this.
   return { allowed: true };
 }
 

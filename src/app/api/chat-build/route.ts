@@ -8,6 +8,7 @@ import { runBuildConversation } from "@/lib/build-agents";
 import { getChatProviderSummary, hasChatProvider } from "@/lib/llm";
 import { requireAuth, unauthorized } from "@/lib/require-auth";
 import { internalError } from "@/lib/api-errors";
+import { checkQuota } from "@/lib/usage";
 
 const CODE_CONTEXT_FILES = [
   "src/app/page.tsx", "src/app/globals.css", "src/app/layout.tsx",
@@ -23,6 +24,11 @@ export async function POST(req: NextRequest) {
 
   const requestId = crypto.randomUUID().slice(0, 8);
   try {
+    const quota = await checkQuota(authedUserId, "llm_call");
+    if (!quota.allowed) {
+      return NextResponse.json({ error: quota.reason, quota: true, upgradeHint: quota.upgradeHint }, { status: 429 });
+    }
+
     if (!hasChatProvider()) {
       return NextResponse.json({ error: "No LLM provider configured. Set OPENROUTER_API_KEY or SILICONFLOW_API_KEY." }, { status: 500 });
     }
@@ -118,7 +124,7 @@ export async function POST(req: NextRequest) {
         for (const baseId of knowledgeBaseIds) {
           const kbCtx = await loadFullKBContext(session.user.id, baseId);
           if (kbCtx.fileCount > 0) {
-            allParts.push(`## KB: ${kbCtx.indexContent.split("\n")[0] || baseId}\n${kbCtx.indexContent}\n\n${formatFilesForPrompt(kbCtx.fileContents, Math.floor(40000 / knowledgeBaseIds.length))}`);
+            allParts.push(`## KB: ${kbCtx.indexContent.split("\n")[0] || baseId}\n${kbCtx.indexContent}\n\n${formatFilesForPrompt(kbCtx.fileContents, Math.floor(20000 / knowledgeBaseIds.length))}`);
             kbFileCount += kbCtx.fileCount;
           }
         }
@@ -132,7 +138,7 @@ export async function POST(req: NextRequest) {
     const legacyContext = selectedKnowledge.map(k => {
       const useCaseHint = k.useCase ? `\nRouting: ${k.useCase}` : "";
       return `[${k.category}] ${k.title}: ${k.content}${useCaseHint}`;
-    }).join("\n\n").slice(0, 15000);
+    }).join("\n\n").slice(0, 8000);
 
     const knowledgeContext = kbContent
       ? (legacyContext ? `${kbContent}\n\n## Legacy Knowledge Items\n${legacyContext}` : kbContent)

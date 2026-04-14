@@ -118,6 +118,7 @@ export const knowledgeBases = sqliteTable("knowledge_bases", {
   indexMd: text("index_md"),             // Auto-generated index: file list + descriptions + keywords
   fileCount: integer("file_count").default(0),
   totalChars: integer("total_chars").default(0),
+  profileJson: text("profile_json"),       // Cached AI-extracted profile data (name, projects, skills, etc.)
   createdAt: text("created_at").$defaultFn(() => new Date().toISOString()),
   updatedAt: text("updated_at").$defaultFn(() => new Date().toISOString()),
 });
@@ -280,5 +281,40 @@ export const usageLogs = sqliteTable("usage_logs", {
   status: text("status").default("success"), // success | error
   errorMessage: text("error_message"),
   metadata: text("metadata"),       // JSON
+  createdAt: text("created_at").$defaultFn(() => new Date().toISOString()),
+});
+
+// ---- Edit Sessions (secondary edit tracking + undo) ----
+
+export const editSessions = sqliteTable("edit_sessions", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  siteId: text("site_id").notNull().references(() => sites.id, { onDelete: "cascade" }),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  status: text("status").default("active"),             // active | completed | failed
+  intent: text("intent"),                                // style | content | component | structure | fix
+  instruction: text("instruction").notNull(),
+  changes: text("changes"),                              // JSON: FileChange[]
+  buildIdBefore: text("build_id_before"),                // For undo — the build before edit
+  buildIdAfter: text("build_id_after"),                  // The build after edit
+  buildSuccess: integer("build_success"),                // 1 = success, 0 = failed
+  buildError: text("build_error"),
+  createdAt: text("created_at").$defaultFn(() => new Date().toISOString()),
+  completedAt: text("completed_at"),
+});
+
+// ---- Error Patterns (cross-build error memory) ----
+
+export const errorPatterns = sqliteTable("error_patterns", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  fingerprint: text("fingerprint").unique(),
+  pattern: text("pattern").notNull(),
+  category: text("category").notNull(),          // jsx | import | typescript | css | runtime | build
+  layer: text("layer").default("prompt"),         // template | guardrail | prompt
+  rawExample: text("raw_example"),
+  badPattern: text("bad_pattern"),
+  fixHint: text("fix_hint"),
+  frequency: integer("frequency").default(1),
+  applicableContext: text("applicable_context"),   // JSON: { themes[], siteTypes[], sections[] }
+  lastSeenAt: text("last_seen_at"),
   createdAt: text("created_at").$defaultFn(() => new Date().toISOString()),
 });

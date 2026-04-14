@@ -135,9 +135,13 @@ export async function POST(req: NextRequest) {
 
     logger.info("modify", `[${requestId}] Modifying site ${siteId}: ${changes.length} changes`);
 
-    // Load current fileMap from DB
+    // Load current fileMap from DB (ownership check)
     const site = await db.select({ fileMap: sites.fileMap, draftBuildId: sites.draftBuildId, previewUrl: sites.previewUrl }).from(sites)
       .where(and(eq(sites.id, siteId), eq(sites.userId, session.user.id))).get();
+
+    if (!site) {
+      return NextResponse.json({ error: "Site not found" }, { status: 404 });
+    }
 
     let fileMap: Record<string, string> = {};
     if (site?.draftBuildId) {
@@ -159,7 +163,14 @@ export async function POST(req: NextRequest) {
     const applied: string[] = [];
     for (const change of changes) {
       const filePath = change.file;
-      const fullPath = path.join(siteDir, filePath);
+      const fullPath = path.resolve(siteDir, filePath);
+
+      // Path traversal protection: ensure resolved path stays inside siteDir
+      if (!fullPath.startsWith(siteDir + path.sep) && fullPath !== siteDir) {
+        logger.warn("modify", `[${requestId}] Path traversal blocked: ${filePath}`);
+        applied.push(`blocked: ${filePath} (path traversal)`);
+        continue;
+      }
 
       if (change.action === "delete") {
         delete fileMap[filePath];
@@ -218,7 +229,7 @@ export async function POST(req: NextRequest) {
       editorState: JSON.stringify({ compiledSpec: spec || null, knowledgeRefs: Array.isArray(knowledgeRefs) ? knowledgeRefs : [] }),
       prd: prd ? JSON.stringify(prd) : undefined,
       updatedAt: new Date().toISOString(),
-    }).where(eq(sites.id, siteId));
+    }).where(and(eq(sites.id, siteId), eq(sites.userId, session.user.id)));
 
     logger.info("modify", `[${requestId}] Applied ${applied.length} changes, running guardrails...`, { applied });
 
@@ -235,16 +246,16 @@ export async function POST(req: NextRequest) {
 
     // Run code guardrails on modified files (fixes translations exports, SharePoster, JSX issues, etc.)
     const previewBaseUrl = (process.env.PREVIEW_BASE_URL?.trim() || "http://localhost:3002").replace(/\/+$/, "");
-    const guarded = runCodeGuardrails(fileMap, siteId, previewBaseUrl, logger);
+    const guardedResult = runCodeGuardrails(fileMap, siteId, previewBaseUrl, logger);
     // Write any guardrail-fixed files back to disk
-    for (const [filePath, content] of Object.entries(guarded)) {
+    for (const [filePath, content] of Object.entries(guardedResult.files)) {
       if (content !== fileMap[filePath]) {
         const fullPath = path.join(siteDir, filePath);
         await fs.mkdir(path.dirname(fullPath), { recursive: true });
         await fs.writeFile(fullPath, content, "utf-8");
       }
     }
-    Object.assign(fileMap, guarded);
+    Object.assign(fileMap, guardedResult.files);
 
     // Run advanced mode guardrails (type annotations, import resolution, translation keys)
     const advFixes = runAdvancedModeGuardrails(fileMap, ALLOWED_DEPENDENCIES, logger);
@@ -282,7 +293,7 @@ export async function POST(req: NextRequest) {
         buildStatus: "ready",
         buildError: null,
         updatedAt: new Date().toISOString(),
-      }).where(eq(sites.id, siteId));
+      }).where(and(eq(sites.id, siteId), eq(sites.userId, session.user.id)));
     } catch (buildErr) {
       buildSuccess = false;
       buildError = buildErr instanceof Error ? buildErr.message : "Build failed";
@@ -294,7 +305,7 @@ export async function POST(req: NextRequest) {
         buildStatus: "failed",
         buildError,
         updatedAt: new Date().toISOString(),
-      }).where(eq(sites.id, siteId));
+      }).where(and(eq(sites.id, siteId), eq(sites.userId, session.user.id)));
     }
 
     return NextResponse.json({ ok: true, applied, buildSuccess, buildError: buildError || undefined, buildLogs, verification });

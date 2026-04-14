@@ -29,7 +29,6 @@ interface ChatMessage {
 }
 interface OptionCard { id: string; icon: string; label: string; desc: string }
 interface PRDData { version?: number; siteType?: string; targetAudience?: string; coreGoal?: string; theme?: string; layout?: string; planner?: string; markdown?: string; [key: string]: unknown }
-interface ConvSummary { id: string; siteId: string | null; title: string | null; updatedAt: string | null }
 interface SourceGroup { sourceId: string; sourceName: string; sourceType: string; items: KnowledgeItem[] }
 interface SiteResourceRef { id: string; title: string; category: string; sourceName: string; sourceType: string }
 interface GuidanceAction { label: string; onClick: () => void; tone?: "accent" | "muted" }
@@ -76,13 +75,11 @@ function CreatePageInner() {
 
   const [view, setView] = useState<View>("build");
 
-  // Conversation persistence
-  const [conversationId, setConversationId] = useState<string | null>(null);
-  const convIdRef = useRef<string | null>(null);
+  // Site tracking (no conversation persistence — ephemeral chat)
   const [siteId, setSiteId] = useState<string | null>(null);
   const siteIdRef = useRef<string | null>(null);
-  const [convList, setConvList] = useState<ConvSummary[]>([]);
   const [sidebarExpanded, setSidebarExpanded] = useState(true);
+  const [kbSectionExpanded, setKbSectionExpanded] = useState(true);
 
   // Chat & Build
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
@@ -91,7 +88,7 @@ function CreatePageInner() {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [genStatus, setGenStatus] = useState<"idle" | "generating" | "ready">("idle");
   const [showPreview, setShowPreview] = useState(false);
-  const [showKnowledgeSelector, setShowKnowledgeSelector] = useState(false);
+
   const [previewTab, setPreviewTab] = useState<"preview" | "prd" | "resources">("preview");
   const [workingStatus, setWorkingStatus] = useState("");
   const [prdData, setPrdData] = useState<PRDData | null>(null);
@@ -219,11 +216,13 @@ function CreatePageInner() {
   useEffect(() => { if (session?.user) { loadKnowledge(); loadGroups(); loadKnowledgeBases(); } }, [session, loadKnowledge, loadGroups, loadKnowledgeBases]);
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [chatMessages, pendingOptions, prdData]);
 
-  // Conv list
-  const loadConvList = useCallback(async () => {
-    try { const r = await fetch("/api/conversations"); if (r.ok) { const d = await r.json(); setConvList(d.conversations || []); } } catch {}
+  // Guide tooltip state (first-time user onboarding)
+  const [showGuideTips, setShowGuideTips] = useState(false);
+  useEffect(() => {
+    if (typeof window !== "undefined" && !localStorage.getItem("create-guide-seen")) {
+      setShowGuideTips(true);
+    }
   }, []);
-  useEffect(() => { if (session?.user) loadConvList(); }, [session, loadConvList]);
 
   useEffect(() => {
     if (!session?.user || !selectedTemplate) return;
@@ -258,84 +257,43 @@ function CreatePageInner() {
     setPendingOptions(null);
   }, [locale, searchParams, selectedTemplate, session]);
 
-  // Restore from URL - track which convId/siteId we last restored to avoid duplicate loads
+  // Restore from URL — only siteId (for re-builds of existing sites)
   const lastRestoredKey = useRef<string>("");
   useEffect(() => {
     if (!session?.user) return;
-    const cid = searchParams.get("convId");
     const sid = searchParams.get("siteId");
-    if (!cid && !sid) return;
+    if (!sid) return;
     setView("build");
-    const key = `${cid || ""}_${sid || ""}`;
-    if (lastRestoredKey.current === key) return;
-    lastRestoredKey.current = key;
+    if (lastRestoredKey.current === sid) return;
+    lastRestoredKey.current = sid;
 
-    // Reset state before loading new conversation
-    setChatMessages([]); setPrdData(null); setCompiledSpec(null); setPreviewUrl(null); setPublishedUrl(null); setSiteStatus("draft"); setSiteResources([]); setGenStatus("idle"); setShowPreview(false);
-    setPendingOptions(null); setThinkingSteps([]); setLoadedSkillIds([]);
-
-    if (cid) {
-      fetch(`/api/conversations/${cid}`).then(r => r.json()).then(d => {
-        if (d.conversation) {
-          convIdRef.current = cid; setConversationId(cid);
-          setChatMessages(d.conversation.messages || []);
-          if (d.conversation.siteId) {
-            siteIdRef.current = d.conversation.siteId; setSiteId(d.conversation.siteId);
-            fetch(`/api/sites/${d.conversation.siteId}`).then(r => r.json()).then(sd => {
-              if (sd.site?.prd) { try { setPrdData(JSON.parse(sd.site.prd)); } catch {} }
-              if (sd.site?.publishedUrl) setPublishedUrl(sd.site.publishedUrl);
-              if (sd.site?.status) setSiteStatus(sd.site.status as "draft" | "published" | "archived");
-              if (sd.site?.editorState) {
-                try {
-                  const editorState = JSON.parse(sd.site.editorState);
-                  if (editorState?.compiledSpec) setCompiledSpec(editorState.compiledSpec);
-                  if (Array.isArray(editorState?.knowledgeRefs)) setSiteResources(editorState.knowledgeRefs);
-                } catch {}
-              }
-            });
-          }
-          if (d.conversation.previewUrl) { setPreviewUrl(d.conversation.previewUrl); setGenStatus("ready"); setShowPreview(true); }
+    // If the site already has a build, redirect to edit workspace
+    siteIdRef.current = sid;
+    setSiteId(sid);
+    fetch(`/api/sites/${sid}`).then(r => r.json()).then(sd => {
+      if (sd.site?.previewUrl || sd.site?.buildStatus === "ready") {
+        window.location.href = `/edit/${sid}`;
+        return;
+      }
+      if (sd.site) {
+        if (sd.site.prd) { try { setPrdData(JSON.parse(sd.site.prd)); } catch {} }
+        if (sd.site.publishedUrl) setPublishedUrl(sd.site.publishedUrl);
+        if (sd.site.status) setSiteStatus(sd.site.status as "draft" | "published" | "archived");
+        if (sd.site.editorState) {
+          try {
+            const editorState = JSON.parse(sd.site.editorState);
+            if (editorState?.compiledSpec) setCompiledSpec(editorState.compiledSpec);
+            if (Array.isArray(editorState?.knowledgeRefs)) setSiteResources(editorState.knowledgeRefs);
+          } catch {}
         }
-      });
-    } else if (sid) {
-      // Load site data directly — conversation may have been cleaned up
-      // after a successful build. Enter edit mode with site state only.
-      siteIdRef.current = sid;
-      setSiteId(sid);
-      fetch(`/api/sites/${sid}`).then(r => r.json()).then(sd => {
-        if (sd.site) {
-          if (sd.site.prd) { try { setPrdData(JSON.parse(sd.site.prd)); } catch {} }
-          if (sd.site.publishedUrl) setPublishedUrl(sd.site.publishedUrl);
-          if (sd.site.previewUrl) { setPreviewUrl(sd.site.previewUrl); setGenStatus("ready"); setShowPreview(true); }
-          if (sd.site.status) setSiteStatus(sd.site.status as "draft" | "published" | "archived");
-          if (sd.site.editorState) {
-            try {
-              const editorState = JSON.parse(sd.site.editorState);
-              if (editorState?.compiledSpec) setCompiledSpec(editorState.compiledSpec);
-              if (Array.isArray(editorState?.knowledgeRefs)) setSiteResources(editorState.knowledgeRefs);
-            } catch {}
-          }
-        }
-      });
-    }
+      }
+    }).catch(() => {});
   }, [searchParams, session]);
 
-  // Save conversation
-  const saveConv = useCallback(async (msgs: ChatMessage[], preview?: string | null) => {
-    if (msgs.length === 0) return;
-    try {
-      const cid = convIdRef.current;
-      if (!cid) {
-        const r = await fetch("/api/conversations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ messages: msgs, previewUrl: preview }) });
-        const d = await r.json();
-        if (d.id) { convIdRef.current = d.id; setConversationId(d.id); loadConvList(); }
-        return d.id;
-      } else {
-        await fetch(`/api/conversations/${cid}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ messages: msgs, previewUrl: preview }) });
-        loadConvList(); return cid;
-      }
-    } catch {}
-  }, [loadConvList]);
+  const dismissGuideTips = useCallback(() => {
+    setShowGuideTips(false);
+    if (typeof window !== "undefined") localStorage.setItem("create-guide-seen", "1");
+  }, []);
 
   const getSelectedResourceRefs = useCallback((): SiteResourceRef[] => {
     return items
@@ -349,59 +307,7 @@ function CreatePageInner() {
       }));
   }, [items, locale]);
 
-  // Auto-save site (with fileMap)
-  const autoSaveSite = useCallback(async (
-    url: string,
-    config: Record<string, unknown>,
-    convId: string | null,
-    fileMap?: Record<string, string>,
-    workspaceData?: Record<string, unknown>,
-    selections?: Record<string, unknown>,
-  ) => {
-    try {
-      const knowledgeRefs = getSelectedResourceRefs();
-      setSiteResources(knowledgeRefs);
-      if (!siteIdRef.current) {
-        const r = await fetch("/api/sites", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            name: config.siteType === "blog" ? "My Blog" : "My Site",
-            siteType: config.siteType || "portfolio",
-            theme: config.theme || pickRandomTheme(),
-            layout: config.layout || "card-grid",
-            previewUrl: url,
-            fileMap,
-            workspaceData,
-            selections,
-            prd: config.prd ? JSON.stringify(config.prd) : undefined,
-            editorState: JSON.stringify({ compiledSpec: config.spec || null, knowledgeRefs }),
-          }),
-        });
-        const d = await r.json();
-        if (d.id) {
-          siteIdRef.current = d.id;
-          setSiteId(d.id);
-          setSiteStatus("draft");
-          setPublishedUrl(null);
-          if (convId) await fetch(`/api/conversations/${convId}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ siteId: d.id }) });
-        }
-      } else {
-        await fetch(`/api/sites/${siteIdRef.current}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            previewUrl: url,
-            fileMap: fileMap ? JSON.stringify(fileMap) : undefined,
-            workspaceData: workspaceData ? JSON.stringify(workspaceData) : undefined,
-            selections: selections ? JSON.stringify(selections) : undefined,
-            prd: config.prd ? JSON.stringify(config.prd) : undefined,
-            editorState: JSON.stringify({ compiledSpec: config.spec || null, knowledgeRefs }),
-          }),
-        });
-      }
-    } catch {}
-  }, [getSelectedResourceRefs]);
+  // (autoSaveSite removed — sites are created by the build backend on success)
 
   const compileSiteSpec = useCallback(async (intent: {
     siteType?: string;
@@ -541,8 +447,8 @@ function CreatePageInner() {
     const userMsg: ChatMessage = { role: "user", content: msg };
     const newMsgs = [...chatMessages, userMsg];
     setChatMessages(newMsgs); setChatInput(""); setChatLoading(true);
-    setWorkingStatus(locale === "zh" ? "💾 保存对话..." : "💾 Saving...");
-    await saveConv(newMsgs);
+    setWorkingStatus("");
+    if (showGuideTips) dismissGuideTips();
 
     const isFirstTemplateUserMessage = Boolean(
       selectedTemplate &&
@@ -571,7 +477,6 @@ function CreatePageInner() {
         const updatedMessages = [...newMsgs, fastTrackMessage];
         setPrdData(fastTrackPrd);
         setChatMessages(updatedMessages);
-        await saveConv(updatedMessages, previewUrl);
         setWorkingStatus(locale === "zh" ? "⚡ 正在基于模板生成首版预览..." : "⚡ Generating the first preview from this template...");
         await handleGenerate({
           siteType: template.category,
@@ -601,19 +506,27 @@ function CreatePageInner() {
     }, 3000);
 
     try {
-      const r = await fetch("/api/chat-build", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messages: newMsgs.map(m => ({ role: m.role, content: m.content })),
-          knowledge: items.filter(i => i.selected),
-          knowledgeBaseIds: selectedBaseIds,
-          currentSelections: {},
-          loadedSkills: loadedSkillIds,
-          siteId: siteIdRef.current,
-          currentPrd: prdData,
-        }),
-      });
+      const chatAbort = new AbortController();
+      const chatTimeout = setTimeout(() => chatAbort.abort(), 300_000); // 5 min
+      let r: Response;
+      try {
+        r = await fetch("/api/chat-build", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: chatAbort.signal,
+          body: JSON.stringify({
+            messages: newMsgs.map(m => ({ role: m.role, content: m.content })),
+            knowledge: items.filter(i => i.selected),
+            knowledgeBaseIds: selectedBaseIds,
+            currentSelections: {},
+            loadedSkills: loadedSkillIds,
+            siteId: siteIdRef.current,
+            currentPrd: prdData,
+          }),
+        });
+      } finally {
+        clearTimeout(chatTimeout);
+      }
       const d = await readJsonResponse<{
         content?: string;
         error?: string;
@@ -666,7 +579,6 @@ function CreatePageInner() {
           kind: d.action?.type === "prd" || isPrdMarkdown(cleanContent) ? "prd" : "message",
         }];
         setChatMessages(updated);
-        await saveConv(updated);
       }
 
       // Handle actions
@@ -741,7 +653,10 @@ function CreatePageInner() {
         });
       }
     } catch (err) {
-      const errMsg = err instanceof Error ? err.message : "Unknown error";
+      const isAbort = err instanceof DOMException && err.name === "AbortError";
+      const errMsg = isAbort
+        ? (locale === "zh" ? "AI 响应超时（5分钟），请重试或简化请求" : "AI response timed out (5 min), please retry or simplify your request")
+        : (err instanceof Error ? err.message : "Unknown error");
       setChatMessages(p => [...p, { role: "assistant", content: locale === "zh" ? `❌ 请求失败：${errMsg}。请重试。` : `❌ Request failed: ${errMsg}. Please retry.` }]);
     }
     finally { clearInterval(statusTimer); setWorkingStatus(""); setChatLoading(false); }
@@ -831,11 +746,6 @@ function CreatePageInner() {
     if (!genResult.jobId) throw new Error("Generation response missing job ID");
     if (genResult.siteId) { siteIdRef.current = genResult.siteId; setSiteId(genResult.siteId); }
 
-    const cid = await saveConv(chatMessages, previewUrl);
-    if (cid && genResult.siteId) {
-      await fetch(`/api/conversations/${cid}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ siteId: genResult.siteId }) });
-    }
-
     setThinkingSteps(p => [...p, zh ? "⏳ 任务已入队，等待构建..." : "⏳ Queued, waiting for build..."]);
 
     const pollStart = Date.now();
@@ -866,7 +776,6 @@ function CreatePageInner() {
           }
         }
         setPreviewUrl(url); setGenStatus("ready"); setShowPreview(true); setPreviewTab("preview"); setPreviewKey(k => k + 1);
-        await saveConv(chatMessages, url);
         finished = true; break;
       }
       if (job.status === "failed") {
@@ -991,22 +900,16 @@ function CreatePageInner() {
     layout: selectedTemplate?.layout || undefined,
     prd: prdData || undefined,
   });
-  const newConversation = () => { convIdRef.current = null; siteIdRef.current = null; lastRestoredKey.current = ""; appliedTemplateIdRef.current = ""; setConversationId(null); setSiteId(null); setChatMessages([]); setPreviewUrl(null); setPublishedUrl(null); setSiteStatus("draft"); setSiteResources([]); setGenStatus("idle"); setShowPreview(false); setLoadedSkillIds([]); setPrdData(null); setCompiledSpec(null); setPendingOptions(null); setThinkingSteps([]); setPreviewTab("preview"); setPreviewKey(0); router.replace("/create"); };
-  const deleteConversation = useCallback(async (id: string) => {
-    try {
-      await fetch(`/api/conversations/${id}`, { method: "DELETE" });
-      setConvList((prev) => prev.filter((item) => item.id !== id));
-      if (conversationId === id) {
-        newConversation();
-      }
-    } catch {}
-  }, [conversationId]);
+  const newConversation = () => {
+    if (chatMessages.length > 0 && !confirm(locale === "zh" ? "当前对话将丢失，确定开始新对话？" : "Current conversation will be lost. Start new?")) return;
+    siteIdRef.current = null; lastRestoredKey.current = ""; appliedTemplateIdRef.current = ""; setSiteId(null); setChatMessages([]); setPreviewUrl(null); setPublishedUrl(null); setSiteStatus("draft"); setSiteResources([]); setGenStatus("idle"); setShowPreview(false); setLoadedSkillIds([]); setPrdData(null); setCompiledSpec(null); setPendingOptions(null); setThinkingSteps([]); setPreviewTab("preview"); setPreviewKey(0); router.replace("/create");
+  };
 
   if (authStatus === "loading" || !session?.user) return null;
 
   const selectedCount = items.filter(i => i.selected).length;
   const sourceGroups = getSourceGroups(items);
-  const currentStep = previewUrl ? 3 : chatMessages.length > 0 || pendingOptions ? 2 : 1;
+  const currentStep = publishedUrl ? 4 : previewUrl ? 3 : chatMessages.length > 0 || pendingOptions ? 2 : 1;
   const isTemplateStart = Boolean(selectedTemplate && !siteId);
   const hasKnowledge = items.length > 0;
   const hasSelectedKnowledge = selectedCount > 0;
@@ -1142,7 +1045,7 @@ function CreatePageInner() {
       <Navbar />
       <div className="flex-1 flex pt-14 overflow-hidden" ref={containerRef}>
 
-        {/* ====== SIDEBAR — Claude-style minimal ====== */}
+        {/* ====== SIDEBAR — Knowledge selector + New chat ====== */}
         <div className={`shrink-0 border-r border-gray-200/40 flex flex-col bg-[#f9fafb] transition-all duration-200 ${sidebarExpanded ? "w-60" : "w-12"}`}>
           {/* Top: toggle + new conversation */}
           <div className={`flex items-center h-12 ${sidebarExpanded ? "px-3 justify-between" : "justify-center"}`}>
@@ -1150,48 +1053,88 @@ function CreatePageInner() {
               <svg className={`w-3.5 h-3.5 transition-transform ${sidebarExpanded ? "" : "rotate-180"}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 19l-7-7 7-7m8 14l-7-7 7-7" /></svg>
             </button>
             {sidebarExpanded && (
-              <button onClick={newConversation} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-200/50 transition-all text-[12px]">
+              <button onClick={newConversation} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 hover:border-gray-300 transition-all text-[12px] font-medium shadow-sm">
                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-                {locale === "zh" ? "新对话" : "New"}
+                {locale === "zh" ? "新对话" : "New Chat"}
               </button>
             )}
           </div>
 
-          {/* Collapsed: just a chat icon */}
+          {/* Collapsed: icons */}
           {!sidebarExpanded && (
             <div className="flex flex-col items-center pt-2 gap-2">
-              <button onClick={() => setSidebarExpanded(true)} className="w-8 h-8 rounded-md flex items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-gray-200/50" title={locale === "zh" ? "对话记录" : "History"}>
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
+              <button onClick={() => setSidebarExpanded(true)} className="w-8 h-8 rounded-md flex items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-gray-200/50" title={locale === "zh" ? "知识库" : "Knowledge"}>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg>
               </button>
             </div>
           )}
 
-          {/* Expanded: conversation list */}
+          {/* Expanded: knowledge selector */}
           {sidebarExpanded && (
             <div className="flex-1 flex flex-col overflow-hidden">
-              <div className="flex-1 overflow-y-auto px-2 pt-1">
-                {convList.map(c => (
-                  <div
-                    key={c.id}
-                    onClick={() => { lastRestoredKey.current = ""; setView("build"); router.push(`/create?convId=${c.id}`); }}
-                    className={`group w-full text-left px-3 py-2.5 rounded-lg mb-0.5 transition-all overflow-hidden cursor-pointer ${conversationId === c.id ? "bg-gray-200/60" : "hover:bg-gray-200/30"}`}
-                  >
-                    <div className="flex items-center justify-between gap-1">
-                      <p className={`text-[13px] truncate ${conversationId === c.id ? "text-gray-900" : "text-gray-600"}`}>{c.title || "Untitled"}</p>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); void deleteConversation(c.id); }}
-                        className="shrink-0 w-6 h-6 rounded flex items-center justify-center text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"
-                      >
-                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+              {/* Knowledge section header */}
+              <button onClick={() => setKbSectionExpanded(!kbSectionExpanded)} className="flex items-center gap-2 px-3 py-2 text-left hover:bg-gray-200/30 transition-all">
+                <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg>
+                <span className="text-[12px] font-medium text-gray-600 flex-1">{locale === "zh" ? "知识库" : "Knowledge"}</span>
+                {selectedBaseIds.length > 0 && <span className="text-[10px] text-accent font-medium">{selectedBaseIds.length}</span>}
+                <svg className={`w-3 h-3 text-gray-400 transition-transform ${kbSectionExpanded ? "rotate-180" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+              </button>
+
+              {/* Guide tooltip */}
+              {showGuideTips && kbSectionExpanded && (
+                <div className="mx-2 mb-2 p-2.5 rounded-lg bg-accent/10 border border-accent/20 relative">
+                  <button onClick={dismissGuideTips} className="absolute top-1 right-1 w-4 h-4 flex items-center justify-center text-accent/50 hover:text-accent">
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                  </button>
+                  <p className="text-[10px] text-accent/80 pr-4">{locale === "zh" ? "上传简历、项目文档等资料，AI 会更好地理解你" : "Upload your resume, project docs — AI will understand you better"}</p>
+                </div>
+              )}
+
+              {kbSectionExpanded && (
+                <div className="flex-1 overflow-y-auto px-2">
+                  {/* Knowledge Bases */}
+                  {kbBases.map(kb => (
+                    <button key={kb.id} onClick={() => setSelectedBaseIds(prev => prev.includes(kb.id) ? prev.filter(id => id !== kb.id) : [...prev, kb.id])} className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left transition-all mb-0.5 ${selectedBaseIds.includes(kb.id) ? "bg-accent/10" : "hover:bg-gray-200/30"}`}>
+                      <div className={`w-3.5 h-3.5 rounded border shrink-0 flex items-center justify-center ${selectedBaseIds.includes(kb.id) ? "bg-accent border-accent" : "border-gray-300"}`}>
+                        {selectedBaseIds.includes(kb.id) && <svg className="w-2 h-2 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[11px] text-gray-700 truncate">{kb.name}</p>
+                        <p className="text-[9px] text-gray-400">{kb.fileCount || 0} {locale === "zh" ? "个文件" : "files"}</p>
+                      </div>
+                    </button>
+                  ))}
+                  {/* Legacy knowledge groups */}
+                  {sourceGroups.map(g => {
+                    const allSel = g.items.every(i => i.selected);
+                    const someSel = g.items.some(i => i.selected);
+                    return (
+                      <button key={g.sourceId} onClick={() => toggleSourceGroup(g.sourceId)} className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left transition-all mb-0.5 ${allSel ? "bg-accent/10" : "hover:bg-gray-200/30"}`}>
+                        <div className={`w-3.5 h-3.5 rounded border shrink-0 flex items-center justify-center ${allSel ? "bg-accent border-accent" : someSel ? "bg-accent/40 border-accent/60" : "border-gray-300"}`}>
+                          {(allSel || someSel) && <svg className="w-2 h-2 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d={allSel ? "M5 13l4 4L19 7" : "M5 12h14"} /></svg>}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[11px] text-gray-700 truncate">{g.sourceName}</p>
+                          <p className="text-[9px] text-gray-400">{g.items.filter(i => i.selected).length}/{g.items.length} {locale === "zh" ? "条" : "items"}</p>
+                        </div>
                       </button>
-                    </div>
-                    <p className="text-[11px] text-gray-400 mt-0.5 truncate">{c.updatedAt ? new Date(c.updatedAt).toLocaleDateString() : ""}{c.siteId ? " · 🌐" : ""}</p>
-                  </div>
-                ))}
-                {convList.length === 0 && (
-                  <p className="text-[11px] text-gray-400 text-center py-8">{locale === "zh" ? "暂无对话记录" : "No conversations yet"}</p>
-                )}
-              </div>
+                    );
+                  })}
+                  {kbBases.length === 0 && sourceGroups.length === 0 && (
+                    <p className="text-[10px] text-gray-400 text-center py-4">{locale === "zh" ? "暂无知识库" : "No knowledge yet"}</p>
+                  )}
+                </div>
+              )}
+
+              {/* Bottom: manage knowledge link */}
+              {sidebarExpanded && (
+                <div className="shrink-0 p-2 border-t border-gray-200/40">
+                  <button onClick={() => router.push("/knowledge")} className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-[11px] text-gray-500 hover:bg-gray-200/30 transition-all">
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                    {locale === "zh" ? "管理知识库" : "Manage Knowledge"}
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -1211,70 +1154,6 @@ function CreatePageInner() {
                     {locale === "zh" ? selectedTemplate.nameCn : selectedTemplate.name}
                   </span>
                 )}
-                {/* Knowledge selector button */}
-                <div className="relative">
-                  <button onClick={() => setShowKnowledgeSelector(!showKnowledgeSelector)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-100 text-[10px] text-gray-400 hover:bg-gray-200/50 transition-all">
-                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg>
-                    {selectedBaseIds.length > 0
-                      ? (selectedBaseIds.length === 1 ? (kbBases.find(b => b.id === selectedBaseIds[0])?.name || (locale === "zh" ? "知识库" : "KB")) : `${selectedBaseIds.length} ${locale === "zh" ? "个知识库" : "KBs"}`)
-                      : (locale === "zh" ? `知识库 (${selectedCount}/${items.length})` : `Knowledge (${selectedCount}/${items.length})`)}
-                    <svg className={`w-2.5 h-2.5 transition-transform ${showKnowledgeSelector ? "rotate-180" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
-                  </button>
-                  {/* Knowledge dropdown */}
-                  {showKnowledgeSelector && (
-                    <div className="absolute top-full left-0 mt-1 w-80 max-h-96 rounded-xl bg-white border border-gray-200 shadow-2xl z-50 overflow-hidden">
-                      <div className="p-3 border-b border-gray-200/60">
-                        <p className="text-[10px] text-gray-400">{locale === "zh" ? "选择构建时使用的知识来源" : "Select knowledge sources for building"}</p>
-                      </div>
-                      {/* Knowledge Bases section */}
-                      {kbBases.length > 0 && (
-                        <div className="p-2 border-b border-gray-100">
-                          <p className="text-[9px] text-gray-400 px-2 mb-1">{locale === "zh" ? "知识库" : "Knowledge Bases"}</p>
-                          {kbBases.map(kb => (
-                            <button key={kb.id} onClick={() => setSelectedBaseIds(prev => prev.includes(kb.id) ? prev.filter(id => id !== kb.id) : [...prev, kb.id])} className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-left transition-all ${selectedBaseIds.includes(kb.id) ? "bg-accent/10" : "hover:bg-gray-100"}`}>
-                              <div className={`w-4 h-4 rounded border shrink-0 flex items-center justify-center ${selectedBaseIds.includes(kb.id) ? "bg-accent border-accent" : "border-gray-300"}`}>
-                                {selectedBaseIds.includes(kb.id) && <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
-                              </div>
-                              <span className="text-sm">📚</span>
-                              <div className="flex-1 min-w-0">
-                                <p className="text-[10px] text-gray-600 truncate">{kb.name}</p>
-                                <p className="text-[8px] text-gray-500">{kb.fileCount || 0} {locale === "zh" ? "个文件" : "files"} · {(kb.totalChars || 0).toLocaleString()} {locale === "zh" ? "字" : "chars"}</p>
-                              </div>
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                      {/* Legacy knowledge items section */}
-                      {sourceGroups.length > 0 && (
-                        <div className="p-2">
-                          <p className="text-[9px] text-gray-400 px-2 mb-1">{locale === "zh" ? "知识条目" : "Knowledge Items"}</p>
-                          {sourceGroups.map(g => {
-                            const allSel = g.items.every(i => i.selected);
-                            const someSel = g.items.some(i => i.selected);
-                            return (
-                              <button key={g.sourceId} onClick={() => toggleSourceGroup(g.sourceId)} className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-left transition-all ${allSel ? "bg-accent/10" : "hover:bg-gray-100"}`}>
-                                <div className={`w-4 h-4 rounded border shrink-0 flex items-center justify-center ${allSel ? "bg-accent border-accent" : someSel ? "bg-accent/40 border-accent/60" : "border-gray-300"}`}>
-                                  {(allSel || someSel) && <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d={allSel ? "M5 13l4 4L19 7" : "M5 12h14"} /></svg>}
-                                </div>
-                                <span className="text-sm">{SOURCE_TYPE_META[g.sourceType as SourceType]?.icon || "📎"}</span>
-                                <div className="flex-1 min-w-0">
-                                  <p className="text-[10px] text-gray-600 truncate">{g.sourceName}</p>
-                                  <p className="text-[8px] text-gray-500">{g.items.filter(i => i.selected).length}/{g.items.length} {locale === "zh" ? "条" : "items"}</p>
-                                </div>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      )}
-                      {kbBases.length === 0 && sourceGroups.length === 0 && (
-                        <div className="p-4 text-center">
-                          <p className="text-[9px] text-gray-500">{locale === "zh" ? "暂无知识库数据" : "No knowledge"}</p>
-                          <button onClick={() => router.push("/knowledge")} className="mt-2 text-[10px] text-accent hover:underline">{locale === "zh" ? "去创建知识库" : "Create knowledge base"}</button>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
               </div>
               {/* Preview toggle — only show when a site has been generated */}
               {previewUrl && (
@@ -1286,11 +1165,35 @@ function CreatePageInner() {
               )}
             </div>
 
-            {/* Guidance banner removed — onboarding is now in the welcome screen below */}
+            {/* Step bar — 4-step progress indicator */}
+            <div className="shrink-0 px-4 py-2 border-b border-gray-100 flex items-center gap-0">
+              {([
+                { n: 1, zh: "准备资料", en: "Prepare" },
+                { n: 2, zh: "对话设计", en: "Design" },
+                { n: 3, zh: "生成预览", en: "Preview" },
+                { n: 4, zh: "发布上线", en: "Publish" },
+              ] as const).map((step, idx) => (
+                <div key={step.n} className="flex items-center flex-1 min-w-0">
+                  {idx > 0 && <div className={`h-px flex-1 ${currentStep > step.n - 1 ? "bg-accent/40" : "bg-gray-200"}`} />}
+                  <div className={`flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] whitespace-nowrap transition-all ${
+                    currentStep === step.n ? "bg-accent/10 text-accent font-medium" :
+                    currentStep > step.n ? "text-accent/60" : "text-gray-400"
+                  }`}>
+                    <div className={`w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-bold shrink-0 ${
+                      currentStep === step.n ? "bg-accent text-white" :
+                      currentStep > step.n ? "bg-accent/30 text-white" : "bg-gray-200 text-gray-400"
+                    }`}>
+                      {currentStep > step.n ? <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg> : step.n}
+                    </div>
+                    {locale === "zh" ? step.zh : step.en}
+                  </div>
+                  {idx < 3 && <div className={`h-px flex-1 ${currentStep > step.n ? "bg-accent/40" : "bg-gray-200"}`} />}
+                </div>
+              ))}
+            </div>
 
-            {/* Messages */}
             {/* Messages — spacious, Claude-style */}
-            <div className="flex-1 overflow-y-auto px-5 py-6 space-y-6" onClick={() => setShowKnowledgeSelector(false)}>
+            <div className="flex-1 overflow-y-auto px-5 py-6 space-y-6">
               {chatMessages.length === 0 && (
                 <div className="flex flex-col items-center justify-center h-full max-w-md mx-auto px-6">
                   <div className="w-10 h-10 rounded-full bg-accent/8 flex items-center justify-center mb-5">
@@ -1502,29 +1405,76 @@ function CreatePageInner() {
                   ))}
                 </div>
               )}
-              {/* Input — Claude-style clean bottom bar */}
-              <div className="relative">
-                <input
-                  type="text"
-                  value={chatInput}
-                  onChange={e => setChatInput(e.target.value)}
-                  onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat(); } }}
-                  disabled={chatLoading || genStatus === "generating"}
-                  placeholder={genStatus === "generating"
-                    ? (locale === "zh" ? "正在生成中..." : "Generating...")
-                    : previewUrl
-                      ? (locale === "zh" ? "描述你想修改的内容..." : "Describe your changes...")
-                      : (locale === "zh" ? "描述你想创建的网站..." : "Describe the site you want...")}
-                  className="w-full pl-4 pr-12 py-3.5 rounded-2xl border border-gray-200/80 bg-gray-50/50 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:border-accent/30 focus:ring-2 focus:ring-accent/10 focus:bg-white disabled:opacity-40 transition-all shadow-sm"
-                />
-                <button
-                  onClick={() => sendChat()}
-                  disabled={!chatInput.trim() || chatLoading || genStatus === "generating"}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-xl bg-accent text-white flex items-center justify-center hover:bg-accent/90 hover:shadow-md hover:shadow-accent/20 disabled:opacity-20 transition-all"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M12 5l7 7-7 7" /></svg>
-                </button>
-              </div>
+              {/* Guide tooltip — chat input hint */}
+              {showGuideTips && chatMessages.length === 0 && (
+                <div className="relative mb-2 mx-1 px-3 py-2 rounded-xl bg-accent/5 border border-accent/15 text-[11px] text-accent/80">
+                  {locale === "zh" ? "描述你想要的网站，或直接发送让 AI 帮你生成" : "Describe the site you want, or just send to let AI generate"}
+                  <button onClick={dismissGuideTips} className="absolute top-1 right-1.5 w-4 h-4 flex items-center justify-center text-accent/40 hover:text-accent">
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                  </button>
+                  <div className="absolute bottom-0 left-6 translate-y-full w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-t-[6px] border-t-accent/15" />
+                </div>
+              )}
+              {/* Input — Claude-style clean bottom bar OR completion card */}
+              {previewUrl && genStatus === "ready" && siteStatus !== "published" ? (
+                <div className="rounded-2xl border border-emerald-200/80 bg-gradient-to-br from-emerald-50/80 to-white p-4 shadow-sm">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-lg">&#10003;</span>
+                    <span className="text-sm font-semibold text-gray-800">
+                      {locale === "zh" ? "网站已生成完成！" : "Site generated successfully!"}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-amber-600 bg-amber-50 rounded-lg px-3 py-1.5 mb-3 border border-amber-100">
+                    {locale === "zh"
+                      ? "未发布的站点不会保存到「我的网站」"
+                      : "Unpublished sites won't appear in My Sites"}
+                  </p>
+                  <div className="flex gap-2 mb-2">
+                    <button
+                      onClick={() => void handlePublish()}
+                      className="flex-1 px-4 py-2.5 rounded-xl bg-accent text-white text-xs font-medium hover:bg-accent/90 transition-all shadow-sm shadow-accent/20"
+                    >
+                      {locale === "zh" ? "发布站点" : "Publish Site"}
+                    </button>
+                    {siteId && (
+                      <button
+                        onClick={() => router.push(`/edit/${siteId}`)}
+                        className="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 bg-white text-xs font-medium text-gray-700 hover:bg-gray-50 transition-all"
+                      >
+                        {locale === "zh" ? "进入编辑" : "Edit Site"}
+                      </button>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-gray-400 text-center">
+                    {locale === "zh"
+                      ? "效果不满意？发布后可在「我的网站」中点击编辑继续优化"
+                      : "Not satisfied? Publish first, then edit from My Sites"}
+                  </p>
+                </div>
+              ) : (
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={chatInput}
+                    onChange={e => setChatInput(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat(); } }}
+                    disabled={chatLoading || genStatus === "generating"}
+                    placeholder={genStatus === "generating"
+                      ? (locale === "zh" ? "正在生成中..." : "Generating...")
+                      : previewUrl
+                        ? (locale === "zh" ? "描述你想修改的内容..." : "Describe your changes...")
+                        : (locale === "zh" ? "描述你想创建的网站..." : "Describe the site you want...")}
+                    className="w-full pl-4 pr-12 py-3.5 rounded-2xl border border-gray-200/80 bg-gray-50/50 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:border-accent/30 focus:ring-2 focus:ring-accent/10 focus:bg-white disabled:opacity-40 transition-all shadow-sm"
+                  />
+                  <button
+                    onClick={() => sendChat()}
+                    disabled={!chatInput.trim() || chatLoading || genStatus === "generating"}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-xl bg-accent text-white flex items-center justify-center hover:bg-accent/90 hover:shadow-md hover:shadow-accent/20 disabled:opacity-20 transition-all"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M12 5l7 7-7 7" /></svg>
+                  </button>
+                </div>
+              )}
             </div>
           </div>
 

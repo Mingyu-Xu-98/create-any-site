@@ -6,6 +6,7 @@ import type { WorkspaceData, UserSelections } from "@/lib/types";
 import { logger } from "@/lib/logger";
 import { getInstalledNextVersion } from "@/lib/next-version";
 import { runCodeGuardrails, runAdvancedModeGuardrails } from "@/lib/code-guardrails";
+import { recordBuildError, recordGuardrailFixes } from "@/lib/error-collector";
 import { copyUserImagesToSite } from "@/lib/asset-store";
 import { routeKnowledge, buildRoutedChatbotContext } from "@/lib/knowledge-router";
 import { knowledgeItems as knowledgeItemsTable, sites as sitesTable } from "@/lib/db/schema";
@@ -77,11 +78,19 @@ async function ensureBuildNodeModules(siteId: string, buildDir: string): Promise
     } catch { /* shared not set up yet — fall through */ }
   }
 
-  // Non-shared mode or first-time: ensure root has node_modules, then
-  // symlink build dir to it with an absolute path.
-  await ensureNodeModules(siteRoot(siteId));
+  // Non-shared mode: ensure site root has node_modules by copying from
+  // runtime-base (package.json lives in the build dir, not site root,
+  // so we must NOT run `npm install` in site root).
   try {
-    const realTarget = await fs.realpath(path.join(siteRoot(siteId), "node_modules"));
+    await fs.access(rootNm);
+  } catch {
+    // Copy node_modules from runtime-base into site root
+    await ensureRuntimeBase();
+    await fs.cp(path.join(RUNTIME_BASE_DIR, "node_modules"), rootNm, { recursive: true, force: true });
+  }
+  // Symlink build dir node_modules to site root node_modules
+  try {
+    const realTarget = await fs.realpath(rootNm);
     await fs.symlink(realTarget, buildNm);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
@@ -761,7 +770,7 @@ const MIME_TYPES: Record<string, string> = {
   ".txt": "text/plain",
 };
 
-async function ensureStaticServer(): Promise<void> {
+export async function ensureStaticServer(): Promise<void> {
   if (staticServer) return;
 
   await new Promise<void>((resolve) => {
@@ -858,108 +867,210 @@ export interface RunSiteBuildResult {
 
 // ---- KB → WorkspaceData enrichment (AI-powered) ----
 
-/**
- * Use lightweight AI to extract structured data from KB content.
- * Falls back to regex if AI call fails.
- */
-async function enrichWorkspaceDataFromKB(data: WorkspaceData, kbContent: string, userId?: string): Promise<Partial<WorkspaceData>> {
-  const text = kbContent.slice(0, 40000);
-
-  // Try AI extraction first
-  try {
-    const { chatCompletion } = await import("./llm");
-    const result = await chatCompletion({
-      requestId: "kb-extract",
-      label: "kb-content-extract",
-      userId,
-      systemPrompt: `You extract structured personal/portfolio data from text. Output ONLY valid JSON, no markdown fences. The JSON must match this exact schema:
-{
-  "name": "person's full name (original language)",
-  "nameEn": "person's name in English (transliterate if Chinese)",
-  "title": "job title (original language)",
-  "titleEn": "job title in English",
-  "email": "email address or empty string",
-  "bio": "1-3 sentence personal introduction (original language)",
-  "bioEn": "same bio translated to English",
-  "tags": ["3-5 skill/role tags in English"],
-  "skills": [{"title": "category name", "skills": ["skill1", "skill2"]}],
-  "projects": [{"title": "project name", "desc": "1-2 sentence description", "tags": ["tech tags"], "org": "company/org", "link": "", "role": "role in project", "period": "time period", "highlights": ["achievement 1", "achievement 2"], "detail": "full project description"}],
-  "experience": [{"title": "job title", "org": "company", "period": "date range", "desc": "role description", "highlights": ["responsibility or achievement"], "current": false}],
-  "education": [{"school": "school name", "degree": "degree", "period": "years", "highlights": []}],
-  "awards": [{"title": "award name", "org": "awarding body", "year": "year", "description": "what for"}],
-  "links": [{"label": "display text", "url": "full URL"}]
+/** Strip HTML tags and decode common entities. */
+function stripHtml(html: string): string {
+  return html
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&nbsp;/g, " ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
 }
-Include ONLY fields that exist in the source text. Keep arrays empty if no data found.
-IMPORTANT: For "name", "title", "bio" — provide BOTH original language AND English versions (nameEn, titleEn, bioEn). If source is already English, both versions can be the same.`,
-      userPrompt: text,
-      temperature: 0.1,
-      maxTokens: 4096,
-    });
 
-    const jsonStr = result.content.replace(/```json\s*\n?|\n?```/g, "").trim();
-    const parsed = JSON.parse(jsonStr);
+// ---- Enrichment: cache-first, AI extract, JSON repair, regex fallback ----
 
-    const enriched: Partial<WorkspaceData> = {};
-    if (parsed.name && parsed.name !== data.name) { enriched.name = parsed.name; enriched.nameEn = parsed.nameEn || parsed.name; }
-    if (parsed.title) { enriched.title = parsed.title; enriched.titleEn = parsed.titleEn || parsed.title; }
-    if (parsed.email) enriched.email = parsed.email;
-    if (parsed.bio) { enriched.bio = parsed.bio; enriched.bioEn = parsed.bioEn || parsed.bio; }
-    if (Array.isArray(parsed.tags) && parsed.tags.length > 0) enriched.tags = parsed.tags;
-    if (Array.isArray(parsed.skills) && parsed.skills.length > 0) {
-      enriched.skills = parsed.skills.map((g: { title?: string; skills?: string[] }) => ({
-        title: g.title || "Skills",
-        skills: Array.isArray(g.skills) ? g.skills : [],
-      }));
-    }
-    if (Array.isArray(parsed.projects) && parsed.projects.length > 0) {
-      enriched.projects = parsed.projects.map((p: Record<string, unknown>) => ({
-        title: String(p.title || ""),
-        desc: String(p.desc || ""),
-        tags: Array.isArray(p.tags) ? p.tags : [],
-        org: String(p.org || ""),
-        link: String(p.link || ""),
-        image: "",
-        badge: "",
-      }));
-      // Also create timeline entries from projects with role/period
-      enriched.timeline = parsed.projects
-        .filter((p: Record<string, unknown>) => p.role || p.period)
-        .map((p: Record<string, unknown>) => ({
-          title: String(p.role || p.title || ""),
-          desc: String(p.desc || ""),
-          date: String(p.period || ""),
-          active: false,
-        }));
-    }
-    if (Array.isArray(parsed.experience) && parsed.experience.length > 0) {
-      enriched.timeline = parsed.experience.map((e: Record<string, unknown>) => ({
-        title: String(e.title || ""),
-        desc: String(e.desc || ""),
-        date: String(e.period || ""),
-        active: Boolean(e.current),
-      }));
-    }
-    if (Array.isArray(parsed.education) && parsed.education.length > 0) {
-      enriched.education = parsed.education.map((e: Record<string, unknown>) => ({
-        school: String(e.school || ""),
-        degree: String(e.degree || ""),
-        highlights: Array.isArray(e.highlights) ? e.highlights : [],
-      }));
-    }
-    if (Array.isArray(parsed.links) && parsed.links.length > 0) {
-      enriched.links = parsed.links.map((l: Record<string, unknown>) => ({
-        label: String(l.label || ""),
-        url: String(l.url || ""),
-        icon: "other",
-      }));
-    }
+const EXTRACT_SYSTEM_PROMPT = `You are a personal portfolio data extractor. Read the knowledge base content and extract structured data for building a personal website.
 
-    return enriched;
-  } catch (err) {
-    logger.warn("generate", `AI KB extraction failed, using regex fallback: ${err instanceof Error ? err.message : "unknown"}`);
+The input may contain a FILE INDEX (summaries) and FILE CONTENTS (raw text from resumes, reports, project docs). Text may be messy from PDF parsing.
+
+Output ONLY valid JSON — no markdown fences, no explanatory text before or after. The JSON schema:
+{
+  "name": "person's full name ONLY (e.g. '徐铭钰')",
+  "nameEn": "English/pinyin name (e.g. 'Xu Mingyu')",
+  "title": "current job title",
+  "titleEn": "job title in English",
+  "email": "email address",
+  "bio": "2-3 sentence professional summary (third person, original language)",
+  "bioEn": "same bio in English",
+  "tags": ["3-6 professional tags in English"],
+  "skills": [{"title": "category", "skills": ["skill1", "skill2"]}],
+  "projects": [{"title": "real project name", "desc": "1-2 sentences", "tags": ["tech"], "org": "company", "role": "role", "period": "time", "highlights": ["achievement"]}],
+  "experience": [{"title": "job title", "org": "company", "period": "dates", "desc": "description", "highlights": ["responsibility"], "current": false}],
+  "education": [{"school": "name", "degree": "degree+major", "period": "years", "highlights": ["awards"]}],
+  "awards": [{"title": "award", "org": "body", "year": "year", "description": "reason"}],
+  "links": [{"label": "text", "url": "URL"}]
+}
+
+RULES:
+1. "name" = ONLY the name. Never include gender, birthdate, or surrounding text.
+2. "bio" = synthesized summary, not raw document text.
+3. Extract ALL projects — look for 项目名称, numbered lists, work descriptions.
+4. Extract ALL experience — company names, job titles, date ranges.
+5. Group skills by category.
+6. Output must be valid JSON. Do NOT truncate arrays.`;
+
+/** Try to fix common JSON issues from LLM output */
+function repairJson(raw: string): unknown | null {
+  // Strip markdown fences
+  let s = raw.replace(/```json\s*\n?|\n?```/g, "").trim();
+  // Strip any leading non-JSON text (e.g. "I'll analyze...")
+  const firstBrace = s.indexOf("{");
+  if (firstBrace > 0) s = s.slice(firstBrace);
+  // Try direct parse
+  try { return JSON.parse(s); } catch { /* continue */ }
+  // Truncated JSON: find the last valid closing bracket
+  for (let i = s.length - 1; i > 0; i--) {
+    if (s[i] === "}" || s[i] === "]") {
+      try { return JSON.parse(s.slice(0, i + 1)); } catch { /* continue */ }
+    }
+  }
+  // Try adding closing braces
+  let balanced = s;
+  const opens = (balanced.match(/\{/g) || []).length;
+  const closes = (balanced.match(/\}/g) || []).length;
+  for (let i = 0; i < opens - closes; i++) balanced += "}";
+  try { return JSON.parse(balanced); } catch { /* continue */ }
+  return null;
+}
+
+/** Map parsed AI JSON to WorkspaceData fields */
+function mapParsedToWorkspaceData(parsed: Record<string, unknown>): Partial<WorkspaceData> {
+  const clean = (s: unknown) => typeof s === "string" ? stripHtml(s) : s;
+  const enriched: Partial<WorkspaceData> = {};
+
+  if (parsed.name) { enriched.name = clean(parsed.name) as string; enriched.nameEn = clean(parsed.nameEn || parsed.name) as string; }
+  if (parsed.title) { enriched.title = clean(parsed.title) as string; enriched.titleEn = clean(parsed.titleEn || parsed.title) as string; }
+  if (parsed.email) enriched.email = clean(parsed.email) as string;
+  if (parsed.bio) { enriched.bio = clean(parsed.bio) as string; enriched.bioEn = clean(parsed.bioEn || parsed.bio) as string; }
+  if (Array.isArray(parsed.tags) && parsed.tags.length > 0) enriched.tags = parsed.tags;
+  if (Array.isArray(parsed.skills) && parsed.skills.length > 0) {
+    enriched.skills = parsed.skills.map((g: Record<string, unknown>) => ({
+      title: String(g.title || "Skills"),
+      skills: Array.isArray(g.skills) ? g.skills : [],
+    }));
+  }
+  if (Array.isArray(parsed.projects) && parsed.projects.length > 0) {
+    enriched.projects = parsed.projects.map((p: Record<string, unknown>) => ({
+      title: String(p.title || ""), desc: String(p.desc || ""),
+      tags: Array.isArray(p.tags) ? p.tags : [], org: String(p.org || ""),
+      link: String(p.link || ""), image: "", badge: "",
+      role: String(p.role || ""), period: String(p.period || ""),
+      highlights: Array.isArray(p.highlights) ? p.highlights : [],
+      detail: String(p.detail || p.desc || ""),
+    }));
+  }
+  if (Array.isArray(parsed.experience) && parsed.experience.length > 0) {
+    enriched.timeline = parsed.experience.map((e: Record<string, unknown>) => ({
+      title: String(e.title || ""), desc: String(e.desc || ""),
+      date: String(e.period || ""), active: Boolean(e.current),
+      org: String(e.org || ""), highlights: Array.isArray(e.highlights) ? e.highlights : [],
+    }));
+  }
+  if (Array.isArray(parsed.education) && parsed.education.length > 0) {
+    enriched.education = parsed.education.map((e: Record<string, unknown>) => ({
+      school: String(e.school || ""), degree: String(e.degree || ""),
+      highlights: Array.isArray(e.highlights) ? e.highlights : [],
+    }));
+  }
+  if (Array.isArray(parsed.awards) && parsed.awards.length > 0) {
+    (enriched as Record<string, unknown>).awards = parsed.awards.map((a: Record<string, unknown>) => ({
+      title: String(a.title || ""), org: String(a.org || ""), year: String(a.year || ""), description: String(a.description || ""),
+    }));
+  }
+  if (Array.isArray(parsed.links) && parsed.links.length > 0) {
+    enriched.links = parsed.links.map((l: Record<string, unknown>) => ({
+      label: String(l.label || ""), labelEn: String(l.labelEn || l.label || ""), url: String(l.url || ""), icon: "other",
+    }));
+  }
+  return enriched;
+}
+
+/** Check if enrichment result has meaningful data (not just name/email) */
+function isEnrichmentUseful(enriched: Partial<WorkspaceData>): boolean {
+  return (enriched.projects?.length || 0) > 0
+    || (enriched.timeline?.length || 0) > 0
+    || (enriched.skills?.length || 0) > 0
+    || (enriched.education?.length || 0) > 0;
+}
+
+/**
+ * Extract structured data from KB content.
+ * Strategy: DB cache → AI (with retry + JSON repair) → regex fallback.
+ */
+async function enrichWorkspaceDataFromKB(
+  data: WorkspaceData,
+  kbContent: string,
+  userId?: string,
+  knowledgeBaseIds?: string[],
+): Promise<Partial<WorkspaceData>> {
+  // 1. Check DB cache — if any KB has a cached profile, use it
+  if (knowledgeBaseIds?.length) {
+    try {
+      const { knowledgeBases } = await import("@/lib/db/schema");
+      const { eq } = await import("drizzle-orm");
+      for (const bid of knowledgeBaseIds) {
+        const kb = await db.select({ profileJson: knowledgeBases.profileJson })
+          .from(knowledgeBases).where(eq(knowledgeBases.id, bid)).get();
+        if (kb?.profileJson) {
+          const cached = JSON.parse(kb.profileJson) as Record<string, unknown>;
+          if (cached.name) {
+            logger.info("generate", `Using cached profile from KB ${bid}`);
+            return mapParsedToWorkspaceData(cached);
+          }
+        }
+      }
+    } catch { /* no cache, continue */ }
   }
 
-  // Regex fallback
+  // 2. Prepare clean text
+  const cleaned = stripHtml(kbContent)
+    .replace(/构建网站时：[\s\S]*?用于网站展示/g, "")
+    .replace(/## 使用说明[\s\S]*?用于网站展示/g, "");
+  const text = cleaned.slice(0, 40000);
+
+  // 3. AI extraction with retry
+  const { chatCompletion } = await import("./llm");
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const result = await chatCompletion({
+        requestId: `kb-extract-${attempt}`,
+        label: "kb-content-extract",
+        userId,
+        systemPrompt: EXTRACT_SYSTEM_PROMPT,
+        userPrompt: attempt === 0 ? text : text.slice(0, 25000), // Retry with shorter input
+        temperature: 0.1,
+        maxTokens: 8192,
+      });
+
+      const parsed = repairJson(result.content);
+      if (!parsed || typeof parsed !== "object") {
+        logger.warn("generate", `AI extraction attempt ${attempt + 1}: JSON repair failed`);
+        continue;
+      }
+
+      const enriched = mapParsedToWorkspaceData(parsed as Record<string, unknown>);
+
+      // Cache successful extraction to DB
+      if (isEnrichmentUseful(enriched) && knowledgeBaseIds?.length) {
+        try {
+          const { knowledgeBases } = await import("@/lib/db/schema");
+          const { eq } = await import("drizzle-orm");
+          await db.update(knowledgeBases).set({
+            profileJson: JSON.stringify(parsed),
+            updatedAt: new Date().toISOString(),
+          }).where(eq(knowledgeBases.id, knowledgeBaseIds[0]));
+          logger.info("generate", `Cached enrichment to KB ${knowledgeBaseIds[0]}`);
+        } catch { /* non-critical */ }
+      }
+
+      return enriched;
+    } catch (err) {
+      logger.warn("generate", `AI extraction attempt ${attempt + 1} failed: ${err instanceof Error ? err.message : "unknown"}`);
+    }
+  }
+
+  // 4. Regex fallback
+  logger.warn("generate", "All AI extraction attempts failed, using regex fallback");
   return regexEnrichWorkspaceData(text);
 }
 
@@ -967,9 +1078,11 @@ IMPORTANT: For "name", "title", "bio" — provide BOTH original language AND Eng
 function regexEnrichWorkspaceData(text: string): Partial<WorkspaceData> {
   const result: Partial<WorkspaceData> = {};
 
+  // Name: stop at common boundary words (性别, 出生, 电话, 邮箱, etc.)
   const namePatterns = [
-    /(?:姓名|名字|Name)[：:\s]*([^\n,，。.]{2,20})/i,
-    /^#\s+(.{2,20})$/m,
+    /(?:姓名|名字|Name)[：:\s]*([^\n,，。.]{2,6})(?:\s|$|性别|出生|电话|邮箱|身份)/i,
+    /(?:姓名|名字|Name)[：:\s]*([\u4e00-\u9fff]{2,4})/i,
+    /^#\s+([\u4e00-\u9fff]{2,6})$/m,
     /(?:我是|I am|I'm)\s+([^\n,，。.]{2,20})/i,
   ];
   for (const p of namePatterns) {
@@ -977,7 +1090,11 @@ function regexEnrichWorkspaceData(text: string): Partial<WorkspaceData> {
     if (m && m[1].trim().length >= 2) { result.name = m[1].trim(); result.nameEn = result.name; break; }
   }
 
-  const titlePatterns = [/(?:职位|职业|Title|Role|Position)[：:\s]*([^\n,，]{2,40})/i];
+  // Title
+  const titlePatterns = [
+    /(?:职位|职业|岗位|Title|Role|Position)[：:\s]*([^\n,，。]{2,30})/i,
+    /(?:担任|任职)\s*([^\n,，。]{2,20})/i,
+  ];
   for (const p of titlePatterns) {
     const m = text.match(p);
     if (m) { result.title = m[1].trim(); result.titleEn = result.title; break; }
@@ -986,7 +1103,8 @@ function regexEnrichWorkspaceData(text: string): Partial<WorkspaceData> {
   const emailMatch = text.match(/[\w.-]+@[\w.-]+\.\w{2,}/);
   if (emailMatch) result.email = emailMatch[0];
 
-  const paragraphs = text.split(/\n{2,}/).filter(p => p.trim().length > 50 && !p.trim().startsWith("#"));
+  // Bio: prefer paragraphs that look like self-introductions
+  const paragraphs = text.split(/\n{2,}/).filter(p => p.trim().length > 50 && !p.trim().startsWith("#") && !p.trim().startsWith("构建网站"));
   if (paragraphs.length > 0) { result.bio = paragraphs[0].trim().slice(0, 500); result.bioEn = result.bio; }
 
   return result;
@@ -1055,7 +1173,7 @@ function generateAdvancedTranslations(data: WorkspaceData): string {
     skills: (p.skills || []).map(g => ({ title: g.title, skills: g.skills })),
     education: (p.education || []).map(e => ({ school: e.school, degree: e.degree, period: "", highlights: e.highlights || [] })),
     testimonials: [] as Array<{ quote: string; author: string; role: string; company: string }>,
-    awards: [] as Array<{ title: string; org: string; year: string; description: string }>,
+    awards: ((p as unknown as Record<string, unknown>).awards as Array<{ title: string; org: string; year: string; description: string }>) || [],
     publications: [] as Array<{ title: string; authors: string; venue: string; year: string; abstract: string; url: string }>,
     media: [] as Array<{ type: string; title: string; platform: string; url: string; date: string; description: string }>,
     demos: [] as Array<{ title: string; description: string; url: string; screenshot: string; techStack: string[] }>,
@@ -1107,6 +1225,7 @@ export async function runSiteBuild(input: RunSiteBuildInput): Promise<RunSiteBui
   let repairCtx: {
     codeCtx: import("./build-agents").BuildConversationContext;
     designPlan: Record<string, unknown>;
+    componentReferences?: string;
     assetCss: string;
   } | null = null;
 
@@ -1187,6 +1306,21 @@ export async function runSiteBuild(input: RunSiteBuildInput): Promise<RunSiteBui
       }
     }
 
+    // Extract component variant source code as references for Code Agent
+    let componentReferences = "";
+    try {
+      const { extractComponentReferences, formatReferencesForPrompt } = await import("./components/reference-extractor");
+      const refs = await extractComponentReferences(selections.compositionPlan);
+      if (refs.length > 0) {
+        const sectionRationale = (selections as any).sectionRationale as Record<string, string> | undefined;
+        const designReasoning = (selections as any).designReasoning as string | undefined;
+        componentReferences = formatReferencesForPrompt(refs, designReasoning, sectionRationale);
+        logger.info("generate", `[${requestId}] Extracted ${refs.length} component references for Code Agent`);
+      }
+    } catch (err) {
+      logger.warn("generate", `[${requestId}] Component reference extraction failed: ${err instanceof Error ? err.message : "unknown"}`);
+    }
+
     logger.info("generate", `[${requestId}] Advanced mode: running Code Agent (${kbContent.length} chars knowledge)...`);
     const codeCtx: import("./build-agents").BuildConversationContext = {
       requestId,
@@ -1204,13 +1338,49 @@ export async function runSiteBuild(input: RunSiteBuildInput): Promise<RunSiteBui
       siteId: input.siteId,
     };
     // Stash for potential build-failure retries later.
-    repairCtx = { codeCtx, designPlan, assetCss };
+    repairCtx = { codeCtx, designPlan, assetCss, componentReferences };
 
-    const codeResult = await runCodeAgent(codeCtx, designPlan, assetCss);
+    const codeResult = await runCodeAgent(codeCtx, designPlan, assetCss, undefined, componentReferences);
 
-    // Enrich WorkspaceData from KB content when legacy items are empty
+    // Enrich WorkspaceData from KB content when legacy items are empty.
+    // Strategy: use the KB index (structured summaries) as a guide + prioritized
+    // file content (resume first) for actual data extraction.
     if (kbContent && (!data.name || data.name === "Your Name" || data.name === "")) {
-      const enriched = await enrichWorkspaceDataFromKB(data, kbContent, input.userId);
+      let enrichInput = kbContent;
+      if (input.userId && allBaseIds.length > 0) {
+        try {
+          const { loadFullKBContext, formatFilesForPrompt } = await import("./kb-loader");
+          const indexParts: string[] = [];
+          const allFiles = new Map<string, { name: string; content: string; type: string }>();
+          for (const bid of allBaseIds) {
+            const kbCtx = await loadFullKBContext(input.userId, bid);
+            // Keep index summaries (strip usage instructions)
+            const cleanIndex = (kbCtx.indexContent || "")
+              .replace(/## 使用说明[\s\S]*?用于网站展示\s*/g, "")
+              .replace(/构建网站时：[\s\S]*?用于网站展示\s*/g, "");
+            if (cleanIndex.trim()) indexParts.push(cleanIndex);
+            for (const [id, f] of kbCtx.fileContents) allFiles.set(id, f);
+          }
+          // Sort: resume/personal/述职 files first, large PDFs with low info-density last
+          const highPriority = /简历|resume|cv|述职|profile|经历|介绍|自我/i;
+          const lowPriority = /竞品|调研|会议|规则|仿真|财报|售前|讲义/i;
+          const sorted = new Map<string, { name: string; content: string; type: string }>(
+            [...allFiles.entries()].sort(([, a], [, b]) => {
+              const aP = highPriority.test(a.name) ? 0 : lowPriority.test(a.name) ? 2 : 1;
+              const bP = highPriority.test(b.name) ? 0 : lowPriority.test(b.name) ? 2 : 1;
+              return aP - bP;
+            }),
+          );
+          // Build: index summaries (as guide) + file contents (for data)
+          const indexSection = indexParts.length > 0
+            ? `## FILE INDEX (summaries of available files)\n${indexParts.join("\n\n")}\n\n## FILE CONTENTS (actual data to extract from)\n`
+            : "";
+          enrichInput = indexSection + formatFilesForPrompt(sorted, 50000);
+        } catch {
+          // Fall back to full kbContent
+        }
+      }
+      const enriched = await enrichWorkspaceDataFromKB(data, enrichInput, input.userId, allBaseIds);
       Object.assign(data, enriched);
       logger.info("generate", `[${requestId}] Enriched WorkspaceData from KB: name="${data.name}", bio=${data.bio?.length || 0} chars, projects=${data.projects?.length || 0}`);
     }
@@ -1366,7 +1536,8 @@ export async function runSiteBuild(input: RunSiteBuildInput): Promise<RunSiteBui
   }
 
   // Auto-fix common issues in generated code before writing to disk
-  files = runCodeGuardrails(files, siteId, previewBaseUrl, logger);
+  const guardrailResult = runCodeGuardrails(files, siteId, previewBaseUrl, logger);
+  files = guardrailResult.files;
 
   // Advanced mode deep validation: type annotations, import resolution, translation keys
   await progress("🔍 验证生成代码...");
@@ -1375,6 +1546,17 @@ export async function runSiteBuild(input: RunSiteBuildInput): Promise<RunSiteBui
     await progress(`✅ 代码验证：${advancedFixes.length} 项自动修复`);
   } else {
     await progress("✅ 代码验证通过");
+  }
+
+  // Record all guardrail fixes into cross-build error memory
+  const allGuardrailFixes = [...guardrailResult.fixes, ...advancedFixes];
+  if (allGuardrailFixes.length > 0) {
+    recordGuardrailFixes(allGuardrailFixes, {
+      siteId,
+      buildId: input.buildId,
+      theme: selections.theme,
+      siteType: selections.siteType,
+    });
   }
 
   const fileCount = Object.keys(files).length;
@@ -1428,6 +1610,14 @@ export async function runSiteBuild(input: RunSiteBuildInput): Promise<RunSiteBui
         `[${requestId}] staticBuild failed (attempt ${buildAttempt + 1}/${MAX_BUILD_RETRIES + 1}): ${errObj.message || "unknown"}\n${errSummary.slice(0, 800)}`,
       );
 
+      // Record error into cross-build error memory
+      recordBuildError(errSummary || errObj.message || "unknown build error", {
+        siteId,
+        buildId: input.buildId,
+        theme: selections.theme,
+        siteType: selections.siteType,
+      });
+
       const canRetry = repairCtx && buildAttempt < MAX_BUILD_RETRIES;
       if (!canRetry) {
         // Preserve stdout/stderr on the error so build-queue can persist them.
@@ -1453,6 +1643,7 @@ export async function runSiteBuild(input: RunSiteBuildInput): Promise<RunSiteBui
             buildError: errSummary || errObj.message || "(no error output captured)",
             attempt: buildAttempt,
           },
+          repairCtx!.componentReferences,
         );
       } catch (repairErr) {
         logger.error(
@@ -1499,7 +1690,8 @@ export async function runSiteBuild(input: RunSiteBuildInput): Promise<RunSiteBui
       // writeFilesToSiteDir only wipes src/, so public/images/ and
       // node_modules/ are preserved across retries — no need to recopy
       // user images or reinstall deps.
-      files = runCodeGuardrails(files, siteId, previewBaseUrl, logger);
+      const retryGuardrailResult = runCodeGuardrails(files, siteId, previewBaseUrl, logger);
+      files = retryGuardrailResult.files;
       runAdvancedModeGuardrails(files, ALLOWED_DEPENDENCIES, logger);
       await writeFilesToSiteDir(siteDir, files);
       // Loop continues; next iteration will re-attempt staticBuild.

@@ -38,9 +38,18 @@ export async function GET() {
     .where(eq(sites.userId, session.user.id))
     .orderBy(desc(sites.createdAt));
 
+  // Hide placeholder sites that never had a successful build, and unpublished drafts
+  const visibleSites = userSites.filter((s) => {
+    // Hide sites that failed on first build attempt (no successful build ever)
+    if (s.buildStatus === "failed" && !s.lastBuiltAt) return false;
+    // Hide unpublished drafts — user must publish from create page first
+    if (!s.publishedUrl && s.status !== "published") return false;
+    return true;
+  });
+
   // conversationId no longer attached — build conversations are deleted
   // after successful builds. Future edits go through the edit workspace.
-  const sitesWithConv = userSites.map((s) => ({ ...s, conversationId: null }));
+  const sitesWithConv = visibleSites.map((s) => ({ ...s, conversationId: null }));
 
   return NextResponse.json({ sites: sitesWithConv });
 }

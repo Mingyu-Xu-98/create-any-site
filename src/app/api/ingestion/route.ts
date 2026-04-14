@@ -5,6 +5,7 @@ import { ingestionTasks } from "@/lib/db/schema";
 import { eq, or, gte } from "drizzle-orm";
 import { runIngestionTask } from "@/lib/ingestion-worker";
 import { DEFAULT_MAX_UPLOAD_BYTES, checkContentLength, checkFileSize } from "@/lib/upload-limits";
+import { checkQuota } from "@/lib/usage";
 
 /**
  * POST /api/ingestion — Submit a file for background processing.
@@ -13,6 +14,11 @@ import { DEFAULT_MAX_UPLOAD_BYTES, checkContentLength, checkFileSize } from "@/l
 export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const uploadQuota = await checkQuota(session.user.id, "file_upload");
+  if (!uploadQuota.allowed) {
+    return NextResponse.json({ error: uploadQuota.reason, quota: true, upgradeHint: uploadQuota.upgradeHint }, { status: 429 });
+  }
 
   const contentType = req.headers.get("content-type") || "";
 

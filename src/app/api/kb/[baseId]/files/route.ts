@@ -7,6 +7,7 @@ import { saveUserImage, isImageFile } from "@/lib/asset-store";
 import { DEFAULT_MAX_KB_UPLOAD_BYTES, checkContentLength, checkFileSize } from "@/lib/upload-limits";
 import { internalError } from "@/lib/api-errors";
 import { startTrace } from "@/lib/llm-trace";
+import { checkQuota } from "@/lib/usage";
 
 /**
  * POST /api/kb/[baseId]/files — upload a file or add a link to a knowledge base.
@@ -22,6 +23,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ bas
   try {
   const session = await auth();
   if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const uploadQuota = await checkQuota(session.user.id, "file_upload");
+  if (!uploadQuota.allowed) {
+    return NextResponse.json({ error: uploadQuota.reason, quota: true, upgradeHint: uploadQuota.upgradeHint }, { status: 429 });
+  }
 
   // Verify base ownership
   const base = await db.select({ id: knowledgeBases.id }).from(knowledgeBases)
