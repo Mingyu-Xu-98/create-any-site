@@ -364,6 +364,7 @@ function initDb() {
     "ALTER TABLE sites ADD COLUMN public_desc TEXT",
     "ALTER TABLE knowledge_bases ADD COLUMN profile_json TEXT",
     "ALTER TABLE knowledge_files ADD COLUMN usage_tag TEXT",
+    "ALTER TABLE edit_sessions ADD COLUMN file_map_before TEXT",
   ];
 
   for (const statement of alterStatements) {

@@ -101,10 +101,13 @@ ${fileSections}`;
     logger.warn("edit-agent", `No changes parsed from LLM output (${result.content.length} chars). Preview: ${preview}`);
   }
 
+  // Validate changes: reject placeholder/abbreviated outputs that would break the build
+  const validated = validateChanges(changes, input.currentFiles);
+
   return {
-    changes,
+    changes: validated.changes,
     summary,
-    valid: changes.length > 0,
+    valid: validated.valid,
   };
 }
 
@@ -271,4 +274,90 @@ function extractSummary(output: string, changes: FileChange[]): string {
   }
 
   return `Modified ${changes.length} file(s): ${changes.map((c) => c.path.split("/").pop()).join(", ")}`;
+}
+
+// ---------------------------------------------------------------------------
+// Validation — reject placeholder/abbreviated LLM output
+// ---------------------------------------------------------------------------
+
+/**
+ * LLMs sometimes output abbreviated code with placeholder comments like:
+ *   // ... imports remain the same ...
+ *   // ... rest of the translations remain exactly the same ...
+ *
+ * This replaces real code with non-functional placeholders that break the build.
+ * We detect and reject such outputs so the retry mechanism can request a proper response.
+ */
+
+/** Patterns that indicate placeholder/abbreviated output */
+const PLACEHOLDER_PATTERNS = [
+  /\/\/\s*\.{3}\s*(.*remain|.*same|.*rest of|.*省略|.*不变|.*existing)/i,
+  /\/\*\s*\.{3}\s*(.*remain|.*same|.*rest of|.*省略|.*不变|.*existing)/i,
+  /\/\/\s*(imports?|state|hooks?|styles?|content)\s*(remain|unchanged|same|省略|不变)/i,
+  /{\s*\/\*\s*\.{3}\s*\*\/\s*}/,  // { /* ... */ }
+];
+
+function validateChanges(
+  changes: FileChange[],
+  originalFiles: Record<string, string>,
+): { changes: FileChange[]; valid: boolean } {
+  if (changes.length === 0) return { changes, valid: false };
+
+  const validChanges: FileChange[] = [];
+  let anyRejected = false;
+
+  for (const change of changes) {
+    const original = originalFiles[change.path];
+    const rejection = checkForPlaceholder(change, original);
+    if (rejection) {
+      logger.warn("edit-agent", `Rejected ${change.path}: ${rejection}`);
+      anyRejected = true;
+      continue;
+    }
+    validChanges.push(change);
+  }
+
+  // If ALL changes were rejected, mark as invalid so retry kicks in
+  if (validChanges.length === 0 && anyRejected) {
+    return { changes: [], valid: false };
+  }
+
+  return { changes: validChanges, valid: validChanges.length > 0 };
+}
+
+function checkForPlaceholder(change: FileChange, original: string | undefined): string | null {
+  const content = change.content;
+
+  // 1. Check for placeholder comment patterns
+  for (const pattern of PLACEHOLDER_PATTERNS) {
+    if (pattern.test(content)) {
+      return `contains placeholder: ${content.match(pattern)?.[0]?.slice(0, 60)}`;
+    }
+  }
+
+  // 2. For page.tsx: must have real imports and useLanguage hook
+  if (change.path === "src/app/page.tsx") {
+    if (!content.includes("import ")) {
+      return "page.tsx missing import statements";
+    }
+    if (!content.includes("useLanguage")) {
+      return "page.tsx missing useLanguage hook";
+    }
+  }
+
+  // 3. For translations.ts: must have actual translation content (not empty objects)
+  if (change.path === "src/i18n/translations.ts") {
+    // Count actual property lines (like `  hero:`, `  nav:`, etc.)
+    const propertyLines = (content.match(/^\s{2,}\w+\s*:/gm) || []).length;
+    if (propertyLines < 3) {
+      return `translations.ts has only ${propertyLines} properties (expected 3+)`;
+    }
+  }
+
+  // 4. Dramatic length reduction: if output is < 30% of original, likely truncated
+  if (original && content.length < original.length * 0.3) {
+    return `content is ${Math.round(content.length / original.length * 100)}% of original (${content.length} vs ${original.length} chars)`;
+  }
+
+  return null; // Passes validation
 }

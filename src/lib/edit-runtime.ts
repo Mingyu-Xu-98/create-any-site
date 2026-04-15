@@ -15,15 +15,16 @@ import fs from "fs/promises";
 import path from "path";
 import { exec } from "child_process";
 import { db, sqlite } from "@/lib/db";
-import { editSessions, sites, knowledgeFiles as knowledgeFilesTable } from "@/lib/db/schema";
+import { editSessions, sites, siteBuilds, knowledgeFiles as knowledgeFilesTable } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { classifyEditIntent, getFileScopeForIntent } from "@/lib/edit-classifier";
 import { runEditAgent, type FileChange } from "@/lib/edit-agent";
+import { tryFastPath } from "@/lib/edit-fast-paths";
 import { runCodeGuardrails, runAdvancedModeGuardrails } from "@/lib/code-guardrails";
 import { recordBuildError } from "@/lib/error-collector";
 import { resolveSiteDir } from "@/lib/site-paths";
 import { siteRoot, siteCurrentLink } from "@/lib/site-paths";
-import { summarizeBuildOutput, syncDraftPreview, ALLOWED_DEPENDENCIES } from "@/lib/build-runtime";
+import { summarizeBuildOutput, syncDraftPreview, rewriteExportAssetPaths, ALLOWED_DEPENDENCIES } from "@/lib/build-runtime";
 import { copyUserImagesToSite } from "@/lib/asset-store";
 import { logger } from "@/lib/logger";
 
@@ -37,6 +38,8 @@ export interface EditSessionResult {
   buildSuccess: boolean;
   buildError?: string;
   previewUrl?: string;
+  /** True when the edit was handled by a deterministic fast path (no LLM). */
+  fastPath?: boolean;
 }
 
 export interface RunEditSessionInput {
@@ -46,17 +49,66 @@ export interface RunEditSessionInput {
   maxRetries?: number;
 }
 
+// ---------------------------------------------------------------------------
+// Version management — create a site_builds record after successful edit
+// ---------------------------------------------------------------------------
+
+async function createEditBuildRecord(opts: {
+  siteId: string;
+  userId: string;
+  fileMap: Record<string, string>;
+  intent: string;
+  instruction: string;
+}): Promise<string> {
+  const buildId = crypto.randomUUID();
+  const now = new Date().toISOString();
+  await db.insert(siteBuilds).values({
+    id: buildId,
+    siteId: opts.siteId,
+    userId: opts.userId,
+    status: "ready",
+    payload: JSON.stringify({
+      type: "edit",
+      intent: opts.intent,
+      instruction: opts.instruction.slice(0, 200),
+    }),
+    fileMapSnapshot: JSON.stringify(opts.fileMap),
+    startedAt: now,
+    finishedAt: now,
+    createdAt: now,
+    updatedAt: now,
+  });
+  return buildId;
+}
+
 export async function runEditSession(input: RunEditSessionInput): Promise<EditSessionResult> {
   const { siteId, userId, instruction, maxRetries = MAX_EDIT_RETRIES } = input;
 
-  // 1. Get site and its fileMap
+  // 0. Concurrent edit lock — reject if another active session exists
+  const STALE_SESSION_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
+  const activeSession = sqlite.prepare(
+    `SELECT id, created_at FROM edit_sessions WHERE site_id = ? AND status = 'active' LIMIT 1`
+  ).get(siteId) as { id: string; created_at: string } | undefined;
+  if (activeSession) {
+    const age = Date.now() - new Date(activeSession.created_at).getTime();
+    if (age < STALE_SESSION_TIMEOUT_MS) {
+      throw new Error("CONCURRENT_EDIT: 该站点正在编辑中，请稍后再试");
+    }
+    // Stale session — mark as failed so we can proceed
+    sqlite.prepare(
+      `UPDATE edit_sessions SET status = 'failed', build_error = 'session timeout', completed_at = ? WHERE id = ?`
+    ).run(new Date().toISOString(), activeSession.id);
+    logger.warn("edit-runtime", `Expired stale active session ${activeSession.id} (${Math.round(age / 1000)}s old)`);
+  }
+
+  // 1. Get site and its fileMap — verify ownership
   const site = await db.select({
     fileMap: sites.fileMap,
     draftBuildId: sites.draftBuildId,
-  }).from(sites).where(eq(sites.id, siteId)).get();
+  }).from(sites).where(and(eq(sites.id, siteId), eq(sites.userId, userId))).get();
 
   if (!site) {
-    throw new Error("Site not found");
+    throw new Error("Site not found or access denied");
   }
 
   let fileMap: Record<string, string>;
@@ -91,15 +143,42 @@ export async function runEditSession(input: RunEditSessionInput): Promise<EditSe
     return runAutofixSession({ siteId, userId, fileMap, draftBuildId: site.draftBuildId || null });
   }
 
-  // 2. Create edit session
-  const sessionId = crypto.randomUUID();
+  // ---------- Deterministic fast-path: skip LLM for simple transforms ----------
+  const fpIntent = classifyEditIntent(instruction);
+  const fastResult = tryFastPath(instruction, fpIntent, fileMap);
+  let existingSessionId: string | undefined;
+  if (fastResult) {
+    logger.info("edit-runtime", `Fast-path matched for "${instruction.slice(0, 60)}" (${fastResult.changes.length} file(s))`);
+    const fpResult = await runFastPathSession({
+      siteId, userId, fileMap, intent: fpIntent, instruction,
+      changes: fastResult.changes,
+      summary: fastResult.summary,
+      draftBuildId: site.draftBuildId || null,
+    });
+    if (fpResult.buildSuccess) return fpResult;
+    // Fast-path build failed → reuse its session ID for the full Edit Agent flow
+    existingSessionId = fpResult.sessionId;
+    logger.warn("edit-runtime", `Fast-path build failed, falling through to Edit Agent (reusing session ${existingSessionId})`);
+  }
+
+  // 2. Create edit session (or reuse fast-path session if it failed)
+  const sessionId = existingSessionId || crypto.randomUUID();
   const intent = classifyEditIntent(instruction);
   const now = new Date().toISOString();
 
-  sqlite.prepare(
-    `INSERT INTO edit_sessions (id, site_id, user_id, status, intent, instruction, build_id_before, created_at)
-     VALUES (?, ?, ?, 'active', ?, ?, ?, ?)`
-  ).run(sessionId, siteId, userId, intent, instruction, site.draftBuildId || null, now);
+  const fileMapBeforeJson = JSON.stringify(fileMap);
+  if (existingSessionId) {
+    // Reuse fast-path session — reset it for the full edit flow
+    sqlite.prepare(
+      `UPDATE edit_sessions SET status = 'active', intent = ?, build_error = NULL WHERE id = ?`
+    ).run(intent, existingSessionId);
+  } else {
+    // Store pre-edit fileMap snapshot for undo
+    sqlite.prepare(
+      `INSERT INTO edit_sessions (id, site_id, user_id, status, intent, instruction, build_id_before, file_map_before, created_at)
+       VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?)`
+    ).run(sessionId, siteId, userId, intent, instruction, site.draftBuildId || null, fileMapBeforeJson, now);
+  }
 
   logger.info("edit-runtime", `[${sessionId}] Starting edit: intent=${intent}, instruction="${instruction.slice(0, 80)}"`);
 
@@ -166,6 +245,7 @@ export async function runEditSession(input: RunEditSessionInput): Promise<EditSe
   let buildSuccess = false;
   let buildError: string | undefined;
   let lastError: string | undefined;
+  let editBuildId: string | undefined;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     // On ANY retry, expand to full "fix" scope — the extra tokens are much
@@ -204,9 +284,9 @@ export async function runEditSession(input: RunEditSessionInput): Promise<EditSe
         summary = editResult.summary || buildError;
         break;
       }
-      // On retry, add a hint to the instruction asking for code output
+      // On retry, add a hint to the instruction asking for COMPLETE code output
       if (!lastError) {
-        lastError = "Previous attempt produced no code changes. You MUST output at least one code block with the modified file. Remember to use labeled code blocks like ```page.tsx";
+        lastError = "Previous attempt was REJECTED because it contained placeholder comments like '// ... remains the same ...' instead of actual code. You MUST output COMPLETE files with ALL code — no abbreviations, no placeholders. Every single line must be real, executable code.";
       }
       continue;
     }
@@ -226,39 +306,33 @@ export async function runEditSession(input: RunEditSessionInput): Promise<EditSe
     const guardedFiles = guardedResult.files;
     runAdvancedModeGuardrails(guardedFiles, ALLOWED_DEPENDENCIES, logger);
 
-    // 7. Write files to disk and build
+    // 7. Write ALL files to disk and build
+    //    Must sync the entire fileMap — previous failed edits may have left
+    //    dirty files on disk that differ from the DB fileMap.
     const siteDir = await resolveSiteDir(siteId);
     try {
-      // Write only changed files
-      for (const change of changes) {
-        const fullPath = path.join(siteDir, change.path);
-        await fs.mkdir(path.dirname(fullPath), { recursive: true });
-        await fs.writeFile(fullPath, guardedFiles[change.path] || change.content, "utf-8");
-      }
-
-      // Also write any guardrail-fixed files
-      for (const [filePath, content] of Object.entries(guardedFiles)) {
-        if (content !== updatedFileMap[filePath]) {
-          const fullPath = path.join(siteDir, filePath);
-          await fs.mkdir(path.dirname(fullPath), { recursive: true });
-          await fs.writeFile(fullPath, content, "utf-8");
-        }
-      }
+      await syncFileMapToDisk(siteDir, guardedFiles);
 
       // Build
       await runNextBuild(siteDir);
       buildSuccess = true;
       buildError = undefined; // Clear error from earlier failed attempts
 
-      // Update site fileMap
+      // Create a build record for this edit (version identity)
+      editBuildId = await createEditBuildRecord({
+        siteId, userId, fileMap: guardedFiles, intent, instruction,
+      });
+
+      // Update site fileMap + advance draftBuildId
       await db.update(sites)
         .set({
           fileMap: JSON.stringify(guardedFiles),
+          draftBuildId: editBuildId,
           buildStatus: "ready",
           buildError: null,
           updatedAt: new Date().toISOString(),
         })
-        .where(eq(sites.id, siteId));
+        .where(and(eq(sites.id, siteId), eq(sites.userId, userId)));
 
       // Copy user-uploaded images to site directory (so code refs like /images/xxx work)
       if (userId && userImages.length > 0) {
@@ -283,10 +357,13 @@ export async function runEditSession(input: RunEditSessionInput): Promise<EditSe
         }
       }
 
-      // Sync preview
+      // Sync preview — rewrite asset paths so static server can route them
       const PREVIEW_PUBLISH_DIR = process.env.PREVIEW_PUBLISH_DIR?.trim() || "";
       if (PREVIEW_PUBLISH_DIR) {
         await syncDraftPreview(siteId, siteDir);
+      } else {
+        // Dev mode: rewrite /_next/ → /{siteId}/_next/ in-place (matches initial build behavior)
+        await rewriteExportAssetPaths(path.join(siteDir, "out"), "", `/drafts/${siteId}`);
       }
 
       logger.info("edit-runtime", `[${sessionId}] Edit succeeded on attempt ${attempt + 1}`);
@@ -316,6 +393,7 @@ export async function runEditSession(input: RunEditSessionInput): Promise<EditSe
     `UPDATE edit_sessions SET
       status = ?,
       changes = ?,
+      build_id_after = ?,
       build_success = ?,
       build_error = ?,
       completed_at = ?
@@ -323,6 +401,7 @@ export async function runEditSession(input: RunEditSessionInput): Promise<EditSe
   ).run(
     buildSuccess ? "completed" : "failed",
     JSON.stringify(changes),
+    editBuildId || null,
     buildSuccess ? 1 : 0,
     buildError || null,
     completedAt,
@@ -361,10 +440,12 @@ async function runAutofixSession(opts: {
   const sessionId = crypto.randomUUID();
   const now = new Date().toISOString();
 
+  // Store pre-edit fileMap snapshot for undo
+  const fileMapBeforeJson = JSON.stringify(fileMap);
   sqlite.prepare(
-    `INSERT INTO edit_sessions (id, site_id, user_id, status, intent, instruction, build_id_before, created_at)
-     VALUES (?, ?, ?, 'active', 'fix', '__AUTOFIX__', ?, ?)`
-  ).run(sessionId, siteId, userId, draftBuildId, now);
+    `INSERT INTO edit_sessions (id, site_id, user_id, status, intent, instruction, build_id_before, file_map_before, created_at)
+     VALUES (?, ?, ?, 'active', 'fix', '__AUTOFIX__', ?, ?, ?)`
+  ).run(sessionId, siteId, userId, draftBuildId, fileMapBeforeJson, now);
 
   logger.info("edit-runtime", `[${sessionId}] AUTOFIX: running deterministic guardrails...`);
 
@@ -390,31 +471,35 @@ async function runAutofixSession(opts: {
   const siteDir = await resolveSiteDir(siteId);
   let buildSuccess = false;
   let buildError: string | undefined;
+  let autofixBuildId: string | undefined;
 
   try {
-    for (const change of changes) {
-      const fullPath = path.join(siteDir, change.path);
-      await fs.mkdir(path.dirname(fullPath), { recursive: true });
-      await fs.writeFile(fullPath, change.content, "utf-8");
-    }
+    // Sync ALL fileMap files to disk (guards against stale files from previous failed edits)
+    await syncFileMapToDisk(siteDir, guardedFiles);
 
     await runNextBuild(siteDir);
     buildSuccess = true;
 
-    // Update site fileMap
+    // Create build record + update site
+    const autofixBuildId = await createEditBuildRecord({
+      siteId, userId, fileMap: guardedFiles, intent: "fix", instruction: "__AUTOFIX__",
+    });
     await db.update(sites)
       .set({
         fileMap: JSON.stringify(guardedFiles),
+        draftBuildId: autofixBuildId,
         buildStatus: "ready",
         buildError: null,
         updatedAt: new Date().toISOString(),
       })
-      .where(eq(sites.id, siteId));
+      .where(and(eq(sites.id, siteId), eq(sites.userId, userId)));
 
-    // Sync preview
+    // Sync preview — rewrite asset paths so static server can route them
     const PREVIEW_PUBLISH_DIR = process.env.PREVIEW_PUBLISH_DIR?.trim() || "";
     if (PREVIEW_PUBLISH_DIR) {
       await syncDraftPreview(siteId, siteDir);
+    } else {
+      await rewriteExportAssetPaths(path.join(siteDir, "out"), "", `/drafts/${siteId}`);
     }
 
     logger.info("edit-runtime", `[${sessionId}] AUTOFIX: build succeeded with guardrails-only fixes`);
@@ -442,7 +527,7 @@ async function runAutofixSession(opts: {
     const fallbackResult = await runEditSession({
       siteId,
       userId,
-      instruction: `检查并修复页面中的构建错误。错误信息：\n${buildError || existingBuildError || "Turbopack build failed"}`,
+      instruction: `检查并修复页面中的构建错误。错误信息：\n${buildError || existingBuildError || "Build failed"}`,
       maxRetries: MAX_EDIT_RETRIES,
     });
 
@@ -473,8 +558,8 @@ async function runAutofixSession(opts: {
   // Guardrails-only fix succeeded
   const completedAt = new Date().toISOString();
   sqlite.prepare(
-    `UPDATE edit_sessions SET status = 'completed', changes = ?, build_success = 1, completed_at = ? WHERE id = ?`
-  ).run(JSON.stringify(changes), completedAt, sessionId);
+    `UPDATE edit_sessions SET status = 'completed', changes = ?, build_id_after = ?, build_success = 1, completed_at = ? WHERE id = ?`
+  ).run(JSON.stringify(changes), autofixBuildId, completedAt, sessionId);
 
   return {
     sessionId,
@@ -482,6 +567,116 @@ async function runAutofixSession(opts: {
     changes,
     summary: `自动修复完成：guardrails 修复了 ${changes.length} 个文件`,
     buildSuccess: true,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// FAST PATH: deterministic CSS/content transform → rebuild → fallback on fail
+// ---------------------------------------------------------------------------
+
+async function runFastPathSession(opts: {
+  siteId: string;
+  userId: string;
+  fileMap: Record<string, string>;
+  intent: string;
+  instruction: string;
+  changes: FileChange[];
+  summary: string;
+  draftBuildId: string | null;
+}): Promise<EditSessionResult> {
+  const { siteId, userId, fileMap, intent, instruction, changes, summary, draftBuildId } = opts;
+  const sessionId = crypto.randomUUID();
+  const now = new Date().toISOString();
+
+  // Store pre-edit fileMap snapshot for undo
+  const fileMapBeforeJson = JSON.stringify(fileMap);
+  sqlite.prepare(
+    `INSERT INTO edit_sessions (id, site_id, user_id, status, intent, instruction, build_id_before, file_map_before, created_at)
+     VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?)`
+  ).run(sessionId, siteId, userId, intent, instruction, draftBuildId, fileMapBeforeJson, now);
+
+  logger.info("edit-runtime", `[${sessionId}] FAST-PATH: applying ${changes.length} change(s)...`);
+
+  // 1. Apply changes to fileMap copy
+  const updatedFileMap: Record<string, string> = { ...fileMap };
+  for (const change of changes) {
+    updatedFileMap[change.path] = change.content;
+  }
+
+  // 2. Run guardrails
+  const previewBaseUrl = (process.env.PREVIEW_BASE_URL?.trim() || "http://localhost:3002").replace(/\/+$/, "");
+  const guardedResult = runCodeGuardrails(updatedFileMap, siteId, previewBaseUrl, logger);
+  const guardedFiles = guardedResult.files;
+  runAdvancedModeGuardrails(guardedFiles, ALLOWED_DEPENDENCIES, logger);
+
+  // 3. Write & build
+  const siteDir = await resolveSiteDir(siteId);
+  let buildSuccess = false;
+  let buildError: string | undefined;
+  let fpBuildId: string | undefined;
+
+  try {
+    // Sync ALL fileMap files to disk (guards against stale files from previous failed edits)
+    await syncFileMapToDisk(siteDir, guardedFiles);
+
+    await runNextBuild(siteDir);
+    buildSuccess = true;
+
+    // Create build record + update site
+    const fpBuildId = await createEditBuildRecord({
+      siteId, userId, fileMap: guardedFiles, intent, instruction,
+    });
+    await db.update(sites)
+      .set({
+        fileMap: JSON.stringify(guardedFiles),
+        draftBuildId: fpBuildId,
+        buildStatus: "ready",
+        buildError: null,
+        updatedAt: new Date().toISOString(),
+      })
+      .where(and(eq(sites.id, siteId), eq(sites.userId, userId)));
+
+    // Sync preview — rewrite asset paths so static server can route them
+    const PREVIEW_PUBLISH_DIR = process.env.PREVIEW_PUBLISH_DIR?.trim() || "";
+    if (PREVIEW_PUBLISH_DIR) {
+      await syncDraftPreview(siteId, siteDir);
+    } else {
+      await rewriteExportAssetPaths(path.join(siteDir, "out"), "", `/drafts/${siteId}`);
+    }
+
+    logger.info("edit-runtime", `[${sessionId}] FAST-PATH: build succeeded`);
+  } catch (err) {
+    const errObj = err as { stdout?: string; stderr?: string; message?: string };
+    const stderrText = errObj.stderr || "";
+    const stdoutText = errObj.stdout || "";
+    const errSummary = summarizeBuildOutput(stdoutText, stderrText).join("\n");
+    buildError = errSummary || errObj.message || "unknown build error";
+    logger.warn("edit-runtime", `[${sessionId}] FAST-PATH: build failed — ${buildError?.slice(0, 120)}`);
+  }
+
+  // 4. Update session
+  const completedAt = new Date().toISOString();
+  const fpBuildIdForSession = buildSuccess ? fpBuildId : undefined;
+  sqlite.prepare(
+    `UPDATE edit_sessions SET status = ?, changes = ?, build_id_after = ?, build_success = ?, build_error = ?, completed_at = ? WHERE id = ?`
+  ).run(
+    buildSuccess ? "completed" : "failed",
+    JSON.stringify(changes),
+    fpBuildIdForSession || null,
+    buildSuccess ? 1 : 0,
+    buildError || null,
+    completedAt,
+    sessionId,
+  );
+
+  return {
+    sessionId,
+    status: buildSuccess ? "completed" : "failed",
+    changes,
+    summary,
+    buildSuccess,
+    buildError,
+    fastPath: true,
   };
 }
 
@@ -601,13 +796,60 @@ async function runEditImageGeneration(siteId: string, userId: string, instructio
 }
 
 // ---------------------------------------------------------------------------
-// Internal: run `next build`
+// Internal: sync ALL fileMap files to disk before building.
+//
+// Why?  The edit flow writes to disk, then builds.  If the build fails, dirty
+// files stay on disk but the DB fileMap isn't updated.  A subsequent edit that
+// only writes its OWN changed files leaves the old dirty files in place, and
+// the build sees an inconsistent mix of DB-version and stale-disk-version code.
+//
+// Solution: before every build, write ALL fileMap files to ensure consistency.
 // ---------------------------------------------------------------------------
 
-function runNextBuild(siteDir: string): Promise<void> {
+async function syncFileMapToDisk(siteDir: string, fileMap: Record<string, string>): Promise<void> {
+  const resolvedSiteDir = path.resolve(siteDir);
+  for (const [filePath, content] of Object.entries(fileMap)) {
+    const fullPath = path.resolve(siteDir, filePath);
+    // Path traversal guard: reject paths that escape the site directory
+    if (!fullPath.startsWith(resolvedSiteDir + path.sep) && fullPath !== resolvedSiteDir) {
+      logger.warn("edit-runtime", `Path traversal blocked: ${filePath}`);
+      continue;
+    }
+    await fs.mkdir(path.dirname(fullPath), { recursive: true });
+    await fs.writeFile(fullPath, content, "utf-8");
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Internal: run `next build --webpack` (consistent with staticBuild in build-runtime.ts)
+//
+// Why --webpack?  Next.js 16 defaults to Turbopack, but Turbopack + output:"export"
+// triggers an InvariantError on the synthetic /_global-error route and parse errors
+// on some dynamically generated code.  The initial generation already uses --webpack;
+// edits must too.
+// ---------------------------------------------------------------------------
+
+async function runNextBuild(siteDir: string): Promise<void> {
+  // 1. Guarantee next.config.mjs is correct (guards against Code Agent overwriting it)
+  const configContent = `const nextConfig = {\n  output: "export",\n  images: { unoptimized: true },\n};\nexport default nextConfig;`;
+
+  for (const old of ["next.config.js", "next.config.ts", "next.config.cjs"]) {
+    try { await fs.unlink(path.join(siteDir, old)); } catch {}
+  }
+  await fs.writeFile(path.join(siteDir, "next.config.mjs"), configContent, "utf-8");
+
+  // 2. Run build with Webpack
+  const nextBin = path.join(siteDir, "node_modules", "next", "dist", "bin", "next");
+  const buildEnv = { ...process.env, NODE_ENV: "production" } as NodeJS.ProcessEnv;
+  delete buildEnv.TURBOPACK;
+  delete buildEnv.NEXT_DISABLE_TURBOPACK;
+
   return new Promise((resolve, reject) => {
-    const env = { ...process.env, NODE_ENV: "production" as const };
-    exec("npx next build", { cwd: siteDir, env, timeout: 120_000 }, (err: any, stdout: any, stderr: any) => {
+    exec(`"${nextBin}" build --webpack`, {
+      cwd: siteDir,
+      env: buildEnv,
+      timeout: 180_000,
+    }, (err: any, stdout: any, stderr: any) => {
       if (err) {
         reject(Object.assign(err, { stdout, stderr }));
       } else {

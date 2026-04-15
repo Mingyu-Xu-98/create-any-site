@@ -4,17 +4,22 @@ import { internalError } from "@/lib/api-errors";
 import { sqlite } from "@/lib/db";
 import { db } from "@/lib/db";
 import { sites } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
-import { syncDraftPreview } from "@/lib/build-runtime";
-import { siteBuildDir, resolveSiteDir } from "@/lib/site-paths";
+import { eq, and } from "drizzle-orm";
+import { syncDraftPreview, rewriteExportAssetPaths } from "@/lib/build-runtime";
+import { resolveSiteDir } from "@/lib/site-paths";
+import { runCodeGuardrails, runAdvancedModeGuardrails } from "@/lib/code-guardrails";
 import { logger } from "@/lib/logger";
 import fs from "fs/promises";
+import path from "path";
+import { exec } from "child_process";
+
+const ALLOWED_DEPENDENCIES = new Set(["next", "react", "react-dom"]);
 
 /**
- * POST /api/edit/[sessionId]/undo — Undo an edit by reverting to previous build
+ * POST /api/edit/[sessionId]/undo — Undo an edit by restoring the pre-edit fileMap
  *
- * Uses the immutable build system: each edit's buildIdBefore is preserved,
- * so we can atomically swap the symlink back.
+ * Reads the `file_map_before` snapshot from the edit session, restores it
+ * to the site's fileMap, syncs files to disk, rebuilds, and updates the preview.
  */
 export async function POST(
   _req: NextRequest,
@@ -26,14 +31,15 @@ export async function POST(
   const { sessionId } = await params;
 
   try {
-    // Get the edit session
+    // Get the edit session with fileMap snapshot
     const session = sqlite.prepare(
-      `SELECT id, site_id, user_id, build_id_before, status
+      `SELECT id, site_id, user_id, file_map_before, build_id_before, status
        FROM edit_sessions WHERE id = ? AND user_id = ?`
     ).get(sessionId, userId) as {
       id: string;
       site_id: string;
       user_id: string;
+      file_map_before: string | null;
       build_id_before: string | null;
       status: string;
     } | undefined;
@@ -42,52 +48,102 @@ export async function POST(
       return NextResponse.json({ error: "Edit session not found" }, { status: 404 });
     }
 
-    if (!session.build_id_before) {
-      return NextResponse.json({ error: "No previous build to revert to" }, { status: 400 });
+    if (!session.file_map_before) {
+      return NextResponse.json({ error: "No snapshot available for undo (older edit session)" }, { status: 400 });
     }
 
-    // Check the previous build directory exists
-    const prevBuildDir = siteBuildDir(session.site_id, session.build_id_before);
+    // Parse the pre-edit fileMap
+    let restoredFileMap: Record<string, string>;
     try {
-      await fs.access(prevBuildDir);
+      restoredFileMap = JSON.parse(session.file_map_before);
     } catch {
-      return NextResponse.json({ error: "Previous build directory no longer exists" }, { status: 410 });
+      return NextResponse.json({ error: "Corrupted fileMap snapshot" }, { status: 500 });
     }
 
-    // Swap symlink back to previous build
-    const { siteCurrentLink } = await import("@/lib/site-paths");
-    const link = siteCurrentLink(session.site_id);
-    const target = `builds/${session.build_id_before}`;
+    const siteDir = await resolveSiteDir(session.site_id);
 
-    try {
-      await fs.unlink(link);
-    } catch {
-      // symlink may not exist in legacy layout
+    // Run guardrails on restored fileMap (safety net)
+    const previewBaseUrl = (process.env.PREVIEW_BASE_URL?.trim() || "http://localhost:3002").replace(/\/+$/, "");
+    const guardedResult = runCodeGuardrails({ ...restoredFileMap }, session.site_id, previewBaseUrl, logger);
+    const guardedFiles = guardedResult.files;
+    runAdvancedModeGuardrails(guardedFiles, ALLOWED_DEPENDENCIES, logger);
+
+    // Sync ALL files to disk (ensures no stale files from failed edits)
+    for (const [filePath, content] of Object.entries(guardedFiles)) {
+      const fullPath = path.join(siteDir, filePath);
+      await fs.mkdir(path.dirname(fullPath), { recursive: true });
+      await fs.writeFile(fullPath, content, "utf-8");
     }
-    await fs.symlink(target, link);
 
-    // Update site's draftBuildId
+    // Rebuild
+    await runUndoBuild(siteDir);
+
+    // Rewrite asset paths for preview
+    const PREVIEW_PUBLISH_DIR = process.env.PREVIEW_PUBLISH_DIR?.trim() || "";
+    if (PREVIEW_PUBLISH_DIR) {
+      await syncDraftPreview(session.site_id, siteDir);
+    } else {
+      await rewriteExportAssetPaths(path.join(siteDir, "out"), "", `/drafts/${session.site_id}`);
+    }
+
+    // Update site's fileMap in DB
     await db.update(sites)
       .set({
+        fileMap: JSON.stringify(guardedFiles),
+        buildStatus: "ready",
+        buildError: null,
         draftBuildId: session.build_id_before,
         updatedAt: new Date().toISOString(),
       })
-      .where(eq(sites.id, session.site_id));
+      .where(and(eq(sites.id, session.site_id), eq(sites.userId, userId)));
 
-    // Sync preview
-    const PREVIEW_PUBLISH_DIR = process.env.PREVIEW_PUBLISH_DIR?.trim() || "";
-    if (PREVIEW_PUBLISH_DIR) {
-      const siteDir = await resolveSiteDir(session.site_id);
-      await syncDraftPreview(session.site_id, siteDir);
-    }
+    // Mark the undone session
+    sqlite.prepare(
+      `UPDATE edit_sessions SET status = 'undone' WHERE id = ?`
+    ).run(sessionId);
 
-    logger.info("edit-undo", `Reverted site ${session.site_id} to build ${session.build_id_before} (session ${sessionId})`);
+    logger.info("edit-undo", `Reverted site ${session.site_id} to pre-edit state (session ${sessionId})`);
 
     return NextResponse.json({
       success: true,
-      revertedToBuildId: session.build_id_before,
+      message: "已成功撤销编辑",
     });
   } catch (err) {
+    logger.error("edit-undo", `Undo failed for session ${sessionId}: ${(err as Error).message}`);
     return internalError(err, "api-edit-undo");
   }
+}
+
+/** Run next build for undo — same config as edit-runtime's runNextBuild */
+function runUndoBuild(siteDir: string): Promise<void> {
+  const configContent = `const nextConfig = {
+  output: "export",
+  images: { unoptimized: true },
+};
+export default nextConfig;`;
+
+  return new Promise(async (resolve, reject) => {
+    try {
+      for (const old of ["next.config.js", "next.config.ts", "next.config.cjs"]) {
+        try { await fs.unlink(path.join(siteDir, old)); } catch {}
+      }
+      await fs.writeFile(path.join(siteDir, "next.config.mjs"), configContent, "utf-8");
+    } catch (e) {
+      reject(e);
+      return;
+    }
+
+    const nextBin = path.join(siteDir, "node_modules", "next", "dist", "bin", "next");
+    const env = { ...process.env, NODE_ENV: "production" as const };
+    delete (env as Record<string, unknown>).TURBOPACK;
+
+    exec(`"${nextBin}" build --webpack`, {
+      cwd: siteDir,
+      env,
+      timeout: 180_000,
+    }, (err: Error | null, _stdout: string, _stderr: string) => {
+      if (err) reject(err);
+      else resolve();
+    });
+  });
 }

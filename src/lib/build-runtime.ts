@@ -320,6 +320,12 @@ export async function syncDraftPreview(siteId: string, siteDir: string): Promise
 
 export async function publishDraftPreview(siteId: string): Promise<string> {
   if (!PREVIEW_PUBLISH_DIR) {
+    // Local mode: copy build output to published/ directory, rewrite paths
+    const outDir = path.join(siteCurrentLink(siteId), "out");
+    const publishedDir = path.join(siteRoot(siteId), "published");
+    await copyDirectory(outDir, publishedDir);
+    // Rewrite from /drafts/{siteId} prefix to /{siteId} prefix
+    await rewriteExportAssetPaths(publishedDir, `/drafts/${siteId}`, `/${siteId}`);
     return getLocalPreviewUrl(siteId);
   }
   const draftDir = getDraftPublishDir(siteId);
@@ -358,7 +364,11 @@ export async function publishDraftPreview(siteId: string): Promise<string> {
 }
 
 export async function unpublishPreview(siteId: string): Promise<void> {
-  if (!PREVIEW_PUBLISH_DIR) return;
+  if (!PREVIEW_PUBLISH_DIR) {
+    // Local mode: remove the published/ directory
+    await fs.rm(path.join(siteRoot(siteId), "published"), { recursive: true, force: true });
+    return;
+  }
   await fs.rm(getPublishedPublishDir(siteId), { recursive: true, force: true });
 }
 
@@ -770,6 +780,18 @@ const MIME_TYPES: Record<string, string> = {
   ".txt": "text/plain",
 };
 
+/**
+ * Resolve the directory to serve for published content.
+ * Prefers `siteRoot/{siteId}/published/` if it exists;
+ * falls back to `siteCurrentLink/{siteId}/out/` for backward compatibility.
+ */
+async function resolvePublishedDir(siteId: string): Promise<string> {
+  const published = path.join(siteRoot(siteId), "published");
+  try { await fs.access(published); return published; } catch {}
+  // Backward compat: old sites without a published/ directory
+  return path.join(siteCurrentLink(siteId), "out");
+}
+
 export async function ensureStaticServer(): Promise<void> {
   if (staticServer) return;
 
@@ -783,7 +805,8 @@ export async function ensureStaticServer(): Promise<void> {
           return;
         }
 
-        const healthMatch = rawUrl.match(/^\/([^/]+)\/__health$/);
+        // Health checks: /{siteId}/__health or /drafts/{siteId}/__health
+        const healthMatch = rawUrl.match(/^\/(?:drafts\/)?([^/]+)\/__health$/);
         if (healthMatch) {
           const siteId = healthMatch[1];
           const indexFile = path.join(siteCurrentLink(siteId), "out", "index.html");
@@ -801,12 +824,27 @@ export async function ensureStaticServer(): Promise<void> {
         const parts = rawUrl.split("/").filter(Boolean);
         if (parts.length === 0) { res.writeHead(404); res.end("Not Found"); return; }
 
-        const siteId = parts[0];
-        let filePath = "/" + parts.slice(1).join("/");
+        // Route: /drafts/{siteId}/... → draft preview (from build output)
+        // Route: /{siteId}/...        → published site (from published/ dir)
+        let isDraft = false;
+        let siteId: string;
+        let filePath: string;
+
+        if (parts[0] === "drafts" && parts.length >= 2) {
+          isDraft = true;
+          siteId = parts[1];
+          filePath = "/" + parts.slice(2).join("/");
+        } else {
+          siteId = parts[0];
+          filePath = "/" + parts.slice(1).join("/");
+        }
         if (filePath === "/") filePath = "/index.html";
         if (!path.extname(filePath)) filePath += ".html";
 
-        const outDir = path.join(siteCurrentLink(siteId), "out");
+        // Draft: serve from build output; Published: serve from published/ (fallback to out/ for compat)
+        const outDir = isDraft
+          ? path.join(siteCurrentLink(siteId), "out")
+          : await resolvePublishedDir(siteId);
         const fullPath = path.join(outDir, filePath);
         if (!fullPath.startsWith(outDir)) { res.writeHead(403); res.end("Forbidden"); return; }
 
@@ -822,10 +860,18 @@ export async function ensureStaticServer(): Promise<void> {
         try {
           const parts = decodeURIComponent((req.url || "/").split("?")[0]).split("/").filter(Boolean);
           if (parts.length > 0) {
-            const index = await fs.readFile(path.join(siteCurrentLink(parts[0]), "out", "index.html"));
-            res.writeHead(200, { "Content-Type": "text/html", "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store, must-revalidate" });
-            res.end(index);
-            return;
+            // Fallback: serve index.html (for SPA routes)
+            const isDraft = parts[0] === "drafts";
+            const siteId = isDraft ? parts[1] : parts[0];
+            if (siteId) {
+              const dir = isDraft
+                ? path.join(siteCurrentLink(siteId), "out")
+                : await resolvePublishedDir(siteId);
+              const index = await fs.readFile(path.join(dir, "index.html"));
+              res.writeHead(200, { "Content-Type": "text/html", "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store, must-revalidate" });
+              res.end(index);
+              return;
+            }
           }
         } catch {}
         res.writeHead(404);
@@ -1759,7 +1805,13 @@ export async function runSiteBuild(input: RunSiteBuildInput): Promise<RunSiteBui
   }
 
   if (!PREVIEW_PUBLISH_DIR) {
-    await rewriteExportAssetPaths(path.join(siteDir, "out"), "", `/${siteId}`);
+    // Draft: rewrite asset paths for /drafts/{siteId} prefix
+    await rewriteExportAssetPaths(path.join(siteDir, "out"), "", `/drafts/${siteId}`);
+    // Auto-publish: first build is automatically published
+    const publishedDir = path.join(siteRoot(siteId), "published");
+    await copyDirectory(path.join(siteDir, "out"), publishedDir);
+    // Published copy uses /{siteId} prefix (rewrite from /drafts/{siteId} to /{siteId})
+    await rewriteExportAssetPaths(publishedDir, `/drafts/${siteId}`, `/${siteId}`);
   }
 
   await progress("📋 检查构建产物...");
@@ -1780,7 +1832,7 @@ export async function runSiteBuild(input: RunSiteBuildInput): Promise<RunSiteBui
 
   const url = PREVIEW_PUBLISH_DIR
     ? getDraftPreviewUrl(siteId, previewBaseUrl)
-    : `${previewBaseUrl.replace(/\/+$/, "")}/${siteId}`;
+    : `${previewBaseUrl.replace(/\/+$/, "")}/drafts/${siteId}`;
   const verification = await runVerification(siteDir, files, spec || undefined);
   const previewReachable = await probePreviewUrl(url);
 
