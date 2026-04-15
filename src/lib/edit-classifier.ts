@@ -76,26 +76,32 @@ export function classifyEditIntent(instruction: string): EditIntent {
 }
 
 /**
+ * Core files that EVERY edit intent receives.
+ *
+ * Rationale: scoping files by intent (e.g. "style" → only CSS) saved a few
+ * thousand tokens per request but caused frequent cross-file build failures.
+ * A "component" edit that adds `t.chatbot` breaks if translations.ts is
+ * missing from context; a "content" edit that changes section order may need
+ * page.tsx.  The extra ~10K tokens is much cheaper than retry iterations.
+ */
+const CORE_FILES = [
+  "src/app/page.tsx",
+  "src/app/globals.css",
+  "src/i18n/translations.ts",
+  "src/app/layout.tsx",
+];
+
+/**
  * Determine which files the Edit Agent needs based on intent.
- * Returns a list of file keys to extract from the site's fileMap.
+ * Always includes all core files; intent guides which files the Agent
+ * focuses on (via the system prompt), not which files it can see.
  */
 export function getFileScopeForIntent(intent: EditIntent): string[] {
   switch (intent) {
-    case "style":
-      return ["src/app/globals.css"];
-    case "content":
-      return ["src/i18n/translations.ts"];
-    case "component":
-      return ["src/app/page.tsx", "src/app/globals.css"];
-    case "structure":
-      return ["src/app/page.tsx", "src/app/layout.tsx", "src/app/globals.css"];
     case "fix":
-      return [
-        "src/app/page.tsx",
-        "src/app/globals.css",
-        "src/app/layout.tsx",
-        "src/i18n/translations.ts",
-        "src/components/LanguageProvider.tsx",
-      ];
+      // Fix gets everything including LanguageProvider for maximum context
+      return [...CORE_FILES, "src/components/LanguageProvider.tsx"];
+    default:
+      return CORE_FILES;
   }
 }

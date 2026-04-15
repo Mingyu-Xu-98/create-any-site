@@ -892,13 +892,37 @@ function fixTranslationKeySafety(
     usedKeys.add(m[1]);
   }
 
-  // Find keys NOT in the known set
-  const missingKeys: string[] = [];
-  for (const key of usedKeys) {
-    if (!KNOWN_TRANSLATION_KEYS.has(key)) {
-      missingKeys.push(key);
+  // Check which known keys actually exist in translations.ts
+  const translationsContent = files["src/i18n/translations.ts"] || "";
+  const actualTranslationKeys = new Set<string>();
+  if (translationsContent) {
+    // Parse top-level keys from the zh/en objects (indented properties like `  hero:` or `    hero:`)
+    for (const m of translationsContent.matchAll(/^\s{2,}(\w+)\s*:/gm)) {
+      actualTranslationKeys.add(m[1]);
     }
   }
+
+  // Separate into two categories:
+  // (a) Known keys missing from translations.ts — fix by adding stub entries to translations.ts
+  // (b) Unknown keys — fallback to _guardrail_ safe defaults in page.tsx
+  const knownButMissing: string[] = [];
+  const unknownKeys: string[] = [];
+  for (const key of usedKeys) {
+    if (!KNOWN_TRANSLATION_KEYS.has(key)) {
+      unknownKeys.push(key);
+    } else if (translationsContent && !actualTranslationKeys.has(key)) {
+      knownButMissing.push(key);
+    }
+  }
+
+  // Fix (a): Add missing known keys directly to translations.ts (proper fix, no workaround)
+  if (knownButMissing.length > 0 && translationsContent) {
+    files["src/i18n/translations.ts"] = addMissingTranslationStubs(translationsContent, knownButMissing);
+    fixes.push(`translations.ts: added stub entries for missing keys: ${knownButMissing.join(", ")}`);
+  }
+
+  // For (b): unknown keys still need _guardrail_ defaults in page.tsx
+  const missingKeys = unknownKeys;
 
   if (missingKeys.length === 0) {
     // Still write back the cleaned version (reverted duplicates)
@@ -936,4 +960,67 @@ function fixTranslationKeySafety(
 
   files["src/app/page.tsx"] = patched;
   fixes.push(`page.tsx: added safe defaults for unknown translation keys: ${missingKeys.join(", ")}`);
+}
+
+/**
+ * Stub translation entries for known keys that are missing from translations.ts.
+ * Inserts minimal valid entries into both zh and en objects so TypeScript is happy.
+ */
+const TRANSLATION_STUBS: Record<string, { zh: string; en: string }> = {
+  nav: { zh: `{ home: "首页", about: "关于", projects: "项目", contact: "联系" }`, en: `{ home: "Home", about: "About", projects: "Projects", contact: "Contact" }` },
+  hero: { zh: `{ title: "", subtitle: "", cta: "了解更多" }`, en: `{ title: "", subtitle: "", cta: "Learn More" }` },
+  about: { zh: `{ title: "关于我", desc: "" }`, en: `{ title: "About", desc: "" }` },
+  projects: { zh: `[]`, en: `[]` },
+  experience: { zh: `[]`, en: `[]` },
+  skills: { zh: `{ title: "技能", items: [] }`, en: `{ title: "Skills", items: [] }` },
+  education: { zh: `[]`, en: `[]` },
+  testimonials: { zh: `[]`, en: `[]` },
+  awards: { zh: `[]`, en: `[]` },
+  publications: { zh: `[]`, en: `[]` },
+  media: { zh: `[]`, en: `[]` },
+  demos: { zh: `[]`, en: `[]` },
+  contact: { zh: `{ title: "联系方式", email: "", desc: "" }`, en: `{ title: "Contact", email: "", desc: "" }` },
+  footer: { zh: `{ copyright: "" }`, en: `{ copyright: "" }` },
+  chatbot: {
+    zh: `{ title: "AI 助手", subtitle: "有什么想了解的？", welcome: "你好！", placeholder: "输入消息...", send: "发送", tooltip: "聊天", suggestions: [] }`,
+    en: `{ title: "AI Assistant", subtitle: "Ask me anything", welcome: "Hello!", placeholder: "Type a message...", send: "Send", tooltip: "Chat", suggestions: [] }`,
+  },
+  share: { zh: `{ title: "分享", desc: "" }`, en: `{ title: "Share", desc: "" }` },
+  availableSections: { zh: `[]`, en: `[]` },
+  posts: { zh: `[]`, en: `[]` },
+  links: { zh: `[]`, en: `[]` },
+};
+
+function addMissingTranslationStubs(content: string, missingKeys: string[]): string {
+  let result = content;
+  for (const key of missingKeys) {
+    const stub = TRANSLATION_STUBS[key];
+    if (!stub) continue;
+
+    // Insert before the closing `}` of each language object (zh and en).
+    // Strategy: find `  },\n  en:` boundary and `};` at the end.
+    // Simpler: insert `  key: ...,` before the last property in each lang block.
+    // Most reliable: regex for the closing brace of zh/en objects.
+
+    // Add to zh block: find `  },\n  en:` or `  },\n};`
+    // We'll use a simpler approach: find all occurrences of the key already
+    // (we know it's missing), and insert at a consistent location.
+
+    // Insert at end of zh block (before `  },` that precedes `en:`)
+    const zhInsert = `    ${key}: ${stub.zh},\n`;
+    const enInsert = `    ${key}: ${stub.en},\n`;
+
+    // Find the zh→en boundary: `  },\n  en:`
+    const zhEnBoundary = result.match(/(\n\s*\},\s*\n\s*en\s*:\s*\{)/);
+    if (zhEnBoundary && zhEnBoundary.index !== undefined) {
+      result = result.slice(0, zhEnBoundary.index) + "\n" + zhInsert + result.slice(zhEnBoundary.index);
+    }
+
+    // Find the en closing: last `  },\n};` or `  }\n};`
+    const enClose = result.match(/(\n\s*\},?\s*\n\};?\s*$)/);
+    if (enClose && enClose.index !== undefined) {
+      result = result.slice(0, enClose.index) + "\n" + enInsert + result.slice(enClose.index);
+    }
+  }
+  return result;
 }

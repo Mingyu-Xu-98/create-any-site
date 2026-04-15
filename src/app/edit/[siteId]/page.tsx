@@ -4,6 +4,18 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
 
+// ---- Helpers ----
+
+/** Safely parse JSON from a fetch Response. Returns { error: "..." } on failure. */
+async function safeJson(res: Response): Promise<any> {
+  try {
+    const text = await res.text();
+    return text ? JSON.parse(text) : { error: `HTTP ${res.status} (empty response)` };
+  } catch {
+    return { error: `HTTP ${res.status} (invalid JSON)` };
+  }
+}
+
 // ---- Types ----
 
 interface EditSession {
@@ -107,17 +119,33 @@ export default function EditWorkspacePage() {
     loadHistory();
   }, [loadHistory]);
 
+  // Edit progress phase for centered overlay display
+  const [editPhase, setEditPhase] = useState<string | null>(null);
+  const [editElapsed, setEditElapsed] = useState(0);
+  const elapsedRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   // Submit edit
   const handleSubmit = async (text?: string) => {
     const instr = text || instruction.trim();
     if (!instr || isEditing) return;
 
     setIsEditing(true);
-    setEditStatus("分析编辑意图...");
+    setEditPhase("分析编辑意图...");
+    setEditElapsed(0);
+    setEditStatus(null);
 
-    // Show progress updates during the LLM call
-    const progressTimer = setTimeout(() => setEditStatus("AI 正在修改代码..."), 3000);
-    const progressTimer2 = setTimeout(() => setEditStatus("正在构建并验证修改..."), 15000);
+    // Elapsed timer (ticks every second)
+    const startTime = Date.now();
+    elapsedRef.current = setInterval(() => {
+      setEditElapsed(Math.floor((Date.now() - startTime) / 1000));
+    }, 1000);
+
+    // Progress phase updates
+    const phaseTimers = [
+      setTimeout(() => setEditPhase("AI 正在分析代码并生成修改方案..."), 3000),
+      setTimeout(() => setEditPhase("正在应用修改并构建验证..."), 20000),
+      setTimeout(() => setEditPhase("构建验证中，请稍候..."), 40000),
+    ];
 
     try {
       const res = await fetch("/api/edit", {
@@ -126,15 +154,23 @@ export default function EditWorkspacePage() {
         body: JSON.stringify({ siteId, instruction: instr }),
       });
 
-      const result = await res.json();
+      const result = await safeJson(res);
 
       // Handle API-level errors (500, 400, etc.)
       if (!res.ok || result.error) {
         setEditStatus(`编辑失败: ${result.error || `HTTP ${res.status}`}`);
       } else if (result.buildSuccess) {
-        setEditStatus("编辑成功！点击右上角「更新发布」使改动生效");
+        setEditStatus("✅ 编辑成功！预览已更新");
         setPreviewKey((k) => k + 1); // Refresh preview
-        setSite((prev) => prev ? { ...prev, buildStatus: "ready" } : prev);
+        // Refetch site to get updated previewUrl
+        fetch(`/api/sites/${siteId}`)
+          .then((r) => r.json())
+          .then((data) => {
+            if (data.site) {
+              setSite((prev) => prev ? { ...prev, ...data.site } : prev);
+            }
+          })
+          .catch(() => {});
         setInstruction("");
       } else {
         setEditStatus(`编辑失败: ${result.buildError?.slice(0, 200) || result.summary || "未知错误"}`);
@@ -145,10 +181,12 @@ export default function EditWorkspacePage() {
     } catch (err) {
       setEditStatus(`请求失败: ${err instanceof Error ? err.message : "未知错误"}`);
     } finally {
-      clearTimeout(progressTimer);
-      clearTimeout(progressTimer2);
+      phaseTimers.forEach(clearTimeout);
+      if (elapsedRef.current) clearInterval(elapsedRef.current);
       setIsEditing(false);
-      setTimeout(() => setEditStatus(null), 5000);
+      setEditPhase(null);
+      setEditElapsed(0);
+      setTimeout(() => setEditStatus(null), 6000);
     }
   };
 
@@ -156,7 +194,7 @@ export default function EditWorkspacePage() {
   const handleUndo = async (sessionId: string) => {
     try {
       const res = await fetch(`/api/edit/${sessionId}/undo`, { method: "POST" });
-      const result = await res.json();
+      const result = await safeJson(res);
       if (result.success) {
         setEditStatus("已撤销");
         setPreviewKey((k) => k + 1);
@@ -176,11 +214,11 @@ export default function EditWorkspacePage() {
     setPublishing(true);
     try {
       const res = await fetch(`/api/sites/${siteId}`, {
-        method: "PATCH",
+        method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "publish" }),
       });
-      const result = await res.json();
+      const result = await safeJson(res);
       if (result.site) {
         setSite((prev) =>
           prev
@@ -360,7 +398,7 @@ export default function EditWorkspacePage() {
                         ↩ 撤销
                       </button>
                     )}
-                    {session.buildError && (
+                    {session.buildError && !session.buildSuccess && (
                       <p className="mt-1 text-[10px] text-red-500 line-clamp-3">
                         {session.buildError}
                       </p>
@@ -373,10 +411,10 @@ export default function EditWorkspacePage() {
         </div>
 
         {/* Right panel — preview */}
-        <div className="flex-1 flex flex-col min-w-0">
-          {/* Status bar */}
-          {editStatus && (
-            <div className={`px-4 py-2 text-xs font-medium shrink-0 ${
+        <div className="flex-1 flex flex-col min-w-0 relative">
+          {/* Status bar (non-editing result messages) */}
+          {editStatus && !isEditing && (
+            <div className={`px-4 py-2 text-xs font-medium shrink-0 z-20 ${
               editStatus.includes("成功") || editStatus.includes("撤销")
                 ? "bg-green-50 text-green-700"
                 : editStatus.includes("失败")
@@ -398,6 +436,34 @@ export default function EditWorkspacePage() {
           ) : (
             <div className="flex-1 flex items-center justify-center text-gray-400 text-sm">
               暂无预览 — 请先构建站点
+            </div>
+          )}
+
+          {/* Editing overlay — covers preview, shows centered progress */}
+          {isEditing && (
+            <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/70 backdrop-blur-sm transition-opacity duration-300">
+              <div className="flex flex-col items-center gap-4 p-8 rounded-2xl bg-white shadow-lg border border-gray-100 max-w-sm">
+                {/* Spinner */}
+                <div className="relative w-12 h-12">
+                  <div className="absolute inset-0 rounded-full border-4 border-gray-200" />
+                  <div className="absolute inset-0 rounded-full border-4 border-blue-500 border-t-transparent animate-spin" />
+                </div>
+                {/* Phase text */}
+                <p className="text-sm font-medium text-gray-800 text-center">
+                  {editPhase || "处理中..."}
+                </p>
+                {/* Elapsed time */}
+                <p className="text-xs text-gray-400">
+                  已用时 {editElapsed < 60
+                    ? `${editElapsed} 秒`
+                    : `${Math.floor(editElapsed / 60)}分${editElapsed % 60}秒`
+                  }
+                </p>
+                {/* Progress bar (indeterminate) */}
+                <div className="w-48 h-1 bg-gray-100 rounded-full overflow-hidden">
+                  <div className="h-full bg-blue-500 rounded-full animate-pulse" style={{ width: "60%" }} />
+                </div>
+              </div>
             </div>
           )}
         </div>

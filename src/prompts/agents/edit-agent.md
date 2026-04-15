@@ -42,11 +42,13 @@ After the code blocks, write a brief summary of what you changed and why.
 - Only modify translations.ts
 - Keep the exact same object structure
 - Update both zh and en translations
+- When changing person/voice (e.g., third person → first person), update ALL text consistently across zh and en
 
 ### Component edits
 - Modify page.tsx (and globals.css if styling changes needed)
 - Preserve the overall page structure
 - Keep all imports and hooks intact
+- **CRITICAL**: If you add code that accesses `t.xxx` (translation keys), you MUST also update translations.ts to include those keys in BOTH zh and en objects. Missing translation keys cause TypeScript build errors.
 
 ### Structure edits
 - May modify page.tsx, layout.tsx, and globals.css
@@ -64,6 +66,27 @@ ERROR_HINTS_PLACEHOLDER
 
 ## Available CSS Variables
 --color-bg, --color-text, --color-accent, --color-text-muted, --color-bg-card, --color-bg-card-solid, --color-line, --color-accent-soft, --color-green
+
+## Knowledge Base Content
+If the user prompt includes a "Knowledge Base Content" section, use that data to update the page:
+- Replace placeholder text with real data from the KB
+- Use actual project names, descriptions, and details
+- Maintain the existing component structure — only update content
+
+## User Images
+If the user prompt includes "Available User Images", reference those images in the code:
+- Use Next.js Image component: `<Image src="/images/{filename}" alt="..." width={...} height={...} unoptimized />`
+- Images tagged [avatar] should be used as profile/avatar images
+- Images tagged [hero-bg] should be used as hero section background
+- Images tagged [project-cover] should be used as project card covers
+- Always add the `unoptimized` prop for user-uploaded images
+
+## Image Generation
+When the user asks to regenerate/generate images (avatar, background, etc.):
+- The system will automatically call the AI image generation API after your code changes
+- Your job is to ensure the code REFERENCES the correct image paths: `/images/avatar.png`, `/images/hero-bg.png`
+- Do NOT try to generate images inline via SVG — the system handles actual image file generation
+- Make sure `<Image>` components have correct src paths for the images that will be generated
 
 ## Pre-generated Components (do NOT rewrite these)
 - `@/components/LanguageProvider` — useLanguage() hook for t.* access

@@ -82,6 +82,14 @@ export default function KnowledgeBaseDetail() {
     return () => clearTimeout(timer);
   }, [uploadQueue]);
 
+  // Auto-poll when any file is still processing (PDF with no content yet)
+  useEffect(() => {
+    const hasProcessing = files.some(f => f.type === "pdf" && f.contentLength === 0);
+    if (!hasProcessing) return;
+    const interval = setInterval(() => { loadData(); }, 8000);
+    return () => clearInterval(interval);
+  }, [files, loadData]);
+
   const uploadFiles = async (fileList: File[]) => {
     if (fileList.length === 0) return;
     const items = fileList.map(f => ({ id: Math.random().toString(36).slice(2) + Date.now().toString(36), name: f.name, status: "waiting" as const }));
@@ -328,7 +336,16 @@ export default function KnowledgeBaseDetail() {
                                   <span className="text-sm">{typeIcon}</span>
                                   <h3 className="text-sm font-medium text-gray-800 truncate">{f.name}</h3>
                                   <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-400 shrink-0">{typeLabel}</span>
-                                  <span className="text-[10px] text-gray-400 shrink-0">{f.contentLength.toLocaleString()} {zh ? "字" : "chars"}</span>
+                                  {f.type === "pdf" && f.contentLength === 0 ? (
+                                    <span className="text-[10px] text-amber-500 shrink-0 flex items-center gap-1">
+                                      <span className="inline-block w-3 h-3 border-2 border-amber-300 border-t-amber-500 rounded-full animate-spin" />
+                                      {zh ? "解析中..." : "Parsing..."}
+                                    </span>
+                                  ) : f.contentLength < 0 ? (
+                                    <span className="text-[10px] text-red-400 shrink-0">{zh ? "解析失败" : "Parse failed"}</span>
+                                  ) : (
+                                    <span className="text-[10px] text-gray-400 shrink-0">{f.contentLength.toLocaleString()} {zh ? "字" : "chars"}</span>
+                                  )}
                                 </div>
                                 <p className="text-xs text-gray-500 line-clamp-2">{f.description}</p>
                                 {kw.length > 0 && (
