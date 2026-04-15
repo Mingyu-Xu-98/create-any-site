@@ -412,8 +412,8 @@ function getRuntimeBasePackageJson(): string {
 
 async function installDependencies(cwd: string): Promise<void> {
   await new Promise<void>((resolve, reject) => {
-    exec("npm install --prefer-offline --package-lock=false", { cwd, timeout: 120_000 }, (err) => {
-      if (err) reject(err);
+    exec("npm install --prefer-offline --package-lock=false --registry=https://registry.npmmirror.com", { cwd, timeout: 180_000 }, (err, _stdout, stderr) => {
+      if (err) reject(new Error(`npm install failed: ${stderr || err.message}`));
       else resolve();
     });
   });

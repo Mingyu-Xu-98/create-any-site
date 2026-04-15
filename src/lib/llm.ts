@@ -77,6 +77,7 @@ interface ProviderConfig {
   baseUrl: string;
   model: string;
   style: "anthropic" | "openai";  // API format
+  wireApi?: "chat" | "responses";  // openai wire format: chat/completions (default) or responses
   extraHeaders?: Record<string, string>;
 }
 
@@ -98,12 +99,14 @@ function buildProviderConfig(name: string): ProviderConfig | null {
   const defaults = DEFAULTS[name];
   if (!defaults) return null;
 
+  const wireApiEnv = env(`${prefix}_WIRE_API`);
   const config: ProviderConfig = {
     name,
     apiKey,
     baseUrl: env(`${prefix}_BASE_URL`, defaults.baseUrl).replace(/\/+$/, ""),
     model: env(`${prefix}_MODEL`, defaults.model),
     style: defaults.style,
+    ...(wireApiEnv === "responses" ? { wireApi: "responses" } : {}),
   };
 
   // OpenRouter needs extra headers
@@ -239,8 +242,78 @@ async function callOpenAICompatible(config: ProviderConfig, input: ChatCompletio
   }
 }
 
+async function callOpenAIResponses(config: ProviderConfig, input: ChatCompletionInput, messages: ChatMessage[]): Promise<ChatCompletionResult> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${config.apiKey}`,
+    ...config.extraHeaders,
+  };
+
+  // Convert messages to Responses API input format
+  const systemMsg = messages.find(m => m.role === "system");
+  const nonSystemMsgs = messages.filter(m => m.role !== "system");
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);
+  try {
+    const response = await fetch(`${config.baseUrl}/responses`, {
+      method: "POST",
+      headers,
+      signal: controller.signal,
+      body: JSON.stringify({
+        model: config.model,
+        instructions: systemMsg?.content,
+        input: nonSystemMsgs.map(m => ({ role: m.role, content: m.content })),
+        temperature: input.temperature ?? 0.35,
+        max_output_tokens: input.maxTokens ?? 8192,
+      }),
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`${input.label} error (${config.name}/${config.model}): ${response.status} ${text}`);
+    }
+
+    const contentType = response.headers.get("content-type") ?? "";
+    if (contentType.includes("text/event-stream")) {
+      // SSE streaming response — accumulate text deltas
+      const text = await response.text();
+      let content = "";
+      let usage: unknown;
+      for (const line of text.split("\n")) {
+        if (!line.startsWith("data: ")) continue;
+        const data = line.slice(6).trim();
+        if (data === "[DONE]") break;
+        try {
+          const evt = JSON.parse(data);
+          // response.output_text.delta
+          if (evt.type === "response.output_text.delta") content += evt.delta ?? "";
+          // response.completed carries final usage
+          if (evt.type === "response.completed") usage = evt.response?.usage;
+        } catch { /* skip malformed lines */ }
+      }
+      return { content, usage, provider: config.name, model: config.model };
+    }
+
+    const result = await response.json();
+    // Non-streaming Responses API: output is array of content items
+    const content = result.output
+      ?.flatMap((item: { type: string; content?: Array<{ type: string; text?: string }> }) =>
+        item.type === "message" ? (item.content ?? []) : []
+      )
+      .filter((c: { type: string }) => c.type === "output_text")
+      .map((c: { text?: string }) => c.text ?? "")
+      .join("") ?? "";
+    return { content, usage: result.usage, provider: config.name, model: config.model };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+
 async function callProvider(config: ProviderConfig, input: ChatCompletionInput, messages: ChatMessage[]): Promise<ChatCompletionResult> {
   if (config.style === "anthropic") return callAnthropic(config, input, messages);
+  if (config.wireApi === "responses") return callOpenAIResponses(config, input, messages);
   return callOpenAICompatible(config, input, messages);
 }
 
