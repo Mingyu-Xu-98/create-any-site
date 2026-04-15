@@ -46,6 +46,8 @@ RESPONSE=$(curl -s -X POST "$BUILD_API" \
   -F "appName=${APP_NAME}" \
   -F "port=${PORT}" \
   -F "description=AI-powered portfolio site generator" \
+  -F "volumes_json=[\"data:/app/data\",\"sites-data:/app/sites-data\"]" \
+  -F "volumes=[\"/app/data\",\"/app/sites-data\"]" \
   -F "envs={\"AUTH_SECRET\":\"${NEXTAUTH_SECRET}\",\"NEXTAUTH_SECRET\":\"${NEXTAUTH_SECRET}\",\"NEXTAUTH_URL\":\"${NEXTAUTH_URL}\",\"OPENROUTER_API_KEY\":\"${OPENROUTER_API_KEY}\",\"OPENROUTER_BASE_URL\":\"${OPENROUTER_BASE_URL}\",\"OPENROUTER_MODEL\":\"${OPENROUTER_MODEL}\",\"OPENROUTER_WIRE_API\":\"${OPENROUTER_WIRE_API}\",\"LLM_PROVIDER_CHAIN\":\"${LLM_PROVIDER_CHAIN}\",\"PREVIEW_BASE_URL\":\"${PREVIEW_BASE_URL}\",\"BUILD_INLINE_JOBS\":\"${BUILD_INLINE_JOBS}\",\"BUILD_WORKER_POLL_MS\":\"${BUILD_WORKER_POLL_MS}\",\"BUILD_MAX_CONCURRENCY\":\"${BUILD_MAX_CONCURRENCY}\",\"PDF_PARSE_URL\":\"${PDF_PARSE_URL}\"}")
 
 DEPLOY_ID=$(echo "$RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('deployId',''))" 2>/dev/null)
