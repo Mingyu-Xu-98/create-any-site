@@ -1514,7 +1514,10 @@ export async function runSiteBuild(input: RunSiteBuildInput): Promise<RunSiteBui
   else {
     const { generateBaseFiles } = await import("./shared-components");
     files = generateBaseFiles({ siteName: data.name, chatbotContext: data.chatbotContext, theme: selections.theme || undefined });
-    logger.warn("generate", `[${requestId}] No compositionPlan found — generated base files only`);
+    files["src/i18n/translations.ts"] = generateAdvancedTranslations(data);
+    files["src/app/layout.tsx"] = generateAdvancedLayout(selections.theme || "minimalist");
+    files["src/app/globals.css"] = generateMinimalThemeCSS(selections.theme || "minimalist");
+    logger.warn("generate", `[${requestId}] No compositionPlan found — generated base files with translations fallback`);
   }
 
   if (files["tsconfig.json"]) {
