@@ -1,148 +1,134 @@
 /**
- * PDF Parser — shared MinerU integration + fallback.
+ * PDF Parser — self-hosted API integration + fallback.
  * Used by both:
  *   - /api/kb/[baseId]/files  (KB uploads → wants raw markdown)
  *   - /api/analyze-source     (legacy uploads → feeds to AI extraction)
+ *
+ * API protocol (V1 async):
+ *   POST {PDF_PARSE_URL}?params=...&async=true  body=<pdf bytes> → { data: { id } }
+ *   GET  {PDF_PARSE_URL}?task_id=xxx            → ZIP (done) or JSON (polling/error)
  */
 import { logger } from "@/lib/logger";
 
-const MINERU_BASE = "https://mineru.net/api/v4";
+const PDF_PARSE_URL = process.env.PDF_PARSE_URL?.trim() || "http://192.168.41.107:7004";
 
 /**
- * Parse PDF via MinerU API → returns markdown text.
- * Falls back to basic text extraction if MinerU is unavailable or fails.
+ * Parse PDF via self-hosted parse API → returns markdown text.
+ * Falls back to basic text extraction if the API is unavailable or fails.
  *
  * @param buffer - PDF file buffer
  * @param filename - original filename (for logging)
  * @param opts.saveImage - optional callback to save extracted images
  */
-export async function parsePdfWithMinerU(
+export async function parsePdfWithApi(
   buffer: ArrayBuffer,
   filename: string,
   opts?: {
     saveImage?: (fileName: string, imgBuffer: Buffer, source: string) => Promise<string>;
   },
 ): Promise<string> {
-  const apiKey = process.env.MINERU_API_KEY;
-  if (!apiKey) {
-    logger.warn("mineru", "MINERU_API_KEY not set, falling back to basic extraction");
-    return basicPdfExtract(buffer);
+  logger.info("pdf-parse", `Starting PDF parse for: ${filename}`, { size: buffer.byteLength });
+
+  // Build parse params — include images extraction when saveImage callback is provided
+  const outputFiles: string[] = ["doc.md"];
+  if (opts?.saveImage) {
+    outputFiles.push("images");
   }
-
-  logger.info("mineru", `Starting PDF parse for: ${filename}`, { size: buffer.byteLength });
-
-  // Step 1: Request upload URL
-  logger.info("mineru", "Requesting upload URL...");
-  const batchRes = await fetch(`${MINERU_BASE}/file-urls/batch`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      enable_formula: true,
-      enable_table: true,
-      language: "ch",
-      files: [{ name: filename, is_ocr: true }],
-    }),
+  const parseParams = JSON.stringify({
+    use_llm: true,
+    output_files: outputFiles,
   });
 
-  if (!batchRes.ok) {
-    const errText = await batchRes.text();
-    logger.error("mineru", `Failed to get upload URL: ${batchRes.status}`, { response: errText });
-    throw new Error(`MinerU upload URL failed: ${batchRes.status}`);
-  }
+  // Step 1: Submit async task
+  logger.info("pdf-parse", `Submitting async task to ${PDF_PARSE_URL}`);
+  const submitUrl = new URL(PDF_PARSE_URL);
+  submitUrl.searchParams.set("params", parseParams);
+  submitUrl.searchParams.set("async", "true");
 
-  const batchData = await batchRes.json();
-  logger.info("mineru", "Upload URL response", { code: batchData.code, msg: batchData.msg });
-
-  if (batchData.code !== 0) {
-    logger.error("mineru", `MinerU API error: ${batchData.msg}`, { code: batchData.code });
-    throw new Error(`MinerU error: ${batchData.msg}`);
-  }
-
-  const batchId = batchData.data?.batch_id;
-  const uploadUrl = batchData.data?.file_urls?.[0];
-
-  if (!uploadUrl || !batchId) {
-    logger.error("mineru", "No upload URL or batch_id returned", { data: batchData.data });
-    throw new Error("MinerU: no upload URL returned");
-  }
-
-  logger.info("mineru", `Got upload URL, batch_id: ${batchId}`);
-
-  // Step 2: Upload file via PUT
-  logger.info("mineru", `Uploading file (${(buffer.byteLength / 1024).toFixed(1)}KB)...`);
-  const uploadRes = await fetch(uploadUrl, {
-    method: "PUT",
+  const submitRes = await fetch(submitUrl.toString(), {
+    method: "POST",
     body: buffer,
   });
 
-  if (!uploadRes.ok) {
-    const errText = await uploadRes.text();
-    logger.error("mineru", `File upload failed: ${uploadRes.status}`, { response: errText.slice(0, 500) });
-    throw new Error(`MinerU upload failed: ${uploadRes.status}`);
+  if (!submitRes.ok) {
+    const errText = await submitRes.text().catch(() => "");
+    logger.error("pdf-parse", `Submit failed: ${submitRes.status}`, { response: errText.slice(0, 500) });
+    throw new Error(`PDF parse submit failed: ${submitRes.status}`);
   }
 
-  logger.info("mineru", "File uploaded successfully");
+  const submitData = await submitRes.json();
+  const taskId = submitData?.data?.id;
 
-  // Step 3: Poll for results
-  logger.info("mineru", `Polling batch results: ${batchId}`);
+  if (!taskId) {
+    logger.error("pdf-parse", "Response missing task_id", { data: submitData });
+    throw new Error("PDF parse: no task_id returned");
+  }
+
+  logger.info("pdf-parse", `Task submitted, task_id=${taskId}`);
+
+  // Step 2: Poll for results
   const maxWait = 300_000; // 5 min
-  const pollInterval = 5_000;
+  const pollInterval = 3_000; // 3s (matching Python implementation)
   const startTime = Date.now();
-  let resultUrl: string | null = null;
+  let zipBuffer: ArrayBuffer | null = null;
 
   while (Date.now() - startTime < maxWait) {
     await new Promise((r) => setTimeout(r, pollInterval));
 
-    const pollRes = await fetch(`${MINERU_BASE}/extract-results/batch/${batchId}`, {
-      headers: { Authorization: `Bearer ${apiKey}` },
-    });
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
 
-    if (!pollRes.ok) {
-      logger.warn("mineru", `Poll request failed: ${pollRes.status}`);
+    let pollRes: Response;
+    try {
+      const pollUrl = new URL(PDF_PARSE_URL);
+      pollUrl.searchParams.set("task_id", taskId);
+      pollRes = await fetch(pollUrl.toString());
+    } catch (err) {
+      logger.warn("pdf-parse", `Poll request failed: ${err instanceof Error ? err.message : "unknown"}, retrying...`);
       continue;
     }
 
-    const pollData = await pollRes.json();
-    const results = pollData.data?.extract_result || [];
-    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+    if (!pollRes.ok) {
+      logger.warn("pdf-parse", `Poll returned ${pollRes.status}, retrying...`);
+      continue;
+    }
 
-    if (results.length > 0) {
-      const r = results[0];
-      logger.info("mineru", `Poll state: ${r.state}, elapsed: ${elapsed}s`, {
-        pages: r.extract_progress?.extracted_pages,
-        total: r.extract_progress?.total_pages,
-      });
+    // Non-JSON response (ZIP file) → task complete
+    const contentType = pollRes.headers.get("content-type") || "";
+    if (!contentType.startsWith("application/json")) {
+      zipBuffer = await pollRes.arrayBuffer();
+      logger.info("pdf-parse", `Task complete! Elapsed: ${elapsed}s, ZIP size: ${(zipBuffer.byteLength / 1024).toFixed(1)}KB`);
+      break;
+    }
 
-      if (r.state === "done" && r.full_zip_url) {
-        resultUrl = r.full_zip_url;
-        logger.info("mineru", `Parse complete! Elapsed: ${elapsed}s`, { url: resultUrl });
-        break;
-      } else if (r.state === "failed") {
-        logger.error("mineru", `Parse failed: ${r.err_msg}`, { elapsed });
-        throw new Error(`MinerU parse failed: ${r.err_msg}`);
+    // JSON response → check status
+    try {
+      const statusData = await pollRes.json();
+      const status = statusData?.status;
+
+      if (status === "failed" || status === "error") {
+        const errMsg = statusData?.error || statusData?.message || "unknown error";
+        logger.error("pdf-parse", `Task failed: ${errMsg}`, { elapsed });
+        throw new Error(`PDF parse failed: ${errMsg}`);
       }
+
+      logger.info("pdf-parse", `Polling... status=${status || "unknown"}, elapsed=${elapsed}s`);
+    } catch (err) {
+      // JSON parse error — might be the ZIP starting to arrive, treat as not-ready
+      if (err instanceof SyntaxError) {
+        logger.warn("pdf-parse", `Poll response not valid JSON, retrying...`);
+        continue;
+      }
+      throw err; // Re-throw actual task failures
     }
   }
 
-  if (!resultUrl) {
-    logger.error("mineru", "Timeout waiting for parse result", { maxWait });
-    throw new Error("MinerU: timeout waiting for result");
+  if (!zipBuffer) {
+    logger.error("pdf-parse", "Timeout waiting for parse result", { maxWait });
+    throw new Error("PDF parse: timeout waiting for result");
   }
 
-  // Step 4: Download and extract result ZIP
-  logger.info("mineru", "Downloading result ZIP...");
-  const zipRes = await fetch(resultUrl);
-  if (!zipRes.ok) {
-    logger.error("mineru", `Result download failed: ${zipRes.status}`);
-    throw new Error(`MinerU result download failed: ${zipRes.status}`);
-  }
-
-  const zipBuffer = await zipRes.arrayBuffer();
-  logger.info("mineru", `Result ZIP downloaded: ${(zipBuffer.byteLength / 1024).toFixed(1)}KB`);
-
+  // Step 3: Extract doc.md + images from ZIP
+  logger.info("pdf-parse", "Extracting content from result ZIP...");
   const JSZip = (await import("jszip")).default;
   const zip = await JSZip.loadAsync(zipBuffer);
   const markdownFiles: string[] = [];
@@ -153,13 +139,13 @@ export async function parsePdfWithMinerU(
     const ext = filePath.split(".").pop()?.toLowerCase() || "";
     const fileName = filePath.split("/").pop() || filePath;
 
-    // Extract text files (markdown from MinerU)
+    // Extract text files (markdown output)
     if (ext === "md" || ext === "txt" || ext === "json") {
       try {
         const content = await entry.async("string");
         if (content.length > 0) {
           markdownFiles.push(content);
-          logger.info("mineru", `Extracted text: ${filePath} (${content.length} chars)`);
+          logger.info("pdf-parse", `Extracted text: ${filePath} (${content.length} chars)`);
         }
       } catch { /* skip */ }
     }
@@ -170,20 +156,20 @@ export async function parsePdfWithMinerU(
       try {
         const imgBuffer = await entry.async("nodebuffer");
         if (imgBuffer.byteLength > 500) {
-          const savedName = await opts.saveImage(fileName, imgBuffer, `mineru:${filename}`);
+          const savedName = await opts.saveImage(fileName, imgBuffer, `pdf-parse:${filename}`);
           extractedImages.push(savedName);
-          logger.info("mineru", `Saved image: ${fileName} → ${savedName} (${(imgBuffer.byteLength / 1024).toFixed(1)}KB)`);
+          logger.info("pdf-parse", `Saved image: ${fileName} → ${savedName} (${(imgBuffer.byteLength / 1024).toFixed(1)}KB)`);
         }
       } catch { /* skip broken images */ }
     }
   }
 
   if (extractedImages.length > 0) {
-    logger.info("mineru", `Extracted ${extractedImages.length} images from PDF`);
+    logger.info("pdf-parse", `Extracted ${extractedImages.length} images from PDF`);
   }
 
   const result = markdownFiles.join("\n\n");
-  logger.info("mineru", `PDF parse complete. Total content: ${result.length} chars from ${markdownFiles.length} files, ${extractedImages.length} images`);
+  logger.info("pdf-parse", `PDF parse complete. Total content: ${result.length} chars from ${markdownFiles.length} files, ${extractedImages.length} images`);
   return result;
 }
 
@@ -214,7 +200,7 @@ export function basicPdfExtract(buffer: ArrayBuffer): string {
 }
 
 /**
- * Safe wrapper: MinerU first, basic fallback on error.
+ * Safe wrapper: self-hosted API first, basic fallback on error.
  */
 export async function parsePdfSafe(
   buffer: ArrayBuffer,
@@ -224,9 +210,12 @@ export async function parsePdfSafe(
   },
 ): Promise<string> {
   try {
-    return await parsePdfWithMinerU(buffer, name, opts);
+    return await parsePdfWithApi(buffer, name, opts);
   } catch (err) {
-    logger.warn("pdf", `MinerU failed for ${name}: ${err instanceof Error ? err.message : "unknown"}, falling back to basic extraction`);
+    logger.warn("pdf", `PDF parse API failed for ${name}: ${err instanceof Error ? err.message : "unknown"}, falling back to basic extraction`);
     return basicPdfExtract(buffer);
   }
 }
+
+// Backward compatibility aliases
+export { parsePdfWithApi as parsePdfWithMinerU };

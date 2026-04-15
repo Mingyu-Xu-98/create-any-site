@@ -13,7 +13,7 @@ AI-powered full-stack website builder. Users upload personal materials (resumes,
 | Auth | NextAuth 5 |
 | Database | SQLite + Drizzle ORM |
 | LLM | OpenRouter (Claude Sonnet) / SiliconFlow (GLM-5) dual-chain |
-| Doc Parsing | JSZip, Mammoth, MinerU |
+| Doc Parsing | JSZip, Mammoth, Self-hosted PDF API |
 | Process Mgmt | PM2 |
 | Reverse Proxy | Nginx |
 
@@ -116,7 +116,8 @@ RUNTIME_BASE_DIR=                         # Shared node_modules path
 USE_SHARED_NODE_MODULES=0                 # 1=shared, 0=per-site install
 MAX_UPLOAD_BYTES=104857600                # Upload size limit (default 100MB)
 MAX_KB_UPLOAD_BYTES=52428800              # KB file limit (default 50MB)
-MINERU_API_KEY=                           # MinerU PDF parsing (optional)
+PDF_PARSE_URL=http://192.168.41.107:7004  # PDF parse service URL
+# MINERU_API_KEY=                         # (deprecated, use PDF_PARSE_URL)
 SILICONFLOW_IMAGE_MODEL=Kwai-Kolors/Kolors  # AI image generation model
 ```
 
@@ -356,7 +357,7 @@ sites-data/{siteId}/
 | `MAX_RETAINED_BUILDS` | - | `5` | Retained builds count |
 | `MAX_UPLOAD_BYTES` | - | `104857600` | Upload size limit |
 | `MAX_KB_UPLOAD_BYTES` | - | `52428800` | KB file limit |
-| `MINERU_API_KEY` | - | - | MinerU PDF parsing |
+| `PDF_PARSE_URL` | - | `http://192.168.41.107:7004` | PDF parse service URL |
 | `LOGIN_RL_IP_PER_MIN` | - | `10` | Login rate limit/IP/min |
 | `LOGIN_RL_EMAIL_PER_MIN` | - | `5` | Login rate limit/email/min |
 | `BACKUP_INTERVAL_MS` | - | `3600000` | DB auto-backup interval |
