@@ -73,6 +73,10 @@ If the user prompt includes a "Knowledge Base Content" section, use that data to
 - Replace placeholder text with real data from the KB
 - Use actual project names, descriptions, and details
 - Maintain the existing component structure — only update content
+- When adding a new section/module (e.g., product introduction), create a visually consistent section that matches the existing page theme and design system
+- If the user says "extract N items", only include exactly N items from the KB data, choosing the most detailed/complete entries
+- For product/service modules: include name, description, key features, and any pricing/links found in the KB
+- Add new sections IN ADDITION to existing ones — never remove or replace existing sections
 
 ## User Images
 If the user prompt includes "Available User Images", reference those images in the code:

@@ -191,10 +191,12 @@ export async function runEditSession(input: RunEditSessionInput): Promise<EditSe
     }
   }
 
-  // 3b. Load KB context if instruction references knowledge base content
+  // 3b. Always load KB context when user has KB data — let the LLM decide what to use.
+  //     Previously gated by keyword regex, but that's fragile: every new module
+  //     type would need new keywords, and misses are silent. The KB payload is
+  //     small (≤15 KB) so the extra tokens are negligible compared to a missed edit.
   let kbContext = "";
-  const needsKB = /知识库|简历|项目信息|个人信息|资料|经历|resume|portfolio|knowledge|bio/i.test(instruction);
-  if (needsKB && userId) {
+  if (userId) {
     try {
       const { loadFullKBContext, formatFilesForPrompt } = await import("./kb-loader");
       const kbCtx = await loadFullKBContext(userId);
@@ -313,6 +315,21 @@ export async function runEditSession(input: RunEditSessionInput): Promise<EditSe
     try {
       await syncFileMapToDisk(siteDir, guardedFiles);
 
+      // Copy user-uploaded images BEFORE build so Next.js copies them to out/images/
+      // (initial build in build-runtime.ts does this at line ~1621, before staticBuild)
+      if (userId && userImages.length > 0) {
+        try {
+          const tagMap = new Map<string, string>();
+          for (const img of userImages) {
+            if (img.usageTag) tagMap.set(img.assetPath, img.usageTag);
+          }
+          const imgCount = await copyUserImagesToSite(userId, siteDir, tagMap.size > 0 ? tagMap : undefined);
+          if (imgCount > 0) logger.info("edit-runtime", `[${sessionId}] Copied ${imgCount} user image(s) to public/images/ (pre-build)`);
+        } catch (err) {
+          logger.warn("edit-runtime", `[${sessionId}] copyUserImagesToSite (pre-build) failed: ${(err as Error).message}`);
+        }
+      }
+
       // Build
       await runNextBuild(siteDir);
       buildSuccess = true;
@@ -334,20 +351,6 @@ export async function runEditSession(input: RunEditSessionInput): Promise<EditSe
         })
         .where(and(eq(sites.id, siteId), eq(sites.userId, userId)));
 
-      // Copy user-uploaded images to site directory (so code refs like /images/xxx work)
-      if (userId && userImages.length > 0) {
-        try {
-          const tagMap = new Map<string, string>();
-          for (const img of userImages) {
-            if (img.usageTag) tagMap.set(img.assetPath, img.usageTag);
-          }
-          const imgCount = await copyUserImagesToSite(userId, siteDir, tagMap.size > 0 ? tagMap : undefined);
-          if (imgCount > 0) logger.info("edit-runtime", `[${sessionId}] Copied ${imgCount} user image(s) to site`);
-        } catch (err) {
-          logger.warn("edit-runtime", `[${sessionId}] copyUserImagesToSite failed: ${(err as Error).message}`);
-        }
-      }
-
       // AI image generation (when user explicitly asks to generate/regenerate images)
       if (wantsImageGen && userId) {
         try {
@@ -358,11 +361,12 @@ export async function runEditSession(input: RunEditSessionInput): Promise<EditSe
       }
 
       // Sync preview — rewrite asset paths so static server can route them
+      // Initial build uses /drafts/{siteId} prefix for out/ (build-runtime.ts ~line 1809)
+      // Static server routes /drafts/{siteId}/... → out/ directory
       const PREVIEW_PUBLISH_DIR = process.env.PREVIEW_PUBLISH_DIR?.trim() || "";
       if (PREVIEW_PUBLISH_DIR) {
         await syncDraftPreview(siteId, siteDir);
       } else {
-        // Dev mode: rewrite /_next/ → /{siteId}/_next/ in-place (matches initial build behavior)
         await rewriteExportAssetPaths(path.join(siteDir, "out"), "", `/drafts/${siteId}`);
       }
 

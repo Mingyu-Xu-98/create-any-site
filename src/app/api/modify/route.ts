@@ -15,9 +15,8 @@ const TRANSLATIONS_FILE = "src/i18n/translations.ts";
 
 function getPreviewUrl(siteId: string): string {
   const base = (process.env.PREVIEW_BASE_URL?.trim() || "http://localhost:3002").replace(/\/+$/, "");
-  return process.env.PREVIEW_PUBLISH_DIR?.trim()
-    ? `${base}/drafts/${siteId}`
-    : `${base}/${siteId}`;
+  // All modes use /drafts/{siteId} for preview — matches initial build & edit flow
+  return `${base}/drafts/${siteId}`;
 }
 
 function normalizeTranslationsModule(content: string, fallback: string): string {
@@ -281,10 +280,10 @@ export async function POST(req: NextRequest) {
           else { logger.info("modify", "Rebuild complete"); resolve(); }
         });
       });
-      // Rewrite asset paths for static preview (same as first build does)
+      // Rewrite asset paths for static preview (same as initial build & edit flow)
       const outDir = path.join(siteDir, "out");
       if (!hasPublishedPreviewDirectory()) {
-        await rewriteExportAssetPaths(outDir, "", `/${siteId}`);
+        await rewriteExportAssetPaths(outDir, "", `/drafts/${siteId}`);
       }
       await syncDraftPreview(siteId, siteDir);
       verification = await runVerification(siteDir, spec);

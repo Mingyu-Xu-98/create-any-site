@@ -131,7 +131,7 @@ export default function DashboardPage() {
                 {site.previewUrl ? (
                   <div className="relative h-36 overflow-hidden bg-gray-50 border-b border-gray-100 cursor-pointer" onClick={() => window.open(site.previewUrl!, "_blank")}>
                     <div className="absolute inset-0 origin-top-left scale-[0.3] w-[334%] h-[334%] pointer-events-none">
-                      <iframe src={`${site.previewUrl}${site.previewUrl!.includes("?") ? "&" : "?"}v=${site.lastBuiltAt || site.updatedAt || ""}`} className="w-full h-full border-0" title={site.name} loading="lazy" sandbox="allow-same-origin" />
+                      <iframe src={`${site.previewUrl}${site.previewUrl!.includes("?") ? "&" : "?"}v=${site.lastBuiltAt || site.updatedAt || ""}`} className="w-full h-full border-0" title={site.name} loading="lazy" sandbox="allow-same-origin allow-scripts" />
                     </div>
                     <div className="absolute inset-0 bg-gradient-to-t from-black/20 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
                   </div>
