@@ -2,22 +2,31 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import Database from "better-sqlite3";
 import * as schema from "./schema";
 import path from "path";
+import fs from "fs";
 
 const DB_PATH = path.join(process.cwd(), "data", "app.db");
 
-// Ensure data directory exists
-import fs from "fs";
+// Skip DB initialization during next build phase
+const isBuildPhase = process.env.NEXT_PHASE === "phase-production-build";
+
 const dataDir = path.dirname(DB_PATH);
-if (!fs.existsSync(dataDir)) {
+if (!isBuildPhase && !fs.existsSync(dataDir)) {
   fs.mkdirSync(dataDir, { recursive: true });
 }
 
-export const sqlite = new Database(DB_PATH);
-sqlite.pragma("journal_mode = WAL");
-sqlite.pragma("busy_timeout = 5000");
-sqlite.pragma("foreign_keys = ON");
+export const sqlite = isBuildPhase
+  ? null as unknown as InstanceType<typeof Database>
+  : new Database(DB_PATH);
 
-export const db = drizzle(sqlite, { schema });
+if (!isBuildPhase) {
+  sqlite.pragma("journal_mode = WAL");
+  sqlite.pragma("busy_timeout = 5000");
+  sqlite.pragma("foreign_keys = ON");
+}
+
+export const db = isBuildPhase
+  ? null as unknown as ReturnType<typeof drizzle>
+  : drizzle(sqlite, { schema });
 
 // Auto-create tables on first import
 function initDb() {
@@ -376,7 +385,8 @@ function initDb() {
   }
 }
 
-initDb();
-
-// Start the backup scheduler (side-effect import — timer is .unref()'d)
-import("@/lib/db-backup").catch(() => {});
+if (!isBuildPhase) {
+  initDb();
+  // Start the backup scheduler (side-effect import — timer is .unref()'d)
+  import("@/lib/db-backup").catch(() => {});
+}
