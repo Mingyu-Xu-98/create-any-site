@@ -295,6 +295,7 @@ export const editSessions = sqliteTable("edit_sessions", {
   intent: text("intent"),                                // style | content | component | structure | fix
   instruction: text("instruction").notNull(),
   changes: text("changes"),                              // JSON: FileChange[]
+  fileMapBefore: text("file_map_before"),                 // For undo — snapshot of fileMap before edit
   buildIdBefore: text("build_id_before"),                // For undo — the build before edit
   buildIdAfter: text("build_id_after"),                  // The build after edit
   buildSuccess: integer("build_success"),                // 1 = success, 0 = failed

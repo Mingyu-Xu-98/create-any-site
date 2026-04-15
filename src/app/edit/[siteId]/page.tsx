@@ -140,9 +140,9 @@ export default function EditWorkspacePage() {
       setEditElapsed(Math.floor((Date.now() - startTime) / 1000));
     }, 1000);
 
-    // Progress phase updates
+    // Progress phase updates (fast-path edits finish in <5s, so show lighter phases)
     const phaseTimers = [
-      setTimeout(() => setEditPhase("AI 正在分析代码并生成修改方案..."), 3000),
+      setTimeout(() => setEditPhase("AI 正在分析代码并生成修改方案..."), 4000),
       setTimeout(() => setEditPhase("正在应用修改并构建验证..."), 20000),
       setTimeout(() => setEditPhase("构建验证中，请稍候..."), 40000),
     ];
@@ -160,7 +160,7 @@ export default function EditWorkspacePage() {
       if (!res.ok || result.error) {
         setEditStatus(`编辑失败: ${result.error || `HTTP ${res.status}`}`);
       } else if (result.buildSuccess) {
-        setEditStatus("✅ 编辑成功！预览已更新");
+        setEditStatus(result.fastPath ? "⚡ 快速编辑完成！预览已更新" : "✅ 编辑成功！预览已更新");
         setPreviewKey((k) => k + 1); // Refresh preview
         // Refetch site to get updated previewUrl
         fetch(`/api/sites/${siteId}`)

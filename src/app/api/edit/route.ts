@@ -35,6 +35,10 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(result);
   } catch (err) {
+    // Concurrent edit → 409 Conflict
+    if ((err as Error).message?.startsWith("CONCURRENT_EDIT")) {
+      return NextResponse.json({ error: "该站点正在编辑中，请稍后再试" }, { status: 409 });
+    }
     return internalError(err, "api-edit");
   }
 }
