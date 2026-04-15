@@ -73,6 +73,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ bas
   let originalUrl: string | null = null;
   let assetPath: string | null = null;
   let mimeType: string | null = null;
+  let pendingPdfBuffer: ArrayBuffer | null = null; // For async background PDF processing
 
   if (contentType.includes("multipart/form-data")) {
     const tooLargeEarly = checkContentLength(req, DEFAULT_MAX_KB_UPLOAD_BYTES);
@@ -104,6 +105,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ bas
       const zip = await JSZip.loadAsync(buffer);
       const results: Array<{ name: string; fileId: string }> = [];
       const asyncDescriptionJobs: Array<{ fileId: string; fileName: string; fileType: string; content: string }> = [];
+      const asyncPdfJobs: Array<{ fileId: string; fileName: string; buffer: ArrayBuffer }> = [];
 
       for (const [filePath, entry] of Object.entries(zip.files)) {
         if (entry.dir) continue;
@@ -117,6 +119,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ bas
         let entryType = "txt";
         let entryAssetPath: string | null = null;
         let entryMime: string | null = null;
+        let entryPdfBuffer: ArrayBuffer | null = null;
 
         if (isImageFile(entryName)) {
           const imgBuf = await entry.async("nodebuffer");
@@ -126,9 +129,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ bas
             entryMime = `image/${entryExt}`;
           }
         } else if (entryExt === "pdf") {
-          // For PDFs inside ZIP, use MinerU via analyze-source
-          const pdfBuf = await entry.async("arraybuffer");
-          entryContent = await parsePdfContent(pdfBuf, entryName, session.user.id);
+          // PDF inside ZIP: parse async in background (MinerU OCR can take minutes)
+          entryPdfBuffer = await entry.async("arraybuffer");
+          entryContent = ""; // Populated by background processing
           entryType = "pdf";
         } else if (entryExt === "docx" || entryExt === "doc") {
           const docBuf = await entry.async("arraybuffer");
@@ -164,6 +167,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ bas
         if (entryContent.length >= 20) {
           asyncDescriptionJobs.push({ fileId: entryFileId, fileName: entryName, fileType: entryType, content: entryContent.slice(0, 3000) });
         }
+        // Queue background PDF parsing
+        if (entryPdfBuffer) {
+          asyncPdfJobs.push({ fileId: entryFileId, fileName: entryName, buffer: entryPdfBuffer });
+        }
 
         results.push({ name: entryName, fileId: entryFileId });
       }
@@ -171,9 +178,30 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ bas
       // Update index and return immediately
       await regenerateIndex(baseId, session.user.id);
 
-      // Fire-and-forget: generate descriptions for all extracted files
+      // Fire-and-forget: PDF parsing + descriptions for all extracted files
       const zipUserId = session.user.id;
       Promise.resolve().then(async () => {
+        // First: parse any PDF entries in background (MinerU OCR can take minutes per file)
+        for (const pdfJob of asyncPdfJobs) {
+          try {
+            console.log(`[kb-upload] Background PDF (ZIP): ${pdfJob.fileName}`);
+            const content = await parsePdfContent(pdfJob.buffer, pdfJob.fileName, zipUserId);
+            await db.update(knowledgeFiles)
+              .set({ content, contentLength: content.length })
+              .where(eq(knowledgeFiles.id, pdfJob.fileId));
+            // Queue description generation for successfully parsed PDFs
+            if (content.length >= 20) {
+              asyncDescriptionJobs.push({ fileId: pdfJob.fileId, fileName: pdfJob.fileName, fileType: "pdf", content: content.slice(0, 3000) });
+            }
+            console.log(`[kb-upload] PDF done (ZIP): ${pdfJob.fileName} (${content.length} chars)`);
+          } catch (err) {
+            console.error(`[kb-upload] PDF failed (ZIP): ${pdfJob.fileName}`, err);
+            await db.update(knowledgeFiles)
+              .set({ description: `PDF解析失败: ${(err as Error).message?.slice(0, 200) || "unknown"}`, contentLength: -1 })
+              .where(eq(knowledgeFiles.id, pdfJob.fileId)).catch(() => {});
+          }
+        }
+        // Then: generate AI descriptions for all files (including newly parsed PDFs)
         for (const job of asyncDescriptionJobs) {
           try {
             const desc = await generateFileDescription(job.fileName, job.fileType, job.content, zipUserId);
@@ -182,18 +210,20 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ bas
               .where(eq(knowledgeFiles.id, job.fileId));
           } catch { /* non-fatal: file saved, just no AI description */ }
         }
-        // Regenerate index with real descriptions
-        if (asyncDescriptionJobs.length > 0) {
+        // Regenerate index with real data
+        if (asyncDescriptionJobs.length > 0 || asyncPdfJobs.length > 0) {
           await regenerateIndex(baseId, zipUserId).catch(() => {});
         }
       });
 
       return NextResponse.json({ files: results, count: results.length, type: "zip" });
     }
-    // PDF: parse with MinerU API
+    // PDF: save record immediately, parse in background.
+    // MinerU OCR can take 5-10 min for large scanned PDFs — must not block the HTTP request.
     else if (ext === "pdf") {
       fileType = "pdf";
-      rawContent = await parsePdfContent(buffer, fileName, session.user.id);
+      rawContent = ""; // Populated async by background processing below
+      pendingPdfBuffer = buffer;
     }
     // DOCX
     else if (ext === "docx" || ext === "doc") {
@@ -255,7 +285,49 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ bas
     });
   }
 
-  return NextResponse.json({ fileId, name: fileName, description: fileName, keywords: [], contentLength: rawContent.length });
+  // Background PDF processing — for scanned/large PDFs, MinerU OCR can take minutes.
+  // The record was saved above with content="" so the API responds instantly.
+  if (pendingPdfBuffer) {
+    const pdfBuf = pendingPdfBuffer;
+    const pdfId = fileId;
+    const pdfBase = baseId;
+    const pdfUser = bgUserId;
+    const pdfName = fileName;
+    Promise.resolve().then(async () => {
+      try {
+        console.log(`[kb-upload] Background PDF processing started: ${pdfName}`);
+        const content = await parsePdfContent(pdfBuf, pdfName, pdfUser);
+        await db.update(knowledgeFiles)
+          .set({ content, contentLength: content.length })
+          .where(eq(knowledgeFiles.id, pdfId));
+        // Generate AI description for the parsed content
+        if (content.length >= 20) {
+          try {
+            const desc = await generateFileDescription(pdfName, "pdf", content.slice(0, 3000), pdfUser);
+            await db.update(knowledgeFiles)
+              .set({ description: desc.description, keywords: JSON.stringify(desc.keywords) })
+              .where(eq(knowledgeFiles.id, pdfId));
+          } catch { /* non-fatal: content saved, just no AI description */ }
+        }
+        await regenerateIndex(pdfBase, pdfUser).catch(() => {});
+        console.log(`[kb-upload] Background PDF complete: ${pdfName} (${content.length} chars)`);
+      } catch (err) {
+        console.error(`[kb-upload] Background PDF failed: ${pdfName}`, err);
+        await db.update(knowledgeFiles)
+          .set({
+            description: `PDF解析失败: ${(err as Error).message?.slice(0, 200) || "unknown error"}`,
+            contentLength: -1, // Negative = error indicator for frontend
+          })
+          .where(eq(knowledgeFiles.id, pdfId)).catch(() => {});
+      }
+    });
+  }
+
+  return NextResponse.json({
+    fileId, name: fileName, description: fileName, keywords: [],
+    contentLength: rawContent.length,
+    processing: pendingPdfBuffer ? true : undefined,
+  });
   } catch (err) {
     return internalError(err, "kb-upload", { clientMessage: "Upload failed" });
   }
