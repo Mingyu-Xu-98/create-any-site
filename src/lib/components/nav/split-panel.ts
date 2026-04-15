@@ -17,7 +17,7 @@ export const navSplitPanel: SectionVariantFn = (ctx) => {
             </div>
             <nav className="flex flex-col gap-2 mb-8">
               {t.availableSections.filter(s => s !== "about" && s !== "contact").map((id) => (
-                <a key={id} href={\`#\${id}\`} className="text-sm text-text-muted hover:text-accent transition-colors">{t.sections[id as keyof typeof t.sections] || id}</a>
+                <a key={id} href={\`#\${id}\`} className="text-sm text-text-muted hover:text-accent transition-colors">{t.nav[id as keyof typeof t.nav] || id}</a>
               ))}
             </nav>
             <div className="flex justify-center gap-4 mb-6">

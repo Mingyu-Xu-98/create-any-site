@@ -95,6 +95,7 @@ The following components are pre-generated and available for import. You do NOT 
 13. **MUST generate a top navigation bar** with:
     - Sticky/fixed positioning at the top of the page
     - Links to each section via `t.availableSections.map()` with `href={`#${section}`}`
+    - Section labels via `t.nav[id]` (NOT `t.sections[id]` — that property does not exist)
     - A language toggle button using `toggle()`
     - Responsive: hamburger menu on mobile (use useState for open/close)
     - Style the nav to match the site theme using CSS variables

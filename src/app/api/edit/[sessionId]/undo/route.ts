@@ -5,8 +5,9 @@ import { sqlite } from "@/lib/db";
 import { db } from "@/lib/db";
 import { sites } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
-import { syncDraftPreview, rewriteExportAssetPaths } from "@/lib/build-runtime";
+import { syncDraftPreview, rewriteExportAssetPaths, ensureStaticServer, getDraftPreviewUrl } from "@/lib/build-runtime";
 import { resolveSiteDir } from "@/lib/site-paths";
+import { syncFileMapToDisk } from "@/lib/edit-runtime";
 import { runCodeGuardrails, runAdvancedModeGuardrails } from "@/lib/code-guardrails";
 import { logger } from "@/lib/logger";
 import fs from "fs/promises";
@@ -68,12 +69,8 @@ export async function POST(
     const guardedFiles = guardedResult.files;
     runAdvancedModeGuardrails(guardedFiles, ALLOWED_DEPENDENCIES, logger);
 
-    // Sync ALL files to disk (ensures no stale files from failed edits)
-    for (const [filePath, content] of Object.entries(guardedFiles)) {
-      const fullPath = path.join(siteDir, filePath);
-      await fs.mkdir(path.dirname(fullPath), { recursive: true });
-      await fs.writeFile(fullPath, content, "utf-8");
-    }
+    // Sync ALL files to disk and clean stale files (ensures no leftovers from the edit being undone)
+    await syncFileMapToDisk(siteDir, guardedFiles);
 
     // Rebuild
     await runUndoBuild(siteDir);
@@ -83,6 +80,7 @@ export async function POST(
     if (PREVIEW_PUBLISH_DIR) {
       await syncDraftPreview(session.site_id, siteDir);
     } else {
+      await ensureStaticServer();
       await rewriteExportAssetPaths(path.join(siteDir, "out"), "", `/drafts/${session.site_id}`);
     }
 
@@ -93,6 +91,7 @@ export async function POST(
         buildStatus: "ready",
         buildError: null,
         draftBuildId: session.build_id_before,
+        previewUrl: getDraftPreviewUrl(session.site_id),
         updatedAt: new Date().toISOString(),
       })
       .where(and(eq(sites.id, session.site_id), eq(sites.userId, userId)));
@@ -122,8 +121,17 @@ function runUndoBuild(siteDir: string): Promise<void> {
 };
 export default nextConfig;`;
 
+  const outDir = path.join(siteDir, "out");
+  const outBackup = path.join(siteDir, "out-pre-edit");
+
   return new Promise(async (resolve, reject) => {
     try {
+      // Backup existing out/ so we can restore on build failure
+      try {
+        await fs.rm(outBackup, { recursive: true, force: true });
+        await fs.cp(outDir, outBackup, { recursive: true });
+      } catch { /* No existing out/ to backup */ }
+
       for (const old of ["next.config.js", "next.config.ts", "next.config.cjs"]) {
         try { await fs.unlink(path.join(siteDir, old)); } catch {}
       }
@@ -141,9 +149,19 @@ export default nextConfig;`;
       cwd: siteDir,
       env,
       timeout: 180_000,
-    }, (err: Error | null, _stdout: string, _stderr: string) => {
-      if (err) reject(err);
-      else resolve();
+    }, async (err: Error | null, _stdout: string, _stderr: string) => {
+      if (err) {
+        // Restore out/ from backup so preview stays intact
+        try {
+          await fs.rm(outDir, { recursive: true, force: true });
+          await fs.rename(outBackup, outDir);
+        } catch { /* restore failed */ }
+        reject(err);
+      } else {
+        // Clean up backup
+        fs.rm(outBackup, { recursive: true, force: true }).catch(() => {});
+        resolve();
+      }
     });
   });
 }

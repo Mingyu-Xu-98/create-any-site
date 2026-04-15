@@ -7,7 +7,7 @@ import fs from "fs/promises";
 import path from "path";
 import { exec } from "child_process";
 import { logger } from "@/lib/logger";
-import { syncDraftPreview, hasPublishedPreviewDirectory, rewriteExportAssetPaths, ALLOWED_DEPENDENCIES, migrateSiteLayout } from "@/lib/build-runtime";
+import { syncDraftPreview, hasPublishedPreviewDirectory, rewriteExportAssetPaths, ALLOWED_DEPENDENCIES, migrateSiteLayout, ensureStaticServer } from "@/lib/build-runtime";
 import { runCodeGuardrails, runAdvancedModeGuardrails } from "@/lib/code-guardrails";
 import { internalError } from "@/lib/api-errors";
 import { resolveSiteDir } from "@/lib/site-paths";
@@ -272,6 +272,16 @@ export async function POST(req: NextRequest) {
     let buildError = "";
     let buildLogs: string[] = [];
     let verification: { ok: boolean; checks: Array<{ label: string; ok: boolean }> } | null = null;
+
+    // Backup out/ before build — next build deletes it, so a partial failure
+    // would leave the preview broken without this backup.
+    const outDir = path.join(siteDir, "out");
+    const outBackup = path.join(siteDir, "out-pre-edit");
+    try {
+      await fs.rm(outBackup, { recursive: true, force: true });
+      await fs.cp(outDir, outBackup, { recursive: true });
+    } catch { /* No existing out/ to backup */ }
+
     try {
       const nextBin = path.join(siteDir, "node_modules", "next", "dist", "bin", "next");
       await new Promise<void>((resolve, reject) => {
@@ -280,20 +290,27 @@ export async function POST(req: NextRequest) {
           else { logger.info("modify", "Rebuild complete"); resolve(); }
         });
       });
+      // Build succeeded — clean up backup
+      fs.rm(outBackup, { recursive: true, force: true }).catch(() => {});
       // Rewrite asset paths for static preview (same as initial build & edit flow)
-      const outDir = path.join(siteDir, "out");
       if (!hasPublishedPreviewDirectory()) {
+        await ensureStaticServer();
         await rewriteExportAssetPaths(outDir, "", `/drafts/${siteId}`);
       }
       await syncDraftPreview(siteId, siteDir);
       verification = await runVerification(siteDir, spec);
       await db.update(sites).set({
-        previewUrl: site?.previewUrl || getPreviewUrl(siteId),
+        previewUrl: getPreviewUrl(siteId),
         buildStatus: "ready",
         buildError: null,
         updatedAt: new Date().toISOString(),
       }).where(and(eq(sites.id, siteId), eq(sites.userId, session.user.id)));
     } catch (buildErr) {
+      // Restore out/ from backup so preview stays intact
+      try {
+        await fs.rm(outDir, { recursive: true, force: true });
+        await fs.rename(outBackup, outDir);
+      } catch { /* restore failed */ }
       buildSuccess = false;
       buildError = buildErr instanceof Error ? buildErr.message : "Build failed";
       buildLogs = summarizeBuildOutput(

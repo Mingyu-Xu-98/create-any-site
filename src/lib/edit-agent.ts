@@ -345,12 +345,14 @@ function checkForPlaceholder(change: FileChange, original: string | undefined): 
     }
   }
 
-  // 3. For translations.ts: must have actual translation content (not empty objects)
+  // 3. For translations.ts: must have export + zh/en structure
   if (change.path === "src/i18n/translations.ts") {
-    // Count actual property lines (like `  hero:`, `  nav:`, etc.)
-    const propertyLines = (content.match(/^\s{2,}\w+\s*:/gm) || []).length;
-    if (propertyLines < 3) {
-      return `translations.ts has only ${propertyLines} properties (expected 3+)`;
+    if (!content.includes("export const translations") && !content.includes("export default")) {
+      return "translations.ts missing export statement";
+    }
+    // Must have both zh and en language keys
+    if (!/(?:["']?)zh(?:["']?)\s*:/.test(content) || !/(?:["']?)en(?:["']?)\s*:/.test(content)) {
+      return "translations.ts missing zh or en language keys";
     }
   }
 

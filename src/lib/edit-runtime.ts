@@ -24,7 +24,7 @@ import { runCodeGuardrails, runAdvancedModeGuardrails } from "@/lib/code-guardra
 import { recordBuildError } from "@/lib/error-collector";
 import { resolveSiteDir } from "@/lib/site-paths";
 import { siteRoot, siteCurrentLink } from "@/lib/site-paths";
-import { summarizeBuildOutput, syncDraftPreview, rewriteExportAssetPaths, ALLOWED_DEPENDENCIES } from "@/lib/build-runtime";
+import { summarizeBuildOutput, syncDraftPreview, rewriteExportAssetPaths, ALLOWED_DEPENDENCIES, getDraftPreviewUrl, ensureStaticServer } from "@/lib/build-runtime";
 import { copyUserImagesToSite } from "@/lib/asset-store";
 import { logger } from "@/lib/logger";
 
@@ -84,7 +84,17 @@ async function createEditBuildRecord(opts: {
 export async function runEditSession(input: RunEditSessionInput): Promise<EditSessionResult> {
   const { siteId, userId, instruction, maxRetries = MAX_EDIT_RETRIES } = input;
 
-  // 0. Concurrent edit lock — reject if another active session exists
+  // 0. Verify site ownership FIRST (before any queries that leak site state)
+  const site = await db.select({
+    fileMap: sites.fileMap,
+    draftBuildId: sites.draftBuildId,
+  }).from(sites).where(and(eq(sites.id, siteId), eq(sites.userId, userId))).get();
+
+  if (!site) {
+    throw new Error("Site not found or access denied");
+  }
+
+  // 1. Concurrent edit lock — reject if another active session exists
   const STALE_SESSION_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
   const activeSession = sqlite.prepare(
     `SELECT id, created_at FROM edit_sessions WHERE site_id = ? AND status = 'active' LIMIT 1`
@@ -99,16 +109,6 @@ export async function runEditSession(input: RunEditSessionInput): Promise<EditSe
       `UPDATE edit_sessions SET status = 'failed', build_error = 'session timeout', completed_at = ? WHERE id = ?`
     ).run(new Date().toISOString(), activeSession.id);
     logger.warn("edit-runtime", `Expired stale active session ${activeSession.id} (${Math.round(age / 1000)}s old)`);
-  }
-
-  // 1. Get site and its fileMap — verify ownership
-  const site = await db.select({
-    fileMap: sites.fileMap,
-    draftBuildId: sites.draftBuildId,
-  }).from(sites).where(and(eq(sites.id, siteId), eq(sites.userId, userId))).get();
-
-  if (!site) {
-    throw new Error("Site not found or access denied");
   }
 
   let fileMap: Record<string, string>;
@@ -340,11 +340,12 @@ export async function runEditSession(input: RunEditSessionInput): Promise<EditSe
         siteId, userId, fileMap: guardedFiles, intent, instruction,
       });
 
-      // Update site fileMap + advance draftBuildId
+      // Update site fileMap + advance draftBuildId + fix previewUrl to draft format
       await db.update(sites)
         .set({
           fileMap: JSON.stringify(guardedFiles),
           draftBuildId: editBuildId,
+          previewUrl: getDraftPreviewUrl(siteId),
           buildStatus: "ready",
           buildError: null,
           updatedAt: new Date().toISOString(),
@@ -367,6 +368,7 @@ export async function runEditSession(input: RunEditSessionInput): Promise<EditSe
       if (PREVIEW_PUBLISH_DIR) {
         await syncDraftPreview(siteId, siteDir);
       } else {
+        await ensureStaticServer();
         await rewriteExportAssetPaths(path.join(siteDir, "out"), "", `/drafts/${siteId}`);
       }
 
@@ -485,13 +487,14 @@ async function runAutofixSession(opts: {
     buildSuccess = true;
 
     // Create build record + update site
-    const autofixBuildId = await createEditBuildRecord({
+    autofixBuildId = await createEditBuildRecord({
       siteId, userId, fileMap: guardedFiles, intent: "fix", instruction: "__AUTOFIX__",
     });
     await db.update(sites)
       .set({
         fileMap: JSON.stringify(guardedFiles),
         draftBuildId: autofixBuildId,
+        previewUrl: getDraftPreviewUrl(siteId),
         buildStatus: "ready",
         buildError: null,
         updatedAt: new Date().toISOString(),
@@ -503,6 +506,7 @@ async function runAutofixSession(opts: {
     if (PREVIEW_PUBLISH_DIR) {
       await syncDraftPreview(siteId, siteDir);
     } else {
+      await ensureStaticServer();
       await rewriteExportAssetPaths(path.join(siteDir, "out"), "", `/drafts/${siteId}`);
     }
 
@@ -627,13 +631,14 @@ async function runFastPathSession(opts: {
     buildSuccess = true;
 
     // Create build record + update site
-    const fpBuildId = await createEditBuildRecord({
+    fpBuildId = await createEditBuildRecord({
       siteId, userId, fileMap: guardedFiles, intent, instruction,
     });
     await db.update(sites)
       .set({
         fileMap: JSON.stringify(guardedFiles),
         draftBuildId: fpBuildId,
+        previewUrl: getDraftPreviewUrl(siteId),
         buildStatus: "ready",
         buildError: null,
         updatedAt: new Date().toISOString(),
@@ -645,6 +650,7 @@ async function runFastPathSession(opts: {
     if (PREVIEW_PUBLISH_DIR) {
       await syncDraftPreview(siteId, siteDir);
     } else {
+      await ensureStaticServer();
       await rewriteExportAssetPaths(path.join(siteDir, "out"), "", `/drafts/${siteId}`);
     }
 
@@ -810,8 +816,10 @@ async function runEditImageGeneration(siteId: string, userId: string, instructio
 // Solution: before every build, write ALL fileMap files to ensure consistency.
 // ---------------------------------------------------------------------------
 
-async function syncFileMapToDisk(siteDir: string, fileMap: Record<string, string>): Promise<void> {
+export async function syncFileMapToDisk(siteDir: string, fileMap: Record<string, string>): Promise<void> {
   const resolvedSiteDir = path.resolve(siteDir);
+
+  // 1. Write all fileMap files to disk
   for (const [filePath, content] of Object.entries(fileMap)) {
     const fullPath = path.resolve(siteDir, filePath);
     // Path traversal guard: reject paths that escape the site directory
@@ -821,6 +829,50 @@ async function syncFileMapToDisk(siteDir: string, fileMap: Record<string, string
     }
     await fs.mkdir(path.dirname(fullPath), { recursive: true });
     await fs.writeFile(fullPath, content, "utf-8");
+  }
+
+  // 2. Clean up stale source files NOT in fileMap.
+  //    Only clean under src/ (entirely managed by the code generation / edit system).
+  //    Ignore non-source dirs (node_modules, .next, out, published, public/images).
+  const CLEAN_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx", ".css", ".json", ".md", ".mjs"]);
+  const fileMapKeys = new Set(Object.keys(fileMap));
+  const srcDir = path.join(resolvedSiteDir, "src");
+
+  async function walkAndClean(dir: string): Promise<void> {
+    let entries;
+    try {
+      entries = await fs.readdir(dir, { withFileTypes: true });
+    } catch {
+      return; // directory doesn't exist
+    }
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        await walkAndClean(full);
+        // Remove empty directories left after file cleanup
+        try {
+          const remaining = await fs.readdir(full);
+          if (remaining.length === 0) await fs.rmdir(full);
+        } catch {}
+      } else if (entry.isFile()) {
+        const ext = path.extname(entry.name).toLowerCase();
+        if (!CLEAN_EXTENSIONS.has(ext)) continue;
+        // Construct relative path matching fileMap keys (e.g. "src/app/page.tsx")
+        const relPath = path.relative(resolvedSiteDir, full);
+        if (!fileMapKeys.has(relPath)) {
+          try {
+            await fs.unlink(full);
+            logger.info("edit-runtime", `Cleaned stale file: ${relPath}`);
+          } catch {}
+        }
+      }
+    }
+  }
+
+  try {
+    await walkAndClean(srcDir);
+  } catch (err) {
+    logger.warn("edit-runtime", `Stale file cleanup failed: ${err instanceof Error ? err.message : "unknown"}`);
   }
 }
 
@@ -834,6 +886,17 @@ async function syncFileMapToDisk(siteDir: string, fileMap: Record<string, string
 // ---------------------------------------------------------------------------
 
 async function runNextBuild(siteDir: string): Promise<void> {
+  const outDir = path.join(siteDir, "out");
+  const outBackup = path.join(siteDir, "out-pre-edit");
+
+  // Backup existing out/ so we can restore on build failure.
+  // next build with output:"export" deletes out/ before writing — a partial failure
+  // leaves it empty/incomplete, breaking the live preview.
+  try {
+    await fs.rm(outBackup, { recursive: true, force: true });
+    await fs.cp(outDir, outBackup, { recursive: true });
+  } catch { /* No existing out/ to backup — first build */ }
+
   // 1. Guarantee next.config.mjs is correct (guards against Code Agent overwriting it)
   const configContent = `const nextConfig = {\n  output: "export",\n  images: { unoptimized: true },\n};\nexport default nextConfig;`;
 
@@ -853,10 +916,20 @@ async function runNextBuild(siteDir: string): Promise<void> {
       cwd: siteDir,
       env: buildEnv,
       timeout: 180_000,
-    }, (err: any, stdout: any, stderr: any) => {
+    }, async (err: any, stdout: any, stderr: any) => {
       if (err) {
+        // Build failed — restore out/ from backup so preview stays intact
+        try {
+          await fs.rm(outDir, { recursive: true, force: true });
+          await fs.rename(outBackup, outDir);
+          logger.info("edit-runtime", "Restored out/ from backup after build failure");
+        } catch {
+          logger.warn("edit-runtime", "Failed to restore out/ backup — preview may be broken");
+        }
         reject(Object.assign(err, { stdout, stderr }));
       } else {
+        // Build succeeded — clean up backup
+        fs.rm(outBackup, { recursive: true, force: true }).catch(() => {});
         resolve();
       }
     });

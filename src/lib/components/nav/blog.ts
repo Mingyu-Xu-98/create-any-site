@@ -10,7 +10,7 @@ export const navBlog: SectionVariantFn = (ctx) => {
           <span className="blog-nav-brand">{lang === "zh" ? "${ctx.data.name}" : "${ctx.data.nameEn || ctx.data.name}"}</span>
           <ul className="blog-nav-links">
             {t.availableSections.filter(s => s !== "contact").map((id) => (
-              <li key={id}><a href={\`#\${id === "timeline" ? "experience" : id}\`}>{t.sections[id as keyof typeof t.sections] || id}</a></li>
+              <li key={id}><a href={\`#\${id === "timeline" ? "experience" : id}\`}>{t.nav[id as keyof typeof t.nav] || id}</a></li>
             ))}
             {t.nav.contact && <li><a href="#contact">{t.nav.contact}</a></li>}
             <li><button onClick={toggle}>{lang === "zh" ? "EN" : "\\u4e2d"}</button></li>

@@ -10,7 +10,7 @@ export const navSticky: SectionVariantFn = (ctx) => {
             <span className="font-bold text-lg">{lang === "zh" ? "${ctx.data.name}" : "${ctx.data.nameEn}"}</span>
             <div className="hidden md:flex items-center gap-6">
               {t.availableSections.filter(s => s !== "about" && s !== "contact").map((id) => (
-                <a key={id} href={\`#\${id}\`} className="text-sm text-text-muted hover:text-text transition-colors">{t.sections[id as keyof typeof t.sections] || id}</a>
+                <a key={id} href={\`#\${id}\`} className="text-sm text-text-muted hover:text-text transition-colors">{t.nav[id as keyof typeof t.nav] || id}</a>
               ))}
             </div>
             <div className="flex items-center gap-2">

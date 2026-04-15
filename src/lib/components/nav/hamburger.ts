@@ -17,7 +17,7 @@ export const navHamburger: SectionVariantFn = (ctx) => {
         </div>
         <div className={\`mobile-menu \${menuOpen ? "open" : ""}\`}>
           {t.availableSections.filter(s => s !== "about" && s !== "contact").map((id) => (
-            <a key={id} href={\`#\${id}\`} onClick={() => setMenuOpen(false)}>{t.sections[id as keyof typeof t.sections] || id}</a>
+            <a key={id} href={\`#\${id}\`} onClick={() => setMenuOpen(false)}>{t.nav[id as keyof typeof t.nav] || id}</a>
           ))}
         </div>`;
 };

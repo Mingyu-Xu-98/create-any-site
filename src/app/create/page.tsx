@@ -32,7 +32,6 @@ interface PRDData { version?: number; siteType?: string; targetAudience?: string
 interface SourceGroup { sourceId: string; sourceName: string; sourceType: string; items: KnowledgeItem[] }
 interface SiteResourceRef { id: string; title: string; category: string; sourceName: string; sourceType: string }
 interface GuidanceAction { label: string; onClick: () => void; tone?: "accent" | "muted" }
-interface NextStepCard { label: string; prompt?: string; onClick?: () => void }
 
 async function readJsonResponse<T>(response: Response): Promise<T> {
   const text = await response.text();
@@ -51,9 +50,6 @@ async function readJsonResponse<T>(response: Response): Promise<T> {
   }
 }
 
-function textIncludes(value: string, patterns: RegExp[]): boolean {
-  return patterns.some((pattern) => pattern.test(value));
-}
 
 function isPrdMarkdown(content: string): boolean {
   return /^\s*#\s+(Website PRD|网站 PRD|Auto-generated PRD)/i.test(content) || /##\s+(Problem Statement|Solution|Target Audience|品牌|设计系统)/i.test(content);
@@ -936,12 +932,6 @@ function CreatePageInner() {
     }
   }, [updateSitePublishState, locale]);
 
-  const quickGenerate = () => handleGenerate({
-    siteType: selectedTemplate?.category || "portfolio",
-    theme: selectedTemplate?.theme || pickRandomTheme(),
-    layout: selectedTemplate?.layout || undefined,
-    prd: prdData || undefined,
-  });
   const newConversation = () => {
     if (chatMessages.length > 0 && !confirm(locale === "zh" ? "当前对话将丢失，确定开始新对话？" : "Current conversation will be lost. Start new?")) return;
     siteIdRef.current = null; lastRestoredKey.current = ""; appliedTemplateIdRef.current = ""; setSiteId(null); setChatMessages([]); setPreviewUrl(null); setPublishedUrl(null); setSiteStatus("draft"); setSiteResources([]); setGenStatus("idle"); setShowPreview(false); setLoadedSkillIds([]); setPrdData(null); setCompiledSpec(null); setPendingOptions(null); setThinkingSteps([]); setPreviewTab("preview"); setPreviewKey(0); router.replace("/create");
@@ -1000,83 +990,6 @@ function CreatePageInner() {
       tone: "muted",
     },
   ];
-  const siteTypeHint = String(prdData?.siteType || selectedTemplate?.category || "").toLowerCase();
-  const themeHint = String(prdData?.theme || selectedTemplate?.theme || "").toLowerCase();
-  const latestUserMessage = [...chatMessages].reverse().find((item) => item.role === "user")?.content || "";
-  const latestAssistantMessage = [...chatMessages].reverse().find((item) => item.role === "assistant")?.content || "";
-  const recentConversation = `${latestUserMessage}\n${latestAssistantMessage}`.toLowerCase();
-  const wantsVisualPolish = textIncludes(recentConversation, [/视觉|动效|配色|风格|hero|动画|aesthetic/i]);
-  const wantsStorytelling = textIncludes(recentConversation, [/品牌|故事|叙事|about|story/i]);
-  const wantsConversion = textIncludes(recentConversation, [/cta|联系|转化|销售|咨询|预约|lead/i]);
-  const wantsShowcase = textIncludes(recentConversation, [/项目|案例|作品|project|case study|portfolio/i]);
-  const isBrandSite = /brand|landing|saas/.test(siteTypeHint);
-  const isPortfolioSite = /portfolio|resume|personal/.test(siteTypeHint);
-
-  const nextStepCards: NextStepCard[] = (() => {
-    const cards: NextStepCard[] = [];
-    const push = (card: NextStepCard) => {
-      if (!cards.some((item) => item.label === card.label)) cards.push(card);
-    };
-
-    if (previewUrl && genStatus === "ready") {
-      if (!hasSelectedKnowledge) {
-        push({ label: locale === "zh" ? "上传资料替换示例内容" : "Upload materials to replace sample content", onClick: () => router.push("/knowledge") });
-      } else {
-        push({ label: locale === "zh" ? "把我的资料映射到首页" : "Map my sources to the homepage", prompt: locale === "zh" ? "请优先用我的资料替换首页的标题、简介和主要 CTA" : "Use my uploaded materials to replace the homepage headline, intro, and main CTA first" });
-      }
-
-      if (siteStatus === "published") {
-        push({ label: locale === "zh" ? "把当前草稿更新到已发布版本" : "Update the published version", prompt: locale === "zh" ? "请检查当前草稿是否已经适合更新发布，并优先修正影响上线的内容" : "Review the current draft for publication and prioritize fixes that affect the live version" });
-      }
-
-      if (wantsVisualPolish || /retro|cinematic|cyberpunk|neo-tokyo|ghibli|glass/.test(themeHint)) {
-        push({ label: locale === "zh" ? "继续强化视觉表现" : "Push the visual direction further", prompt: locale === "zh" ? "保留当前结构，继续强化视觉层次、风格细节和动效表现" : "Keep the current structure and push the visual hierarchy, theme details, and motion further" });
-      } else {
-        push({ label: locale === "zh" ? "只调整视觉，不改结构" : "Refine visuals only", prompt: locale === "zh" ? "保留当前结构，只优化视觉层次、配色和动效" : "Keep the current structure and only improve visual hierarchy, color, and motion" });
-      }
-
-      if (wantsStorytelling || isBrandSite) {
-        push({ label: locale === "zh" ? "优化品牌故事" : "Refine the brand story", prompt: locale === "zh" ? "请根据当前内容优化品牌故事、关于部分和叙事节奏" : "Refine the brand story, about section, and storytelling flow based on the current content" });
-      }
-
-      if (wantsShowcase || isPortfolioSite) {
-        push({ label: locale === "zh" ? "强化项目案例展示" : "Strengthen project case studies", prompt: locale === "zh" ? "请把项目案例部分改得更有说服力，突出结果、过程和角色分工" : "Make the case study section more convincing and highlight outcomes, process, and role clearly" });
-      }
-
-      if (wantsConversion || isBrandSite) {
-        push({ label: locale === "zh" ? "优化 CTA 和联系区" : "Improve CTA and contact", prompt: locale === "zh" ? "优化当前网站的 CTA 和联系区，让转化路径更明确" : "Improve the CTA and contact section to make the conversion path clearer" });
-      }
-
-      if (cards.length < 4) {
-        push({ label: locale === "zh" ? "补充案例与项目展示" : "Add stronger showcase sections", prompt: locale === "zh" ? "补充更完整的案例、项目或证明实力的模块" : "Add stronger case study, project, or proof sections" });
-      }
-
-      return cards.slice(0, 4);
-    }
-
-    if (selectedTemplate) {
-      push({ label: locale === "zh" ? "用我的信息替换模板内容" : "Replace template content with my info", prompt: locale === "zh" ? "请根据我刚才提供的信息替换模板里的示例内容" : "Replace the sample template content with the information I just provided" });
-      push({ label: locale === "zh" ? "保留结构，只改语气" : "Keep structure, change tone", prompt: locale === "zh" ? "保留当前模板结构，只把语气改成更符合我的品牌风格" : "Keep the current template structure and only adapt the tone to my brand" });
-      if (!hasSelectedKnowledge) push({ label: locale === "zh" ? "上传资料后再生成" : "Upload materials before generating", onClick: () => router.push("/knowledge") });
-      push({ label: locale === "zh" ? "直接生成首版预览" : "Generate first preview now", onClick: () => quickGenerate() });
-      return cards.slice(0, 4);
-    }
-
-    if (hasSelectedKnowledge) {
-      push({ label: locale === "zh" ? "根据资料推荐网站定位" : "Recommend a site angle from my materials", prompt: locale === "zh" ? "根据我现在的资料推荐一个最适合的网站定位和结构" : "Recommend the best site positioning and structure based on my current materials" });
-      push({ label: locale === "zh" ? "直接生成首版预览" : "Generate first preview now", onClick: () => quickGenerate() });
-      push({ label: locale === "zh" ? "总结当前资料还缺什么" : "Summarize what is still missing", prompt: locale === "zh" ? "总结一下当前资料还缺哪些信息会影响网站效果" : "Summarize which missing information is still limiting the quality of the site" });
-      push({ label: locale === "zh" ? "继续上传资料" : "Upload more materials", onClick: () => router.push("/knowledge") });
-      return cards.slice(0, 4);
-    }
-
-    push({ label: locale === "zh" ? "先上传资料" : "Upload materials first", onClick: () => router.push("/knowledge") });
-    push({ label: locale === "zh" ? "推荐适合我的网站结构" : "Recommend a site structure", prompt: locale === "zh" ? "根据我接下来的需求，推荐一个适合我的网站结构" : "Recommend a site structure based on what I need" });
-    push({ label: locale === "zh" ? "先生成一个草稿" : "Generate a quick draft", prompt: locale === "zh" ? "先根据我的简单描述生成一个可预览的草稿" : "Generate a quick preview draft from a simple description first" });
-    push({ label: locale === "zh" ? "我想做个人网站" : "I want a personal site", prompt: locale === "zh" ? "我想做一个个人网站，请先给我一个快速草稿" : "I want a personal site. Start with a quick draft first" });
-    return cards.slice(0, 4);
-  })();
-
   // ─── NAV items (simplified: only build tab, sources/knowledge moved to /knowledge page) ───
   const NAV = [
     { id: "build" as View, icon: "M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z", label: locale === "zh" ? "构建" : "Build" },
@@ -1426,37 +1339,6 @@ function CreatePageInner() {
 
             {/* Input */}
             <div className="shrink-0 px-5 py-4 border-t border-gray-100 space-y-3">
-              {!chatLoading && previewUrl && nextStepCards.length > 0 && (
-                <div className="grid grid-cols-2 gap-2">
-                  {nextStepCards.map((card) => (
-                    <button
-                      key={card.label}
-                      onClick={() => {
-                        if (card.onClick) {
-                          card.onClick();
-                          return;
-                        }
-                        if (card.prompt) {
-                          void sendChat(card.prompt);
-                        }
-                      }}
-                      className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-left text-[11px] text-gray-600 hover:border-accent/30 hover:bg-accent/5 hover:text-gray-800 transition-all"
-                    >
-                      {card.label}
-                    </button>
-                  ))}
-                </div>
-              )}
-              {/* Guide tooltip — chat input hint */}
-              {showGuideTips && chatMessages.length === 0 && (
-                <div className="relative mb-2 mx-1 px-3 py-2 rounded-xl bg-accent/5 border border-accent/15 text-[11px] text-accent/80">
-                  {locale === "zh" ? "描述你想要的网站，或直接发送让 AI 帮你生成" : "Describe the site you want, or just send to let AI generate"}
-                  <button onClick={dismissGuideTips} className="absolute top-1 right-1.5 w-4 h-4 flex items-center justify-center text-accent/40 hover:text-accent">
-                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-                  </button>
-                  <div className="absolute bottom-0 left-6 translate-y-full w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-t-[6px] border-t-accent/15" />
-                </div>
-              )}
               {/* Input — Claude-style clean bottom bar OR completion card */}
               {previewUrl && genStatus === "ready" && siteStatus !== "published" ? (
                 <div className="rounded-2xl border border-emerald-200/80 bg-gradient-to-br from-emerald-50/80 to-white p-4 shadow-sm">

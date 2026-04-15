@@ -9,7 +9,7 @@ export const navBold: SectionVariantFn = (ctx) => {
         <div className="logo">{lang === "zh" ? "${ctx.data.name}" : "${ctx.data.nameEn || ctx.data.name}"}</div>
         <ul className="nav-links">
           {t.availableSections.filter(s => s !== "about").map((id) => (
-            <li key={id}><a href={\`#\${id === "timeline" ? "experience" : id}\`}>{t.sections[id as keyof typeof t.sections] || id}</a></li>
+            <li key={id}><a href={\`#\${id === "timeline" ? "experience" : id}\`}>{t.nav[id as keyof typeof t.nav] || id}</a></li>
           ))}
           <li><button onClick={toggle}>{lang === "zh" ? "EN" : "\\u4e2d"}</button></li>
         </ul>

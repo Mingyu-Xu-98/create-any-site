@@ -10,7 +10,7 @@ export const navMinimal: SectionVariantFn = (ctx) => {
           <a href="#" className="brutal-logo">{lang === "zh" ? "${ctx.data.name}" : "${ctx.data.nameEn}"}</a>
           <div className="brutal-nav-links">
             {t.availableSections.filter(s => s !== "contact").map((id) => (
-              <a key={id} href={\`#\${id}\`} className="brutal-nav-link">{t.sections[id as keyof typeof t.sections] || id}</a>
+              <a key={id} href={\`#\${id}\`} className="brutal-nav-link">{t.nav[id as keyof typeof t.nav] || id}</a>
             ))}
           </div>
         </div>

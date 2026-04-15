@@ -17,7 +17,7 @@ export const navSidebar: SectionVariantFn = (ctx) => {
             </div>
             <nav className="flex flex-col gap-1 mb-6">
               {t.availableSections.filter(s => s !== "about" && s !== "contact").map((id) => (
-                <a key={id} href={\`#\${id}\`} className="sidebar-nav-link">{t.sections[id as keyof typeof t.sections] || id}</a>
+                <a key={id} href={\`#\${id}\`} className="sidebar-nav-link">{t.nav[id as keyof typeof t.nav] || id}</a>
               ))}
             </nav>
             <div className="flex justify-center gap-5 mb-5">

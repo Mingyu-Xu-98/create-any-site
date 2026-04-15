@@ -9,7 +9,7 @@ export const navMini: SectionVariantFn = (ctx) => {
         <span className="mini-nav-logo">{lang === "zh" ? "${ctx.data.name}" : "${ctx.data.nameEn}"}</span>
         <ul className="mini-nav-links">
           {t.availableSections.filter(s => s !== "contact").map((id) => (
-            <li key={id}><a href={\`#\${id === "timeline" ? "experience" : id}\`}>{t.sections[id as keyof typeof t.sections] || id}</a></li>
+            <li key={id}><a href={\`#\${id === "timeline" ? "experience" : id}\`}>{t.nav[id as keyof typeof t.nav] || id}</a></li>
           ))}
           <li><button onClick={toggle} className="text-xs border border-line rounded-full px-2.5 py-1 hover:border-text transition-colors">{lang === "zh" ? "EN" : "\\u4e2d"}</button></li>
           <li>

@@ -313,9 +313,23 @@ export function hasPublishedPreviewDirectory(): boolean {
 export async function syncDraftPreview(siteId: string, siteDir: string): Promise<void> {
   if (!PREVIEW_PUBLISH_DIR) return;
   const targetDir = getDraftPublishDir(siteId);
-  await copyDirectory(path.join(siteDir, "out"), targetDir);
-  const draftPathname = new URL(getDraftPreviewUrl(siteId)).pathname;
-  await rewriteExportAssetPaths(targetDir, "", draftPathname);
+  const tmpDir = `${targetDir}_tmp_${Date.now()}`;
+
+  try {
+    // Copy + rewrite in a temp directory (invisible to Nginx)
+    await fs.cp(path.join(siteDir, "out"), tmpDir, { recursive: true, force: true });
+    const draftPathname = new URL(getDraftPreviewUrl(siteId)).pathname;
+    await rewriteExportAssetPaths(tmpDir, "", draftPathname);
+
+    // Atomic swap: remove old, rename temp → target
+    // Both are in the same parent dir so fs.rename is atomic on the same filesystem
+    await fs.rm(targetDir, { recursive: true, force: true });
+    await fs.rename(tmpDir, targetDir);
+  } catch (err) {
+    // Clean up temp dir on failure
+    await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+    throw err;
+  }
 }
 
 export async function publishDraftPreview(siteId: string): Promise<string> {
@@ -805,18 +819,23 @@ export async function ensureStaticServer(): Promise<void> {
           return;
         }
 
-        // Health checks: /{siteId}/__health or /drafts/{siteId}/__health
-        const healthMatch = rawUrl.match(/^\/(?:drafts\/)?([^/]+)\/__health$/);
+        // Health checks: /drafts/{siteId}/__health → check draft (out/)
+        //                 /{siteId}/__health        → check published (published/ or out/)
+        const healthMatch = rawUrl.match(/^\/(?:(drafts)\/)?([^/]+)\/__health$/);
         if (healthMatch) {
-          const siteId = healthMatch[1];
-          const indexFile = path.join(siteCurrentLink(siteId), "out", "index.html");
+          const isDraftHealth = healthMatch[1] === "drafts";
+          const siteId = healthMatch[2];
+          const healthDir = isDraftHealth
+            ? path.join(siteCurrentLink(siteId), "out")
+            : await resolvePublishedDir(siteId);
+          const indexFile = path.join(healthDir, "index.html");
           try {
             const html = await fs.readFile(indexFile, "utf-8");
             res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
-            res.end(JSON.stringify({ ok: html.trim().length > 0, siteId }));
+            res.end(JSON.stringify({ ok: html.trim().length > 0, siteId, draft: isDraftHealth }));
           } catch {
             res.writeHead(404, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
-            res.end(JSON.stringify({ ok: false, siteId }));
+            res.end(JSON.stringify({ ok: false, siteId, draft: isDraftHealth }));
           }
           return;
         }
